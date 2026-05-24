@@ -658,7 +658,7 @@ void nes_cart_slot_device::call_load_ines()
 		mapper |= (header[8] & 0x0f) << 8;
 		// read submappers (based on 20140116 specs)
 		submapper = (header[8] & 0xf0) >> 4;
-
+		 
 		// NES 2.0's extended exponential sizes, needed for loading PRG >= 64MB, CHR >= 32MB. These bizarrely go up to 7 * 2^63!
 		auto expsize = [] (u8 byte) { return (2*(byte & 0x03) + 1) << (byte >> 2); };
 
@@ -680,21 +680,61 @@ void nes_cart_slot_device::call_load_ines()
 		else
 			vrom_size += ((header[9] & 0xf0) << 4) * 0x2000;
 	}
+
 	ines_mapr_setup(mapper, &pcb_id);
 
+	// Bad-header MMC6/HKROM test ROM.
+	// nes.hsi/extrainfo has no fifth field, so use crc_hack through mapint2 high nibble.
+	if (mapper == 4 && crc_hack == 1)
+		pcb_id = STD_HKROM;
+
+	m_cart->set_submapper(submapper); 
+	
 	// handle submappers
 	if (submapper)
 	{
 		// 001: MMC1 (other submappers are deprecated)
-		if (mapper == 1 && submapper == 5)
-			logerror("Unimplemented NES 2.0 submapper: SEROM/SHROM/SH1ROM.\n");
+		if (mapper == 1 && submapper == 5) {
+			logerror("NES 2.0 submapper: SEROM/SHROM/SH1ROM.\n");
+		}
 		// 002, 003, 007: UxROM, CNROM, AxROM
 		else if (mapper == 2 && submapper == 2)
 			bus_conflict = true;
-		else if (mapper == 3 && submapper == 2)
-			bus_conflict = true;
-		else if (mapper == 7 && submapper == 2)
-			bus_conflict = true;
+		else if (mapper == 3)
+		{
+			// NES 2.0 mapper 3 / CNROM submappers:
+			//   0 = unspecified / unknown bus-conflict behavior
+			//   1 = no bus conflicts
+			//   2 = AND-type bus conflicts
+			//
+			// Do not fall through to the generic undocumented-submapper path,
+			// or submapper 1 gets reset to 0 and later behaves like original
+			// CNROM with bus conflicts.
+			if (submapper == 1)
+				bus_conflict = false;
+			else if (submapper == 2)
+				bus_conflict = true;
+			else
+				logerror("Unimplemented NES 2.0 submapper %d for mapper 3\n", submapper);
+		}
+		else if (mapper == 4 && submapper == 1)
+			pcb_id = STD_HKROM;
+		else if (mapper == 7)
+		{
+			// NES 2.0 mapper 7 / AxROM submappers:
+			//   0 = unspecified / unknown bus-conflict behavior
+			//   1 = no bus conflicts
+			//   2 = bus conflicts
+			//
+			// Handle submapper 1 here so it does not fall through to the
+			// generic undocumented-submapper path and get reset to 0.
+			if (submapper == 1)
+				bus_conflict = false;
+			else if (submapper == 2)
+				bus_conflict = true;
+			else
+				logerror("Unimplemented NES 2.0 submapper %d for mapper 7\n", submapper);
+		}
 		// 019: Namcot N163
 		else if (mapper == 19)
 		{
@@ -706,22 +746,58 @@ void nes_cart_slot_device::call_load_ines()
 			}
 		}
 		// 021, 023, 025: VRC4 / VRC2
-		else if (mapper == 21 || mapper == 23 || mapper == 25)
-		{
-			// 021, 023, 025: VRC4
-			int line_1 = submapper & 0x07;
-			int line_2 = (submapper & 0x08) ? line_1 + 1 : line_1 - 1;
-			if (line_2 >= 0 && line_2 <= 7)
-			{
-				pcb_id = KONAMI_VRC4;
-				m_cart->set_vrc_lines(line_1, line_2, 0);
-			}
-			else if (submapper == 15)
-			{
-				pcb_id = KONAMI_VRC2;
-				m_cart->set_vrc_lines(1, 0, 0);
-			}
-		}
+		else if (mapper == 21)
+{
+	// NES 2.0 mapper 21 submappers:
+	// 1 = VRC4a (A1/A2)
+	// 2 = VRC4c (A6/A7)
+	if (submapper == 1)
+	{
+		pcb_id = KONAMI_VRC4;
+		m_cart->set_vrc_lines(2, 1, 0);
+	}
+	else if (submapper == 2)
+	{
+		pcb_id = KONAMI_VRC4;
+		m_cart->set_vrc_lines(7, 6, 0);
+	}
+	else
+	{
+		logerror("Unimplemented/unknown NES 2.0 submapper %d for mapper 21\n", submapper);
+	}
+}
+else if (mapper == 23)
+{
+	// keep existing logic for now, or make explicit later if needed
+	int line_1 = submapper & 0x07;
+	int line_2 = (submapper & 0x08) ? line_1 + 1 : line_1 - 1;
+	if (line_2 >= 0 && line_2 <= 7)
+	{
+		pcb_id = KONAMI_VRC4;
+		m_cart->set_vrc_lines(line_1, line_2, 0);
+	}
+	else if (submapper == 15)
+	{
+		pcb_id = KONAMI_VRC2;
+		m_cart->set_vrc_lines(1, 0, 0);
+	}
+}
+else if (mapper == 25)
+{
+	// keep existing logic for now, or make explicit later if needed
+	int line_1 = submapper & 0x07;
+	int line_2 = (submapper & 0x08) ? line_1 + 1 : line_1 - 1;
+	if (line_2 >= 0 && line_2 <= 7)
+	{
+		pcb_id = KONAMI_VRC4;
+		m_cart->set_vrc_lines(line_1, line_2, 0);
+	}
+	else if (submapper == 15)
+	{
+		pcb_id = KONAMI_VRC2;
+		m_cart->set_vrc_lines(1, 0, 0);
+	}
+}
 		// 032: Irem G101
 		else if (mapper == 32 && submapper == 1)
 		{
@@ -839,12 +915,67 @@ void nes_cart_slot_device::call_load_ines()
 			vram_size |= 0x80 << (((header[11] & 0xf0) >> 4) - 1);
 		// header[11] & 0xf0 is the size of battery backed VRAM, found so far in Racermate II only and not supported yet
 	}
-	else
+	else if (!ines20)
 	{
-		// PRGRAM size is 8k for most games, but pirate carts often use different sizes,
-		// so its size has been added recently to the iNES format spec, but almost no image uses it
-		prgram_size = header[8] ? header[8] * 0x2000 : 0x2000;
+		// iNES 1.0 has weak PRG-RAM size signaling.
+		//
+		// Old MAME behavior defaulted header[8] == 0 to 8KB PRG RAM for nearly
+		// everything:
+		//
+		//     prgram_size = header[8] ? header[8] * 0x2000 : 0x2000;
+		//
+		// That makes simple boards like NROM/CNROM/UxROM appear to have RAM at
+		// $6000-$7FFF even when the physical PCB normally leaves that range
+		// undriven/open bus.
+		//
+		// Keep explicit header[8] RAM, but do not invent default PRG RAM for
+		// boards that normally have none.
+		if (header[8])
+		{
+			prgram_size = header[8] * 0x2000;
+		}
+		else
+		{
+			switch (pcb_id)
+			{
+				// Simple no-WRAM boards.  These should leave $6000-$7FFF open bus
+				// unless PRG RAM was explicitly declared.
+				case STD_NROM:
+				case STD_NROM368:
+				case STD_CNROM:
+				case STD_CPROM:
+				case STD_UXROM:
+				case STD_UN1ROM:
+				case UXROM_CC:
+				case STD_AXROM:
+				case STD_AMROM:
+				case STD_BXROM:
+				case STD_GXROM:
+					prgram_size = 0;
+					break;
+
+				default:
+					// Preserve the old iNES fallback for mapper families where
+					// 8KB WRAM is common but old headers often left byte 8 as zero.
+					prgram_size = 0x2000;
+					break;
+			}
+		}
+
+		if (mapper == 5)
+		{
+			// iNES 1 cannot describe MMC5 RAM properly.
+			// Default to something realistic for MMC5.
+			if (prgram_size <= 0x2000)
+				prgram_size = 0x8000;   // 32KB
+
+			if (battery_size)
+				battery_size = 0x8000;  // 32KB battery RAM
+		}
 	}
+
+	if (m_pcb_id == STD_NROM && vrom_size == 0 && vram_size == 0)
+		vram_size = 0x2000;
 
 	// a few mappers correspond to multiple PCBs, so we need a few additional checks and tweaks
 	switch (m_pcb_id)
@@ -861,6 +992,14 @@ void nes_cart_slot_device::call_load_ines()
 		case STD_SXROM:
 			if (mapper == 1 && ines20 && prgram_size == 0x2000 && battery_size == 0x2000 && vrom_size == 0x4000)
 				m_pcb_id = STD_SZROM;
+			if (mapper == 1 && crc_hack == 1)
+			{
+				m_pcb_id = STD_SNROM;
+
+				// MMC1_A12 needs actual 8KB PRG RAM at $6000-$7FFF
+				if (prgram_size == 0 && battery_size == 0)
+					prgram_size = 0x2000;
+			}
 			if (mapper == 155)
 				m_cart->set_mmc1_type(device_nes_cart_interface::mmc1_type::MMC1A);
 			break;
@@ -1071,6 +1210,27 @@ void nes_cart_slot_device::call_load_ines()
 			break;
 	}
 
+	// NES 2.0 mapper 3 / CNROM:
+	//   submapper 0 = unknown bus-conflict behavior
+	//   submapper 1 = no bus conflicts
+	//   submapper 2 = AND-type bus conflicts
+	//
+	// Original CNROM boards have AND-type bus conflicts. Treat unknown as
+	// original CNROM behavior so mapper-3 diagnostic ROMs do not falsely detect
+	// submapper 1 / no-conflict behavior.
+	if (mapper == 3 && submapper == 0)
+		bus_conflict = true;
+
+	// NES 2.0 mapper 7 / AxROM:
+	//   submapper 0 = unknown bus-conflict behavior.
+	// Original AxROM/AOROM-style boards commonly have bus conflicts, so treat
+	// unknown as original behavior unless a submapper explicitly says otherwise.
+	if (mapper == 7 && submapper == 0)
+		bus_conflict = true;
+
+	// Finally turn off bus conflict emulation, because the pirate variants of the boards are bus conflict free and games would glitch
+	m_cart->set_bus_conflict(bus_conflict);
+
 	// Finally turn off bus conflict emulation, because the pirate variants of the boards are bus conflict free and games would glitch
 	m_cart->set_bus_conflict(bus_conflict);
 
@@ -1242,14 +1402,27 @@ const char * nes_cart_slot_device::get_default_card_ines(get_default_card_softwa
 
 	ines_mapr_setup(mapper, &pcb_id);
 
+	// Bad-header MMC6/HKROM test ROM.
+	// nes.hsi/extrainfo uses mapint2 high nibble as crc_hack.
+	if (mapper == 4 && crc_hack == 1)
+		pcb_id = STD_HKROM;
+
 	// handle submappers
 	if (submapper)
 	{
 		// 001: MMC1 (other submappers are deprecated)
 		if (mapper == 1 && submapper == 5)
 			logerror("Unimplemented NES 2.0 submapper: SEROM/SHROM/SH1ROM.\n");
+		else if (mapper == 4 && submapper == 1)
+		{
+			pcb_id = STD_HKROM;
+		}
 		// 021, 023, 025: VRC4 / VRC2
-		else if (mapper == 21 || mapper == 23 || mapper == 25)
+		else if (mapper == 21) {
+			if (submapper == 1 || submapper == 2)
+				pcb_id = KONAMI_VRC4;
+		}
+		else if (mapper == 23 || mapper == 25)
 		{
 			// 021, 023, 025: VRC4
 			int line_1 = submapper & 0x07;
@@ -1296,6 +1469,9 @@ const char * nes_cart_slot_device::get_default_card_ines(get_default_card_softwa
 			// only A Ressha de Ikou uses SZROM and it can be detected by its profile: 8K WRAM, 8K BWRAM, 16K CHR ROM
 			if (mapper == 1 && ines20 && ROM[10] == 0x77 && ROM[5] == 2)
 				pcb_id = STD_SZROM;
+			
+			if (mapper == 1 && crc_hack == 1)
+				pcb_id = STD_SNROM;
 			break;
 
 		case KONAMI_VRC2:

@@ -69,6 +69,20 @@ void nes_maxi15_device::pcb_reset()
 	m_reg[0] = m_reg[1] = 0;
 }
 
+void nes_nina001_device::pcb_reset()
+{
+	// NINA-001:
+	//   CPU $8000-$FFFF = 32KB PRG ROM bank
+	//   PPU $0000-$0FFF = 4KB CHR ROM bank
+	//   PPU $1000-$1FFF = 4KB CHR ROM bank
+	//
+	// Do not inherit the generic NROM chr8(..., m_chr_source) reset here.
+	// This board has CHR ROM, and mapper 34 submapper 1 diagnostics will
+	// incorrectly detect CHR RAM if PPU writes can affect $0000-$1FFF.
+	prg32(0);
+	chr4_0(0, CHRROM);
+	chr4_4(0, CHRROM);
+}
 
 
 
@@ -109,6 +123,12 @@ void nes_nina001_device::write_m(offs_t offset, u8 data)
 			chr4_4(data, CHRROM);
 			break;
 	}
+}
+
+void nes_nina001_device::chr_w(offs_t offset, u8 data)
+{
+	// NINA-001 uses CHR ROM. PPU writes to pattern space must not modify
+	// backing CHR data, or CHR-RAM detection will falsely pass.
 }
 
 /*-------------------------------------------------

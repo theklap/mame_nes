@@ -23,6 +23,7 @@
 #include "konami.h"
 
 #include "speaker.h"
+#include "cpu/m6502/m6502.h"
 
 #define LOG_UNHANDLED (1U << 1)
 
@@ -67,7 +68,17 @@ nes_konami_vrc3_device::nes_konami_vrc3_device(const machine_config &mconfig, co
 }
 
 nes_konami_vrc4_device::nes_konami_vrc4_device(const machine_config &mconfig, device_type type, const char *tag, device_t *owner, u32 clock)
-	: nes_nrom_device(mconfig, type, tag, owner, clock), m_prg_flip(0), m_wram_enable(0), m_irq_count(0), m_irq_count_latch(0), m_irq_enable(0), m_irq_enable_latch(0), m_irq_mode(0), m_irq_prescale(0), irq_timer(nullptr)
+	: nes_nrom_device(mconfig, type, tag, owner, clock)
+	, m_prg_flip(0)
+	, m_wram_enable(0)
+	, m_irq_count(0)
+	, m_irq_count_latch(0)
+	, m_irq_enable(0)
+	, m_irq_enable_latch(0)
+	, m_irq_mode(0)
+	, m_irq_prescale(0)
+	, m_irq_delay(0)
+	, irq_timer(nullptr)
 {
 }
 
@@ -123,6 +134,7 @@ void nes_konami_vrc2_device::pcb_reset()
 void nes_konami_vrc3_device::device_start()
 {
 	common_start();
+	m_maincpu6502 = machine().root_device().subdevice<m6502_device>("maincpu");
 	irq_timer = timer_alloc(FUNC(nes_konami_vrc3_device::irq_timer_tick), this);
 	irq_timer->adjust(attotime::zero, 0, clocks_to_attotime(1));
 
@@ -144,11 +156,13 @@ void nes_konami_vrc3_device::pcb_reset()
 	m_irq_enable_latch = 0;
 	m_irq_count = 0;
 	m_irq_count_latch = 0;
+	m_irq_delay = 0;
 }
 
 void nes_konami_vrc4_device::device_start()
 {
 	common_start();
+	m_maincpu6502 = machine().root_device().subdevice<m6502_device>("maincpu");
 	irq_timer = timer_alloc(FUNC(nes_konami_vrc4_device::irq_timer_tick), this);
 	irq_timer->adjust(attotime::zero, 0, clocks_to_attotime(1));
 
@@ -162,6 +176,7 @@ void nes_konami_vrc4_device::device_start()
 	save_item(NAME(m_wram_enable));
 	save_item(NAME(m_mmc_prg_bank));
 	save_item(NAME(m_mmc_vrom_bank));
+	save_item(NAME(m_irq_delay));
 }
 
 void nes_konami_vrc4_device::pcb_reset()
@@ -172,6 +187,7 @@ void nes_konami_vrc4_device::pcb_reset()
 	m_irq_enable_latch = 0;
 	m_irq_count = 0;
 	m_irq_count_latch = 0;
+	m_irq_delay = 0;
 
 	m_prg_flip = 0;
 	m_wram_enable = 0;
@@ -190,6 +206,36 @@ void nes_konami_vrc7_device::pcb_reset()
 	prg32((m_prg_chunks >> 1) - 1);
 }
 
+void nes_konami_vrc6_device::device_start()
+{
+	nes_konami_vrc4_device::device_start();
+
+	save_item(NAME(m_vrc6_b003));
+	save_item(NAME(m_vrc6_chr));
+}
+
+void nes_konami_vrc6_device::pcb_reset()
+{
+	nes_konami_vrc4_device::pcb_reset();
+
+	// IMPORTANT:
+	// device_nes_cart_interface::nt_r/nt_w still uses the current mirroring mode.
+	// Force vertical so offset 0x000 = NTA and offset 0x400 = NTB.
+	// Actual VRC6 nametable logic is handled by nt_r/nt_w below.
+	set_nt_mirroring(PPU_MIRROR_VERT);
+
+	m_vrc6_b003 = 0;
+	m_wram_enable = 0;
+
+	for (int i = 0; i < 8; i++)
+		m_vrc6_chr[i] = i;
+
+	prg16_89ab(0);
+	prg8_cd((m_prg_chunks * 2) - 2);
+	prg8_ef((m_prg_chunks * 2) - 1);
+
+	set_chr();
+}
 
 
 /*-------------------------------------------------
@@ -277,26 +323,41 @@ void nes_konami_vrc2_device::write_h(offs_t offset, u8 data)
 		case 0x2000:
 			prg8_x(BIT(offset, 13), data);
 			break;
+
 		case 0x1000:
 			set_nt_mirroring(data & 1 ? PPU_MIRROR_HORZ : PPU_MIRROR_VERT);
 			break;
+
 		case 0x3000:
 		case 0x4000:
 		case 0x5000:
 		case 0x6000:
 		{
-			int bank = 2 * (BIT(offset, 12, 3) - 3) + BIT(addr_lines, 1);
+			int bank  = 2 * (BIT(offset, 12, 3) - 3) + BIT(addr_lines, 1);
 			int shift = BIT(addr_lines, 0) * 4;
-			int mask = 0x0f << shift;
-			m_mmc_vrom_bank[bank] = (m_mmc_vrom_bank[bank] & ~mask) | (((data >> m_vrc_ls_chr) << shift) & mask);
-			chr1_x(bank, m_mmc_vrom_bank[bank], m_chr_source);
+
+			// VRC2 uses 4-bit writes for each half
+			u8 nib  = data & 0x0f;
+			u8 mask = 0x0f << shift;
+
+			// 1) Merge nibble WITHOUT any VRC2a shift
+			m_mmc_vrom_bank[bank] = (m_mmc_vrom_bank[bank] & ~mask) | ((nib << shift) & mask);
+
+			// 2) Apply VRC2a quirk only when *using* the value
+			u8 chr_bank = m_mmc_vrom_bank[bank];
+			if (m_vrc_ls_chr)          // for mapper 22 set this to 1
+				chr_bank >>= 1;        // VRC2a ignores low bit
+
+			chr1_x(bank, chr_bank, m_chr_source);
 			break;
 		}
+
 		default:
 			LOGMASKED(LOG_UNHANDLED, "VRC-2 write_h uncaught write, addr: %04x value: %02x\n", offset + 0x8000, data);
 			break;
 	}
 }
+
 
 /*-------------------------------------------------
 
@@ -320,9 +381,18 @@ TIMER_CALLBACK_MEMBER(nes_konami_vrc3_device::irq_timer_tick)
 		m_irq_count = (m_irq_count & ~mask) | ((m_irq_count + 1) & mask);
 		if (!(m_irq_count & mask))
 		{
-			set_irq_line(ASSERT_LINE);
+			m_irq_delay = 2;  //set_irq_line(ASSERT_LINE);
 			m_irq_count = (m_irq_count & ~mask) | (m_irq_count_latch & mask);
 		}
+	}
+}
+
+void nes_konami_vrc3_device::ppu_to_mapper(int scanline, unsigned dot) {
+	if (m_irq_delay > 0)
+	{
+		--m_irq_delay;
+		if (m_irq_delay == 0)
+			m_maincpu6502->queue_delayed_mapper_irq(2);
 	}
 }
 
@@ -343,15 +413,26 @@ void nes_konami_vrc3_device::write_h(offs_t offset, u8 data)
 			break;
 		}
 		case 0x4000:
-			m_irq_mode = data & 0x04;
-			m_irq_enable = data & 0x02;
-			m_irq_enable_latch = data & 0x01;
+			m_irq_mode = BIT(data, 2);
+			m_irq_enable = BIT(data, 1);
+			m_irq_enable_latch = BIT(data, 0);
+			
 			if (m_irq_enable)
 				m_irq_count = m_irq_count_latch;
+			
+			if (m_irq_delay > 0)
+				m_maincpu6502->cancel_delayed_mapper_irq();
+			
+			m_irq_delay = 0;
 			set_irq_line(CLEAR_LINE);
 			break;
 		case 0x5000:
 			m_irq_enable = m_irq_enable_latch;
+			
+			if (m_irq_delay > 0)
+				m_maincpu6502->cancel_delayed_mapper_irq();
+
+			m_irq_delay = 0;
 			set_irq_line(CLEAR_LINE);
 			break;
 		case 0x7000:
@@ -370,16 +451,27 @@ void nes_konami_vrc3_device::write_h(offs_t offset, u8 data)
  In MAME: Supported
 
  -------------------------------------------------*/
+void nes_konami_vrc4_device::ppu_to_mapper(int scanline, unsigned dot) {
+	if (m_irq_delay > 0)
+	{
+		--m_irq_delay;
+		if (m_irq_delay == 0)
+			m_maincpu6502->queue_delayed_mapper_irq(2);
+	}
+}
+
 
 void nes_konami_vrc4_device::irq_tick()
 {
 	if (m_irq_count == 0xff)
 	{
 		m_irq_count = m_irq_count_latch;
-		set_irq_line(ASSERT_LINE);
+		m_irq_delay = 2; //set_irq_line(ASSERT_LINE);
 	}
 	else
+	{
 		m_irq_count++;
+	}
 }
 
 TIMER_CALLBACK_MEMBER(nes_konami_vrc4_device::irq_timer_tick)
@@ -406,21 +498,31 @@ TIMER_CALLBACK_MEMBER(nes_konami_vrc4_device::irq_timer_tick)
 
 void nes_konami_vrc4_device::irq_ack_w()
 {
+	if(m_irq_delay > 0)
+		m_maincpu6502->cancel_delayed_mapper_irq();
+	
 	m_irq_enable = m_irq_enable_latch;
+	m_irq_delay = 0;
 	set_irq_line(CLEAR_LINE);
 }
 
 void nes_konami_vrc4_device::irq_ctrl_w(u8 data)
 {
-	m_irq_mode = data & 0x04;
-	m_irq_enable = data & 0x02;
-	m_irq_enable_latch = data & 0x01;
-	if (m_irq_enable)
-	{
-		m_irq_count = m_irq_count_latch;
-		m_irq_prescale = 341;
-	}
+	if(m_irq_delay > 0)
+		m_maincpu6502->cancel_delayed_mapper_irq();
+
+	m_irq_mode = BIT(data, 2);
+	m_irq_enable = BIT(data, 1);
+	m_irq_enable_latch = BIT(data, 0);
+
+	// Any write to IRQ control acknowledges pending IRQ and resets prescaler.
+	m_irq_delay = 0;
 	set_irq_line(CLEAR_LINE);
+	m_irq_prescale = 341;
+
+	// Reload IRQ counter from latch only if E is set.
+	if (m_irq_enable)
+		m_irq_count = m_irq_count_latch;
 }
 
 void nes_konami_vrc4_device::set_mirror(u8 data)
@@ -436,10 +538,27 @@ void nes_konami_vrc4_device::set_mirror(u8 data)
 
 void nes_konami_vrc4_device::set_prg(int prg_base, int prg_mask)
 {
-	prg8_x(0 ^ m_prg_flip, prg_base | (m_mmc_prg_bank[0] & prg_mask));
-	prg8_x(1, prg_base | (m_mmc_prg_bank[1] & prg_mask));
-	prg8_x(2 ^ m_prg_flip, prg_base | (prg_mask & ~1));
-	prg8_x(3, prg_base | prg_mask);
+	const u8 bank0  = prg_base | (m_mmc_prg_bank[0] & prg_mask);
+	const u8 bank1  = prg_base | (m_mmc_prg_bank[1] & prg_mask);
+	const u8 fixed2 = prg_base | (prg_mask & ~1);
+	const u8 fixed3 = prg_base | prg_mask;
+
+	if (!m_prg_flip)
+	{
+		// normal: $8000 switchable, $A000 switchable, $C000 fixed, $E000 fixed
+		prg8_x(0, bank0);
+		prg8_x(1, bank1);
+		prg8_x(2, fixed2);
+		prg8_x(3, fixed3);
+	}
+	else
+	{
+		// flipped: $8000 fixed, $A000 switchable, $C000 switchable, $E000 fixed
+		prg8_x(0, fixed2);
+		prg8_x(1, bank1);
+		prg8_x(2, bank0);
+		prg8_x(3, fixed3);
+	}
 }
 
 void nes_konami_vrc4_device::set_chr(int chr_base, int chr_mask)
@@ -450,6 +569,7 @@ void nes_konami_vrc4_device::set_chr(int chr_base, int chr_mask)
 
 u8 nes_konami_vrc4_device::read_m(offs_t offset)
 {
+	
 	LOG("VRC-4 read_m, offset: %04x\n", offset);
 
 	if (m_wram_enable)
@@ -471,7 +591,7 @@ void nes_konami_vrc4_device::write_h(offs_t offset, u8 data)
 	LOG("VRC-4 write_h, offset: %04x, data: %02x\n", offset, data);
 
 	u8 addr_lines = bitswap<2>(offset, m_vrc_ls_prg_a, m_vrc_ls_prg_b);
-
+	
 	switch (offset & 0x7000)
 	{
 		case 0x0000:
@@ -479,16 +599,32 @@ void nes_konami_vrc4_device::write_h(offs_t offset, u8 data)
 			m_mmc_prg_bank[BIT(offset, 13)] = data;
 			set_prg();
 			break;
+
 		case 0x1000:
-			if (BIT(addr_lines, 1))
+			switch (addr_lines)
 			{
-				m_wram_enable = data & 0x01;
-				m_prg_flip = data & 0x02;
-				set_prg();
+				case 0:
+					// $9000 - mirroring
+					set_mirror(data);
+					break;
+
+				case 2:
+					m_wram_enable = data & 0x01;
+					m_prg_flip = (data >> 1) & 0x01;
+					set_prg();
+					break;
+
+				case 3:
+					// $9003 - external select strobe on VRC4
+					// Not currently used here.
+					break;
+
+				default:
+					// $9001 or any otherwise-unused decode
+					break;
 			}
-			else
-				set_mirror(data);
 			break;
+
 		case 0x3000:
 		case 0x4000:
 		case 0x5000:
@@ -501,18 +637,22 @@ void nes_konami_vrc4_device::write_h(offs_t offset, u8 data)
 			set_chr();
 			break;
 		}
+
 		case 0x7000:
 			switch (addr_lines)
 			{
 				case 0:
 					m_irq_count_latch = (m_irq_count_latch & 0xf0) | (data & 0x0f);
 					break;
+
 				case 1:
-					m_irq_count_latch = (m_irq_count_latch & 0x0f) | (data & 0x0f) << 4;
+					m_irq_count_latch = (m_irq_count_latch & 0x0f) | ((data & 0x0f) << 4);
 					break;
+
 				case 2:
 					irq_ctrl_w(data);
 					break;
+
 				case 3:
 					irq_ack_w();
 					break;
@@ -532,57 +672,221 @@ void nes_konami_vrc4_device::write_h(offs_t offset, u8 data)
  the three released VRC6 games?
 
  -------------------------------------------------*/
+u8 nes_konami_vrc6_device::vrc6_nt_bank(int nt) const
+{
+	nt &= 3;
+
+	int reg = 6;
+
+	switch (m_vrc6_b003 & 0x07)
+	{
+		case 0:
+		case 6:
+		case 7: // h-mirror-ish: 6677
+			reg = 6 | (nt >> 1);
+			break;
+
+		case 2:
+		case 3:
+		case 4: // v-mirror-ish: 6767
+			reg = 6 | (nt & 1);
+			break;
+
+		case 1:
+		case 5: // 4-screen-ish: 4567
+			reg = 4 | nt;
+			break;
+	}
+
+	u8 bank = m_vrc6_chr[reg];
+
+	// Bit 5 set = replace/force A10 behavior.
+	if (BIT(m_vrc6_b003, 5))
+	{
+		switch (m_vrc6_b003 & 0x0f)
+		{
+			case 0:
+			case 7: // vertical
+				bank &= 0xfe;
+				bank |= nt & 1;
+				break;
+
+			case 3:
+			case 4: // horizontal
+				bank &= 0xfe;
+				bank |= nt >> 1;
+				break;
+
+			case 8:
+			case 15: // 1-screen A
+				bank &= 0xfe;
+				break;
+
+			case 11:
+			case 12: // 1-screen B
+				bank |= 1;
+				break;
+		}
+	}
+
+	return bank;
+}
+
+u8 nes_konami_vrc6_device::nt_r(offs_t offset)
+{
+	offset &= 0x0fff;
+
+	const int nt = offset >> 10;
+	const offs_t inner = offset & 0x03ff;
+
+	u8 bank = vrc6_nt_bank(nt);
+
+	if (!BIT(m_vrc6_b003, 4))
+	{
+		// CIRAM / NTRAM mode
+		bank &= 1;
+		return device_nes_cart_interface::nt_r((bank * 0x400) + inner);
+	}
+
+	// CHR-ROM nametable mode:
+	// raw 1 KB CHR ROM bank selected by VRC6 $B003 logic
+	return get_vrom_base()[
+		((bank * 0x400) + inner) & (get_vrom_size() - 1)
+	];
+}
+
+void nes_konami_vrc6_device::nt_w(offs_t offset, u8 data)
+{
+	offset &= 0x0fff;
+
+	const int nt = offset >> 10;
+	const offs_t inner = offset & 0x03ff;
+
+	u8 bank = vrc6_nt_bank(nt);
+
+	if (!BIT(m_vrc6_b003, 4))
+	{
+		bank &= 1;
+		device_nes_cart_interface::nt_w((bank * 0x400) + inner, data);
+	}
+}
 
 void nes_konami_vrc6_device::write_h(offs_t offset, u8 data)
 {
 	LOG("VRC-6 write_h, offset: %04x, data: %02x\n", offset, data);
 
-	u8 addr_lines = bitswap<2>(offset, m_vrc_ls_prg_a, m_vrc_ls_prg_b);
+	const u8 addr_lines = bitswap<2>(offset, m_vrc_ls_prg_a, m_vrc_ls_prg_b);
 
 	switch (offset & 0x7000)
 	{
 		case 0x0000:
+			// $8000-$8003 : 16 KB PRG at $8000
 			prg16_89ab(data & 0x0f);
 			break;
+
+		case 0x1000:
+			// $9000-$9002 : pulse 1
+			// $9003       : not used as audio register
+			if (addr_lines <= 2)
+				m_vrc6snd->write(addr_lines, data);
+			break;
+
+		case 0x2000:
+			// $A000-$A002 : pulse 2
+			if (addr_lines <= 2)
+				m_vrc6snd->write(addr_lines | 0x100, data);
+			break;
+
+		case 0x3000:
+		if (addr_lines == 3)
+		{
+			// $B003 : PPU banking style / mirroring / WRAM enable
+			m_vrc6_b003 = data;
+
+			// For normal commercial mode 0 with bit 5 set:
+			// data bits 3-2 select V/H/1screen A/1screen B.
+			//set_mirror((data >> 2) & 0x03);
+
+			m_wram_enable = BIT(data, 7);
+
+			// Re-apply CHR because bits 0-1 and bit 5 change how CHR regs map.
+			set_chr();
+		}
+		else
+		{
+			m_vrc6snd->write(addr_lines | 0x200, data);
+		}
+		break;
+
 		case 0x4000:
+			// $C000-$C003 : 8 KB PRG at $C000
 			prg8_cd(data & 0x1f);
 			break;
-		case 0x1000:    // pulse 1 & global control
-			m_vrc6snd->write(addr_lines, data);
-			break;
-		case 0x2000:    // pulse 2
-			m_vrc6snd->write(addr_lines | 0x100, data);
-			break;
-		case 0x3000:
-			if (addr_lines == 3)
-			{
-				set_mirror(data >> 2);
-				m_wram_enable = BIT(data, 7);
-			}
-			else    // saw
-				m_vrc6snd->write(addr_lines | 0x200, data);
-			break;
+
 		case 0x5000:
-		case 0x6000:
-			chr1_x(4 * BIT(offset, 13) + addr_lines, data, CHRROM);
+			// $D000-$D003 : CHR banks 0-3
+			m_vrc6_chr[addr_lines] = data;
+			set_chr();
 			break;
+
+		case 0x6000:
+			// $E000-$E003 : CHR banks 4-7
+			m_vrc6_chr[4 + addr_lines] = data;
+			set_chr();
+			break;
+
 		case 0x7000:
 			switch (addr_lines)
 			{
 				case 0:
+					// $F000 : IRQ latch
 					m_irq_count_latch = data;
 					break;
+
 				case 1:
+					// $F001 : IRQ control
 					irq_ctrl_w(data);
 					break;
+
 				case 2:
+					// $F002 : IRQ acknowledge
 					irq_ack_w();
 					break;
+
 				default:
-					LOGMASKED(LOG_UNHANDLED, "VRC-6 write_h uncaught write, addr: %04x value: %02x\n", ((offset & 0x7000) | addr_lines) + 0x8000, data);
+					// $F003 unused
 					break;
 			}
 			break;
+	}
+}
+
+void nes_konami_vrc6_device::set_chr()
+{
+	static const u8 ptables[3][8] =
+	{
+		{ 0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07 },
+		{ 0x80,0xc0,0x81,0xc1,0x82,0xc2,0x83,0xc3 },
+		{ 0x00,0x01,0x02,0x03,0x84,0xc4,0x85,0xc5 }
+	};
+
+	int mode = m_vrc6_b003 & 0x03;
+	if (mode == 3)
+		mode = 2;
+
+	for (int i = 0; i < 8; i++)
+	{
+		const u8 pt = ptables[mode][i];
+		u8 bank = m_vrc6_chr[pt & 7];
+
+		if (BIT(m_vrc6_b003, 5) && BIT(pt, 7))
+		{
+			bank &= 0xfe;
+			if (BIT(pt, 6))
+				bank |= 1;
+		}
+
+		chr1_x(i, bank, m_chr_source);
 	}
 }
 
@@ -624,14 +928,19 @@ void nes_konami_vrc7_device::write_h(offs_t offset, u8 data)
 		case 0x0:
 		case 0x1:
 		case 0x2:
+			// 8 KB PRG banks at $8000, $A000, $C000
 			prg8_x(reg, data & 0x3f);
 			break;
+
 		case 0x3:
+			// FM synth register select / data
+			// One address selects register, the other writes data.
 			if (BIT(offset, 5))
 				m_vrc7snd->data_w(data);
 			else
 				m_vrc7snd->address_w(data);
 			break;
+
 		case 0x4:
 		case 0x5:
 		case 0x6:
@@ -640,19 +949,28 @@ void nes_konami_vrc7_device::write_h(offs_t offset, u8 data)
 		case 0x9:
 		case 0xa:
 		case 0xb:
+			// 1 KB CHR banks 0-7
 			chr1_x(reg - 4, data, m_chr_source);
 			break;
+
 		case 0xc:
-			set_mirror(data);
+			// Mirroring + WRAM enable
+			set_mirror(data & 0x03);
 			m_wram_enable = BIT(data, 7);
 			break;
+
 		case 0xd:
+			// IRQ latch
 			m_irq_count_latch = data;
 			break;
+
 		case 0xe:
+			// IRQ control
 			irq_ctrl_w(data);
 			break;
+
 		case 0xf:
+			// IRQ acknowledge
 			irq_ack_w();
 			break;
 	}

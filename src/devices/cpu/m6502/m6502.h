@@ -12,8 +12,7 @@
 #define MAME_CPU_M6502_M6502_H
 
 #pragma once
-
-
+class nes_exrom_device;
 class m6502_device : public cpu_device {
 public:
 	enum {
@@ -22,7 +21,7 @@ public:
 		NMI_LINE = INPUT_LINE_NMI,
 		V_LINE   = INPUT_LINE_IRQ0 + 16
 	};
-
+	
 	class memory_interface {
 	public:
 		memory_access<16, 0, 0, ENDIANNESS_LITTLE>::cache cprogram, csprogram;
@@ -56,6 +55,48 @@ public:
 
 	devcb_write_line sync_w;
 
+	//Added Functions
+	bool get_apu_clk1_is_high(); 								//used in m6502.cpp
+	bool get_cpu_is_reading(); 									//used in APU
+	bool get_rmw_1();											//used in PPU
+	bool is_branch_opcode(u8 op);								//used in m6502.cpp
+	bool is_irq_oam_dma_window();								//used in m6502.cpp
+	bool branch_delay_match_for_new_irq(int state);				//used in m6502.cpp
+	bool branch_need_irq_match();								//used in m6502.cpp
+	bool dma_window_interrupt_eligible();						//used in m6502.cpp
+	uint8_t read_4016_4017(uint16_t adr);						//used in APU
+	uint16_t get_adr_bus();										//used in APU
+	uint8_t get_open_bus();										//used in APU
+	uint8_t get_data_bus();
+	void set_data_bus(uint8_t x);
+	void set_open_bus(uint8_t x);								//used in APU
+	void mark_oam_dma_halt_cycle();								//used in m6502.cpp
+	void dmc_halt_next_read(bool a, bool b); 					//used in APU
+	void oam_halt_next_read();									//used in APU
+	void dmc_clear_halt();										//used in APU
+	void oam_clear_halt();										//used in APU
+	uint16_t get_prevReadAddress ();							//used in APU
+	void handle_dma_rdy_stall();								//used in m6502.cpp
+	void run_suspended_cpu_dma_cycle();							//used in APU
+	void do_halt();												//Used in .hxx
+	void queue_delayed_nmi(int cycles);							//used in PPU
+	void cancel_delayed_nmi();									//used in PPU
+	void queue_delayed_mapper_irq(int cycles);					//used in MMC3
+	void cancel_delayed_mapper_irq();							//used in MMC3
+	void queue_delayed_apu_irq(int cycles);						//used in APU
+	void cancel_delayed_apu_irq();								//used in APU
+	
+	//MMC5 Mapper
+	void set_m_exram_control(int x);							//used in mmc5.cpp
+	void set_is_mmc5 (bool x);									//used in mmc5.cpp
+	
+	//MMC3 Clone Mappers
+	uint8_t get_last_cpu_write_latch() const { return last_cpu_write_latch; }
+	
+	//Open Bus 
+	void set_open_bus_ranges(const uint32_t *ranges, int count);	//nes_slot.cpp
+	bool is_open_bus_address(uint16_t adr) const;				//nes_slot.cpp
+	
 protected:
 	m6502_device(const machine_config &mconfig, device_type type, const char *tag, device_t *owner, uint32_t clock);
 
@@ -116,35 +157,101 @@ protected:
 
 	// device_disasm_interface overrides
 	virtual std::unique_ptr<util::disasm_interface> create_disassembler() override;
+	
+	void handle_mmc5_vector_read_side_effect();
+	bool handle_repeated_controller_read(uint16_t adr, uint8_t &result);
+	void cache_controller_read_value(uint16_t adr, uint8_t value);
+	void handle_mmc5_ppu_register_write_side_effect(uint16_t adr, uint8_t val);
+	bool handle_controller_write_suppression(uint16_t adr, uint8_t val);
+	bool handle_controller_write_9_suppression(uint16_t adr, uint8_t val);
 
 	address_space_config program_config, sprogram_config;
-
-	uint16_t  PPC;                    /* previous program counter */
-	uint16_t  NPC;                    /* next start-of-instruction program counter */
-	uint16_t  PC;                     /* program counter */
-	uint16_t  SP;                     /* stack pointer (always 100 - 1FF) */
-	uint16_t  TMP;                    /* temporary internal values */
-	uint8_t   TMP2;                   /* another temporary internal value, 8 bits this time */
-	uint8_t   A;                      /* Accumulator */
-	uint8_t   X;                      /* X index register */
-	uint8_t   Y;                      /* Y index register */
-	uint8_t   P;                      /* Processor status */
-	uint8_t   IR;                     /* Prefetched instruction register */
-	int       inst_state_base;        /* Current instruction bank */
-
+	
+	uint16_t	PPC;                    /* previous program counter */
+	uint16_t  	NPC;                    /* next start-of-instruction program counter */
+	uint16_t  	PC;                     /* program counter */
+	uint16_t  	SP;                     /* stack pointer (always 100 - 1FF) */
+	uint16_t  	TMP;                    /* temporary internal values */
+	uint8_t   	TMP2;                   /* another temporary internal value, 8 bits this time */
+	uint8_t   	A;                      /* Accumulator */
+	uint8_t   	X;                      /* X index register */
+	uint8_t   	Y;                      /* Y index register */
+	uint8_t   	P;                      /* Processor status */
+	uint8_t   	IR;                     /* Prefetched instruction register */
+	uint16_t  	vec_addr;
+	int       	inst_state_base;        /* Current instruction bank */
+	
+	uint8_t	  	prev_IR;				//track branch delays IRQ
+	uint8_t	  	next_IR;				//track branch delays IRQ
+	bool 	  	cpu_is_reading;			//APU
+	uint8_t 	cpu_data_bus;       	//internal CPU data bus / last CPU-visible value
+	uint8_t 	cpu_external_bus;   	//external/open bus latch
+	uint16_t 	adr_bus;				//APU
+	int 	  	delay;					//CPU to track NMI
+	bool 	  	nmi_pending_1;			//PPU sets to tell CPU of an NMI
+	bool	  	irq_delay;				//track branch delays IRQ
+	bool	  	apu_irq_delay;			//track branch delays IRQ
+	bool	  	nmi_delay;				//track branch delays IRQ
+	bool	  	branched;				//track branch delays IRQ
+	bool 	  	paged;					//track branch delays IRQ
+	int64_t   	oam_dma_halt_cycle;		//Track IRQ interrupt DMA
+	bool 		rmw_1;					//Track if we are running a RWM OpCode
+	bool 		apu_irq_branch_delay;	//track branch delays IRQ
+	bool 		irq_branch_delay;		//track branch delays IRQ
+	bool 		nmi_branch_delay;		//track branch delays IRQ
+	bool 		apu_clk1_is_high;		//Track CPU "get and "put" Cycles
+	bool		dmc_halt;				//Need to suspend CPU for DMA
+	bool		oam_halt;				//Need to suspend CPU for OAM
+	bool		dmc_dma_explicit_stop;	//is this an explicit stop request?
+	int 		write_cycles_since_dma_halt_request;			//used to help stop the CPU for DMA
+	bool		dmc_dma_reload;			//is this a DMC reload?
+	int64_t 	prev_4016_write;		//keep track of strobing the controller and when
+	int64_t 	prev_4017_write;		//keep track of strobing the controller and when
+	int64_t 	prev_4016_read;			//last controller read cycle
+	int64_t 	prev_4017_read;			//last controller read cycle
+	uint8_t 	last_4016_val;			//last returned controller value
+	uint8_t 	last_4017_val;			//last returned controller value
+	bool		inst_halted;			//used in .hxx
+	bool		next_read;				//used in .hxx
+	bool		prev_next_read; 		//keep next_read from previous cycle
+	bool		need_irq;				//used in m6502.cpp
+	uint16_t 	prevReadAddress;		//used in m6502.h
+	int 		m_exram_control;		//used in m6502.h
+	bool		is_mmc5;				//used in m6502.h
+	nes_exrom_device *m_mmc5;			//MMC5 mapper
+	int64_t nmi_cpu_cycle;				//NMI stuff
+	bool nmi_overlap_brk_irq;			//NMI stuff
+	bool m_real_brk;					//NMI stuff
+	uint8_t last_cpu_write_latch;		//mmc3_clone.cpp
+	bool mapper_irq;
+	int mapper_irq_delay;
+	int64_t mapper_irq_cpu_cycle;
+	bool apu_irq;
+	int apu_irq_delay_apu;
+	int64_t apu_irq_cpu_cycle;
+	bool pending_apu_irq_cancel;
+	static constexpr int MAX_OPEN_BUS_RANGES = 16;		//OpenBus nes_slot.cpp
+    uint32_t m_open_bus_ranges[MAX_OPEN_BUS_RANGES];	//OpenBus nes_slot.cpp
+    int m_ob_count;										//OpenBus nes_slot.cpp
+		
 	std::unique_ptr<memory_interface> mintf;
+	
 	int inst_state, inst_substate;
 	int icount, bcount, count_before_instruction_step;
 	bool nmi_state, irq_state, apu_irq_state, v_state;
 	bool nmi_pending, irq_taken, sync, inhibit_interrupts;
 	bool uses_custom_memory_interface;
+	
+	uint8_t read(uint16_t adr);
+	uint8_t read_9(uint16_t adr);
+	void write(uint16_t adr, uint8_t val);
+	void write_1(uint16_t adr, uint8_t val);
+	void write_9(uint16_t adr, uint8_t val);
+	uint8_t read_arg(uint16_t adr);
+	uint8_t read_pc();
+	uint8_t read_sync(uint16_t adr);
+	void set_var_read();
 
-	uint8_t read(uint16_t adr) { return mintf->read(adr); }
-	uint8_t read_9(uint16_t adr) { return mintf->read_9(adr); }
-	void write(uint16_t adr, uint8_t val) { mintf->write(adr, val); }
-	void write_9(uint16_t adr, uint8_t val) { mintf->write_9(adr, val); }
-	uint8_t read_arg(uint16_t adr) { return mintf->read_arg(adr); }
-	uint8_t read_pc() { return mintf->read_arg(PC); }
 	void prefetch_start();
 	void prefetch_end();
 	void prefetch_end_noirq();

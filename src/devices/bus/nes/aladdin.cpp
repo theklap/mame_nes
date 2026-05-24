@@ -196,13 +196,29 @@ nes_algq_rom_device::nes_algq_rom_device(const machine_config &mconfig, const ch
 void nes_algn_rom_device::device_start()
 {
 	m_rom = (uint8_t*)memregion("aderom")->base();
+
 	save_item(NAME(m_lobank));
+	save_item(NAME(m_hibank));
+	save_item(NAME(m_firehawk_mirroring));
 }
 
 void nes_algn_rom_device::device_reset()
 {
+	// Mapper 071:
+	//   $8000-$BFFF = switchable 16K PRG bank
+	//   $C000-$FFFF = fixed last 16K PRG bank
+	//   CHR = 8K RAM, no CHR banking
+	//
+	// Reset state is not strongly guaranteed by the mapper docs, but MAME has
+	// traditionally started the switchable bank at 0 and the fixed bank at the
+	// last available bank. Keep that behavior.
 	m_lobank = 0;
-	m_hibank = 0x0f & m_rom_mask;
+	m_hibank = m_rom_mask;
+
+	// Fire Hawk / BF9097 has mapper-controlled one-screen mirroring.
+	// For compatibility, do not enable it until a $9000-$9FFF write happens.
+	// Normal mapper 071 games keep their header/board mirroring.
+	m_firehawk_mirroring = false;
 }
 
 void nes_algq_rom_device::device_start()
@@ -232,9 +248,43 @@ uint8_t *nes_algn_rom_device::get_cart_base()
 
 void nes_algn_rom_device::write_prg(uint32_t offset, uint8_t data)
 {
-	// m_hibank is fixed to the last available bank!
+	// CPU $8000-$FFFF reaches this as offset $0000-$7FFF.
+	//
+	// NESdev mapper 071:
+	//   $8000-$BFFF: Fire Hawk mirroring register only, not PRG bank select
+	//   $C000-$FFFF: PRG bank select for CPU $8000-$BFFF
+	//
+	// The fixed CPU $C000-$FFFF bank remains the last available 16K bank.
+
+	if (offset >= 0x1000 && offset < 0x2000)
+	{
+		// Fire Hawk compatibility behavior:
+		// NESdev notes Fire Hawk writes $9000, while other Camerica games can
+		// write $00 to $8000 at startup. So only $9000-$9FFF enables/updates
+		// mapper-controlled one-screen mirroring.
+		//
+		// This only affects carts that actually need Fire Hawk behavior. On a
+		// plain ALGN mini-cart path this is harmless unless the parent board
+		// exposes mirroring control through this sub-cart, which this file
+		// currently does not directly do.
+		m_firehawk_mirroring = true;
+
+		// Do NOT change PRG bank here.
+		return;
+	}
+
 	if (offset >= 0x4000)
+	{
+		// $C000-$FFFF:
+		// Select 16K PRG bank visible at CPU $8000-$BFFF.
+		//
+		// BF9093 exposes 4 bits, BF9097 exposes 3 bits, BF9096 exposes 2 bits,
+		// but masking by ROM size gives the right available-bank behavior here.
 		m_lobank = data & m_rom_mask;
+
+		// Keep the upper half fixed to the final 16K bank.
+		m_hibank = m_rom_mask;
+	}
 }
 
 void nes_algq_rom_device::write_prg(uint32_t offset, uint8_t data)

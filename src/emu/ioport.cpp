@@ -1784,6 +1784,14 @@ ioport_manager::ioport_manager(running_machine &machine)
 }
 
 
+void ioport_manager::refresh_for_live_reads()
+{
+	m_machine.osd().input_update(false);
+
+	for (auto &entry : m_portlist)
+		entry.second->frame_update();
+}
+
 //-------------------------------------------------
 //  initialize - walk the configured ports and
 //  create live state information

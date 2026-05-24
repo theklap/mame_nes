@@ -62,22 +62,38 @@ void nes_pxrom_device::pcb_reset()
 	prg8_ab((m_prg_chunks << 1) - 3);
 	prg8_cd((m_prg_chunks << 1) - 2);
 	prg8_ef((m_prg_chunks << 1) - 1);
-	chr8(0, m_chr_source);
 
-	m_reg[0] = m_reg[2] = 0;
-	m_reg[1] = m_reg[3] = 0;
-	m_latch1 = m_latch2 = 0xfe;
+	m_reg[0] = 0;
+	m_reg[1] = 0;
+	m_reg[2] = 0;
+	m_reg[3] = 0;
+
+	// MMC2 powers up with both latches in the FE state
+	m_latch1 = 0xfe;
+	m_latch2 = 0xfe;
+
+	// Apply the active 4K banks directly based on latch state
+	chr4_0(m_reg[1], CHRROM);
+	chr4_4(m_reg[3], CHRROM);
 }
 
 void nes_fxrom_device::pcb_reset()
 {
 	prg16_89ab(0);
 	prg16_cdef(m_prg_chunks - 1);
-	chr8(0, m_chr_source);
 
-	m_reg[0] = m_reg[2] = 0;
-	m_reg[1] = m_reg[3] = 0;
-	m_latch1 = m_latch2 = 0xfe;
+	m_reg[0] = 0;
+	m_reg[1] = 0;
+	m_reg[2] = 0;
+	m_reg[3] = 0;
+
+	// MMC4 powers up with both latches in the FE state
+	m_latch1 = 0xfe;
+	m_latch2 = 0xfe;
+
+	// Apply the active 4K banks directly based on latch state
+	chr4_0(m_reg[1], CHRROM);
+	chr4_4(m_reg[3], CHRROM);
 }
 
 
@@ -101,30 +117,29 @@ void nes_fxrom_device::pcb_reset()
 
 void nes_pxrom_device::ppu_latch(offs_t offset)
 {
-	if ((offset & 0x3ff0) == 0x0fd0)
-	{
-		LOG("mmc2 vrom latch switch (bank 0 low): %02x\n", m_reg[0]);
-		m_latch1 = 0xfd;
-		chr4_0(m_reg[0], CHRROM);
-	}
-	else if ((offset & 0x3ff0) == 0x0fe0)
-	{
-		LOG("mmc2 vrom latch switch (bank 0 high): %02x\n", m_reg[1]);
-		m_latch1 = 0xfe;
-		chr4_0(m_reg[1], CHRROM);
-	}
-	else if ((offset & 0x3ff0) == 0x1fd0)
-	{
-		LOG("mmc2 vrom latch switch (bank 1 low): %02x\n", m_reg[2]);
-		m_latch2 = 0xfd;
-		chr4_4(m_reg[2], CHRROM);
-	}
-	else if ((offset & 0x3ff0) == 0x1fe0)
-	{
-		LOG("mmc2 vrom latch switch (bank 0 high): %02x\n", m_reg[3]);
-		m_latch2 = 0xfe;
-		chr4_4(m_reg[3], CHRROM);
-	}
+    offset &= 0x3fff;
+
+    // MMC2: left side exact, right side ranged
+    if (offset == 0x0fd8)
+    {
+        m_latch1 = 0xfd;
+        chr4_0(m_reg[0], CHRROM);
+    }
+    else if (offset == 0x0fe8)
+    {
+        m_latch1 = 0xfe;
+        chr4_0(m_reg[1], CHRROM);
+    }
+    else if ((offset & 0x3ff8) == 0x1fd8)
+    {
+        m_latch2 = 0xfd;
+        chr4_4(m_reg[2], CHRROM);
+    }
+    else if ((offset & 0x3ff8) == 0x1fe8)
+    {
+        m_latch2 = 0xfe;
+        chr4_4(m_reg[3], CHRROM);
+    }
 }
 
 void nes_pxrom_device::pxrom_write(offs_t offset, uint8_t data)
@@ -178,6 +193,33 @@ void nes_pxrom_device::pxrom_write(offs_t offset, uint8_t data)
  In MAME: Supported
 
  -------------------------------------------------*/
+
+void nes_fxrom_device::ppu_latch(offs_t offset)
+{
+    offset &= 0x3fff;
+
+    // MMC4: ranged on both sides
+    if ((offset & 0x3ff8) == 0x0fd8)
+    {
+        m_latch1 = 0xfd;
+        chr4_0(m_reg[0], CHRROM);
+    }
+    else if ((offset & 0x3ff8) == 0x0fe8)
+    {
+        m_latch1 = 0xfe;
+        chr4_0(m_reg[1], CHRROM);
+    }
+    else if ((offset & 0x3ff8) == 0x1fd8)
+    {
+        m_latch2 = 0xfd;
+        chr4_4(m_reg[2], CHRROM);
+    }
+    else if ((offset & 0x3ff8) == 0x1fe8)
+    {
+        m_latch2 = 0xfe;
+        chr4_4(m_reg[3], CHRROM);
+    }
+}
 
 void nes_fxrom_device::write_h(offs_t offset, uint8_t data)
 {

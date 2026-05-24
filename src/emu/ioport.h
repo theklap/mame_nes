@@ -958,6 +958,9 @@ public:
 	s32 frame_interpolate(s32 oldval, s32 newval);
 	ioport_type token_to_input_type(const char *string, int &player) const;
 	std::string input_type_to_token(ioport_type type, int player);
+	
+	//added
+	void refresh_for_live_reads();
 
 private:
 	// internal helpers

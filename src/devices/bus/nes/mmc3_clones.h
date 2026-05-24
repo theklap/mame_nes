@@ -37,10 +37,11 @@ protected:
 	// device-level overrides
 	virtual void device_start() override;
 
-	virtual void set_prg(int prg_base, int prg_mask) override;
+	virtual void chr_cb(int start, int bank, int source) override;
 
 private:
 	u8 m_reg;
+	u8 m_bmw_extra_chr[2];
 };
 
 
@@ -1046,7 +1047,6 @@ public:
 	nes_bmc_810305c_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock);
 
 	virtual void write_h(offs_t offset, u8 data) override;
-
 	virtual void pcb_reset() override;
 
 protected:
@@ -1055,9 +1055,17 @@ protected:
 
 	virtual void set_prg(int prg_base, int prg_mask) override;
 	virtual void set_chr(u8 chr, int chr_base, int chr_mask) override;
+	virtual void chr_cb(int start, int bank, int source) override;
 
 private:
-	u8 m_outer;
+	u8 m_outer = 0;
+
+	// Mapper 353 / TXSROM-like single-screen mirroring state.
+	// Matches FCEU:
+	//   static uint8 PPUCHRBus;
+	//   static uint8 TKSMIR[8];
+	u8 m_tks_mir[8]{};
+	u8 m_ppu_chr_bus = 0;
 };
 
 

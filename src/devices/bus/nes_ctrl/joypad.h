@@ -30,6 +30,7 @@ public:
 
 	virtual u8 read_bit0() override;
 	virtual void write(u8 data) override;
+	void latch_now() { set_latch(); button_index = 0; }
 
 protected:
 	nes_joypad_device(const machine_config &mconfig, device_type type, const char *tag, device_t *owner, u32 clock, u32 latch_fill = 0x80);
@@ -38,11 +39,18 @@ protected:
 	virtual void device_start() override;
 	virtual ioport_constructor device_input_ports() const override;
 
-	virtual void set_latch() { m_latch = m_joypad->read(); }
+	//virtual void set_latch() { m_latch = m_joypad->read(); }
+	virtual void set_latch()
+{
+	machine().ioport().refresh_for_live_reads();
+	m_latch = m_joypad->read();
+}
+	//void latch_now();
 
 	required_ioport m_joypad;
 	u32 m_latch;  // wider than standard joypad's 8-bit latch to accomodate subclass devices
 	const u32 m_latch_fill;  // the new MSB as a joypad's shift register shifts
+	int button_index;
 };
 
 

@@ -264,6 +264,9 @@ void nes_joypad_device::device_start()
 {
 	save_item(NAME(m_latch));
 	save_item(NAME(m_strobe));
+	m_latch = 0;
+	m_strobe = 0;
+	button_index = 0;
 }
 
 
@@ -273,15 +276,45 @@ void nes_joypad_device::device_start()
 
 u8 nes_joypad_device::read_bit0()
 {
-	if (m_strobe)
-		set_latch();
-
+	if (button_index > 7) {
+		return 1;
+	}
+	
 	u8 ret = m_latch & 1;
+	
 	m_latch >>= 1;
 	m_latch |= m_latch_fill;
+	
+	if (!m_strobe && button_index <=7) {
+		button_index += 1;
+	}
 
 	return ret;
 }
+
+/*u8 nes_joypad_device::read_bit0()
+{
+	if (m_strobe)
+	{
+		//machine().ioport().refresh_for_live_reads();
+		return m_joypad->read() & 1;
+	}
+
+	if (button_index > 7) {
+		return 1;
+	}
+	
+	u8 ret = m_latch & 1;
+	
+	m_latch >>= 1;
+	m_latch |= m_latch_fill;
+	
+	if (button_index <= 7) {
+		button_index += 1;
+	}
+
+	return ret;
+}*/
 
 u8 nes_fcpadexp_device::read_exp(offs_t offset)
 {
@@ -317,8 +350,10 @@ u8 nes_arcstick_device::read_exp(offs_t offset)
 
 void nes_joypad_device::write(u8 data)
 {
-	if (write_strobe(data))
+	if (write_strobe(data)) {
 		set_latch();
+		button_index = 0;
+	}
 }
 
 void nes_arcstick_device::write(u8 data)

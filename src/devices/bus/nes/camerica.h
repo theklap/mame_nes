@@ -19,6 +19,12 @@ public:
 	virtual void write_h(offs_t offset, u8 data) override;
 
 	virtual void pcb_reset() override;
+	
+protected:
+	virtual void device_start() override;
+	
+private:
+	u8 m_cic_stun = 0;
 };
 
 
@@ -74,6 +80,7 @@ protected:
 
 private:
 	u8 m_lock, m_reg;
+
 };
 
 

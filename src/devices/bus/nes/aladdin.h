@@ -113,6 +113,8 @@ protected:
 	// device-level overrides
 	virtual void device_start() override;
 	virtual void device_reset() override;
+	
+	bool m_firehawk_mirroring;
 };
 
 

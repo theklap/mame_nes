@@ -23,7 +23,7 @@ enum
 	STD_CNROM, STD_CPROM,
 	STD_EXROM, STD_FXROM, STD_GXROM,
 	STD_HKROM, STD_PXROM,
-	STD_SXROM, STD_SOROM, STD_SZROM,
+	STD_SXROM, STD_SNROM, STD_SOROM, STD_SUROM, STD_SXROM_EXT, STD_SZROM,
 	STD_TXROM, STD_TXSROM, STD_TKROM, STD_TQROM,
 	STD_UXROM, STD_UN1ROM, UXROM_CC,
 	HVC_FAMBASIC, NES_QJ, PAL_ZZ, STD_EVENT, STD_EVENT2,
@@ -158,6 +158,10 @@ enum
 	UNSUPPORTED_BOARD, UNKNOWN_BOARD, NO_BOARD
 };
 
+struct open_bus_range {
+    uint16_t start;
+    uint16_t end;
+};
 
 #define CHRROM 0
 #define CHRRAM 1
@@ -230,7 +234,7 @@ public:
 	void set_smd133_addr(int val) {  m_smd133_addr = val; }
 	void set_x1_005_alt(bool val) { m_x1_005_alt_mirroring = val; }
 	void set_bus_conflict(bool val) { m_bus_conflict = val; }
-	uint8_t get_open_bus() { return m_open_bus; }
+	uint8_t get_open_bus();// { return m_open_bus; }
 	void set_open_bus(uint8_t val) { m_open_bus = val; }
 
 	uint8_t *get_prg_base() { return m_prg; }
@@ -251,6 +255,8 @@ public:
 	uint32_t get_misc_rom_size() const { return m_misc_rom_size; }
 
 	virtual void ppu_latch(offs_t offset) {}
+	virtual void ppu_to_mapper(int scanline, unsigned dot) {}
+	
 	virtual void hblank_irq(int scanline, bool vblank, bool blanked) {}
 	virtual void scanline_irq(int scanline, bool vblank, bool blanked) {}
 
@@ -261,6 +267,9 @@ public:
 
 	uint8_t hi_access_rom(uint32_t offset);             // helper ROM access for a bunch of PCB reading 0x8000-0xffff for protection too
 	uint8_t account_bus_conflict(uint32_t offset, uint8_t data);
+	
+	void set_submapper(u8 val) { m_submapper = val; }
+	u8 get_submapper() const { return m_submapper; }
 
 protected:
 	device_nes_cart_interface(const machine_config &mconfig, device_t &device);
@@ -276,6 +285,8 @@ protected:
 	std::vector<uint8_t> m_battery;
 	uint32_t m_prg_size;
 	uint32_t m_vrom_size;
+	u8 m_submapper = 0;
+
 
 private:
 	// HACK: to reduce tagmap lookups for PPU-related IRQs, we add a hook to the
@@ -306,6 +317,9 @@ protected:
 	bool m_pcb_ctrl_mirror, m_four_screen_vram, m_has_trainer;
 	bool m_x1_005_alt_mirroring;    // temp hack for two kind of mirroring in Taito X1-005 boards (to be replaced with pin checking)
 	bool m_bus_conflict;
+	
+	bool m_prg_ram_declared;
+	bool m_prg_nvram_declared;
 private:
 	uint8_t m_open_bus;
 
@@ -436,7 +450,7 @@ public:
 //private:
 	device_nes_cart_interface*      m_cart;
 	int m_pcb_id;
-
+	
 protected:
 	// device_t implementation
 	virtual void device_start() override;

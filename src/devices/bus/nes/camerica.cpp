@@ -71,7 +71,11 @@ nes_golden5_device::nes_golden5_device(const machine_config &mconfig, const char
 }
 
 
-
+void nes_bf9093_device::device_start()
+{
+	common_start();
+	save_item(NAME(m_cic_stun));
+}
 
 void nes_bf9093_device::pcb_reset()
 {
@@ -79,6 +83,9 @@ void nes_bf9093_device::pcb_reset()
 	prg16_cdef(m_prg_chunks - 1);
 	if (m_pcb_ctrl_mirror)
 		set_nt_mirroring(PPU_MIRROR_LOW);
+	
+	m_cic_stun = 0;
+
 }
 
 void nes_bf9096_device::device_start()
@@ -93,6 +100,7 @@ void nes_bf9096_device::pcb_reset()
 	prg16_cdef(3);
 
 	m_reg = 0;
+	
 }
 
 void nes_golden5_device::device_start()
@@ -143,15 +151,28 @@ void nes_bf9093_device::write_h(offs_t offset, u8 data)
 	switch (offset & 0x6000)
 	{
 		case 0x0000:
-			if (m_pcb_ctrl_mirror)
+			// Fire Hawk / BF9097 only
+			if (m_pcb_ctrl_mirror && (offset & 0x1000))
 				set_nt_mirroring(BIT(data, 4) ? PPU_MIRROR_HIGH : PPU_MIRROR_LOW);
 			break;
-		case 0x4000:
-		case 0x6000:
-			prg16_89ab(data);
+
+		case 0x4000: // $C000-$DFFF
+			prg16_89ab(data & 0x0F);
+			break;
+
+		case 0x6000: // $E000-$FFFF
+			prg16_89ab(data & 0x0F);
+
+			// CIC stun latch uses A0 in this range
+			u8 new_stun = BIT(offset, 0);
+			if (new_stun != m_cic_stun) {
+				m_cic_stun = new_stun;
+				logerror("bf9093 CIC stun latch=%d (A0=%d)\n", m_cic_stun, offset & 1);
+			}
 			break;
 	}
 }
+
 
 /*-------------------------------------------------
 
@@ -177,16 +198,19 @@ void nes_bf9096_device::write_h(offs_t offset, u8 data)
 
 	if (offset < 0x4000)
 	{
-		m_reg = (m_reg & 0x03) | (data & 0x18) >> 1;
+		m_reg = (m_reg & 0x03) | ((data & 0x18) >> 1);
 		if (m_page_swap)
 			m_reg = bitswap<4>(m_reg, 2, 3, 1, 0);
+
 		prg16_89ab(m_reg);
-		prg16_cdef(m_reg | 0x03);
+		prg16_cdef((m_reg & 0x0c) | 0x03);
 	}
 	else
 	{
 		m_reg = (m_reg & 0x0c) | (data & 0x03);
+
 		prg16_89ab(m_reg);
+		prg16_cdef((m_reg & 0x0c) | 0x03);
 	}
 }
 

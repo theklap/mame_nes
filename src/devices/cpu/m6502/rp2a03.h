@@ -23,7 +23,7 @@ public:
 
 	virtual void do_exec_full() override;
 	virtual void do_exec_partial() override;
-
+	
 protected:
 	rp2a03_core_device(const machine_config &mconfig, device_type type, const char *tag, device_t *owner, uint32_t clock);
 
@@ -49,9 +49,9 @@ public:
 
 protected:
 	rp2a03_device(const machine_config &mconfig, device_type type, const char *tag, device_t *owner, uint32_t clock);
-
+	
 	required_device<nesapu_device> m_apu;
-
+	
 	virtual void device_add_mconfig(machine_config &config) override;
 
 	void apu_irq(int state);
@@ -62,9 +62,10 @@ class rp2a03g_device : public rp2a03_device
 {
 public:
 	rp2a03g_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock);
-
+	
 protected:
 	virtual void device_add_mconfig(machine_config &config) override;
+
 };
 
 /* These are the official XTAL values and clock rates used by Nintendo for

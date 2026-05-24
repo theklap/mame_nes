@@ -100,8 +100,11 @@ void nes_cart(device_slot_interface &device)
 // UN1ROM
 	device.option_add_internal("un1rom",           NES_UN1ROM);
 // SxROM
+	device.option_add_internal("sxrom_ext",        NES_SXROM_EXT );
 	device.option_add_internal("sxrom",            NES_SXROM);
+	device.option_add_internal("snrom", 		   NES_SNROM);
 	device.option_add_internal("sorom",            NES_SOROM);
+	device.option_add_internal("surom",            NES_SUROM);
 	device.option_add_internal("szrom",            NES_SZROM);
 // TxROM
 	device.option_add_internal("txrom",            NES_TXROM);

@@ -28,94 +28,50 @@
 
 #pragma once
 
-
 /* APU type */
 struct apu_t
 {
+	
 	/* CHANNEL TYPE DEFINITIONS */
 
 	/* Square Wave */
 	struct square_t
 	{
-		square_t()
-		{
-			for (auto & elem : regs)
-				elem = 0;
-		}
+		// Range 0-15
+		// (Potentially) affected by
+		//   - volume updates,
+		//   - length counter updates,
+		//   - period updates,
+		//   - and waveform position updates
+		unsigned output_level;
 
-		u8 regs[4];
-		int vbl_length = 0;
-		int freq = 0;
-		float phaseacc = 0.0;
-		float env_phase = 0.0;
-		float sweep_phase = 0.0;
-		u8 adder = 0;
-		u8 env_vol = 0;
-		bool enabled = false;
+		bool     enabled = false;
+
+		bool     const_vol;
+		unsigned duty;
+		unsigned waveform_pos;
+		unsigned len_cnt;
+		unsigned period;
+		unsigned period_cnt;
+		bool     sweep_enabled;
+		bool     sweep_negate;
+		unsigned sweep_period;
+		unsigned sweep_period_cnt;
+		unsigned sweep_shift;
+		bool     sweep_reload_flag;
+		unsigned vol;
+
+		unsigned env_div_cnt;
+		unsigned env_vol;
+		bool     halt_len_loop_env;
+		bool     env_start_flag;
+		
 		u8 output = 0;
+
+		// Recalculated whenever anything happens that might affect the sweep
+		// target period. Not sure if this optimization is still worthwhile.
+		int sweep_target_period;
 	};
-
-	/* Triangle Wave */
-	struct triangle_t
-	{
-		triangle_t()
-		{
-			for (auto & elem : regs)
-				elem = 0;
-		}
-
-		u8 regs[4]; /* regs[1] unused */
-		int linear_length = 0;
-		bool linear_reload = false;
-		int vbl_length = 0;
-		int write_latency = 0;
-		float phaseacc = 0.0;
-		u8 adder = 0;
-		bool counter_started = false;
-		bool enabled = false;
-		u8 output = 0;
-	};
-
-	/* Noise Wave */
-	struct noise_t
-	{
-		noise_t()
-		{
-			for (auto & elem : regs)
-				elem = 0;
-		}
-
-		u8 regs[4]; /* regs[1] unused */
-		u16 lfsr = 1;
-		int vbl_length = 0;
-		float phaseacc = 0.0;
-		float env_phase = 0.0;
-		u8 env_vol = 0;
-		bool enabled = false;
-		u8 output = 0;
-	};
-
-	/* DPCM Wave */
-	struct dpcm_t
-	{
-		dpcm_t()
-		{
-			for (auto & elem : regs)
-				elem = 0;
-		}
-
-		u8 regs[4];
-		u32 address = 0;
-		u32 length = 0;
-		int bits_left = 0;
-		float phaseacc = 0.0;
-		u8 cur_byte = 0;
-		bool enabled = false;
-		bool irq_occurred = false;
-		s16 vol = 0;
-		u8 output = 0;
-	};
-
 
 	/* REGISTER DEFINITIONS */
 	static constexpr unsigned WRA0    = 0x00;
@@ -140,55 +96,94 @@ struct apu_t
 	static constexpr unsigned IRQCTRL = 0x17;
 
 	/* Sound channels */
-	square_t   squ[2];
-	triangle_t tri;
-	noise_t    noi;
-	dpcm_t     dpcm;
-
-	u8 step_mode = 0;
-	bool frame_irq_enabled = false;
-	bool frame_irq_occurred = false;
+	square_t   pulse[2];
 };
 
 /* CONSTANTS */
 
-/* vblank length table used for squares, triangle, noise */
-static const u8 vbl_length[32] =
-{
-	10, 254, 20,  2, 40,  4, 80,  6, 160,  8, 60, 10, 14, 12, 26, 14,
-	12,  16, 24, 18, 48, 20, 96, 22, 192, 24, 72, 26, 16, 28, 32, 30
-};
+// Length counter look-up table
+uint8_t const len_table[] = {
+	  10, 254, 20,  2, 40,  4, 80,  6, 160,  8, 60, 10, 14, 12, 26, 14,
+	  12,  16, 24, 18, 48, 20, 96, 22, 192, 24, 72, 26, 16, 28, 32, 30 };
 
-/* frequency limit of square channels */
-static const int freq_limit[8] =
-{
-	0x3FF, 0x555, 0x666, 0x71C, 0x787, 0x7C1, 0x7E0, 0x7F0,
-};
+uint16_t const ntsc_noise_periods[] =
+	{ 4, 8, 16, 32, 64, 96, 128, 160, 202, 254, 380, 508, 762, 1016, 2034, 4068 };
+uint16_t const pal_noise_periods[]  =
+	{ 4, 8, 14, 30, 60, 88, 118, 148, 188, 236, 354, 472, 708,  944, 1890, 3778 };
 
-// table of noise period
-// each fundamental is determined as: freq = master / period / 93
-static const int noise_freq[2][16] =
-{
-	{ 4, 8, 16, 32, 64, 96, 128, 160, 202, 254, 380, 508, 762, 1016, 2034, 4068 }, // NTSC
-	{ 4, 8, 14, 30, 60, 88, 118, 148, 188, 236, 354, 472, 708,  944, 1890, 3778 }  // PAL
-};
-
-// dpcm (cpu) cycle period
-// each frequency is determined as: freq = master / period
-static const int dpcm_clocks[2][16] =
-{
-	{ 428, 380, 340, 320, 286, 254, 226, 214, 190, 160, 142, 128, 106, 84, 72, 54 }, // NTSC
-	{ 398, 354, 316, 298, 276, 236, 210, 198, 176, 148, 132, 118,  98, 78, 66, 50 }  // PAL
-};
+uint16_t const ntsc_dmc_periods[] =
+	{ 428, 380, 340, 320, 286, 254, 226, 214, 190, 160, 142, 128, 106,  84,  72,  54 };
+uint16_t const pal_dmc_periods[] =
+	{ 398, 354, 316, 298, 276, 236, 210, 198, 176, 148, 132, 118,  98,  78,  66,  50 };
 
 /* ratios of pos/neg pulse for square waves */
 /* 2/16 = 12.5%, 4/16 = 25%, 8/16 = 50%, 12/16 = 75% */
-static const int duty_lut[4] =
-{
-	0b01000000, // 01000000 (12.5%)
-	0b01100000, // 01100000 (25%)
-	0b01111000, // 01111000 (50%)
-	0b10011111, // 10011111 (25% negated)
-};
+static uint8_t const pulse_duties[4][8] =
+      { { 0, 1, 0, 0, 0, 0, 0, 0 },
+        { 0, 1, 1, 0, 0, 0, 0, 0 },
+        { 0, 1, 1, 1, 1, 0, 0, 0 },
+        { 1, 0, 0, 1, 1, 1, 1, 1 } };
 
+// Premultiply by three to save multiplication during mixing
+uint8_t const tri_waveform_steps[32] =
+  { 15, 14, 13, 12, 11, 10, 9, 8, 7, 6,  5,  4,  3,  2,  1,  0,
+     0,  1,  2,  3,  4,  5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 };
+	 
+	 
+struct mmc5_sound_t
+{
+	/* CHANNEL TYPE DEFINITIONS */
+
+	/* Square Wave */
+	struct square_t
+	{
+		square_t()
+		{
+			for (auto & elem : regs)
+				elem = 0;
+		}
+
+		u8 regs[4];
+		s32 freq = 0;
+		float phaseacc = 0.0;
+		float env_phase = 0.0;
+		u8 adder = 0;
+		u8 env_vol = 0;
+		bool enabled = false;
+		u8 output = 0;
+	};
+
+	/* DPCM Wave */
+	struct pcm_t
+	{
+		pcm_t()
+		{
+			for (auto & elem : regs)
+				elem = 0;
+		}
+
+		u8 regs[2];
+		bool irq_enabled = false;
+		bool irq_line = false;
+		u8 output = 0;
+	};
+
+
+	/* REGISTER DEFINITIONS */
+	static constexpr unsigned WRA0    = 0x00;
+	static constexpr unsigned WRA1    = 0x01;
+	static constexpr unsigned WRA2    = 0x02;
+	static constexpr unsigned WRA3    = 0x03;
+	static constexpr unsigned WRB0    = 0x04;
+	static constexpr unsigned WRB1    = 0x05;
+	static constexpr unsigned WRB2    = 0x06;
+	static constexpr unsigned WRB3    = 0x07;
+	static constexpr unsigned WRE0    = 0x10;
+	static constexpr unsigned WRE1    = 0x11;
+	static constexpr unsigned SMASK   = 0x15;
+
+	/* Sound channels */
+	square_t   squ[2];
+	pcm_t      pcm;
+};
 #endif // MAME_SOUND_NES_DEFS_H

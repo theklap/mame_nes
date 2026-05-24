@@ -1,5 +1,5 @@
 // license:BSD-3-Clause
-// copyright-holders:Ernesto Corvi,Brad Oliver
+// copyright-holders:Ernesto Corvi, Brad Oliver
 /******************************************************************************
 
     Nintendo 2C0x PPU emulation.
@@ -14,42 +14,50 @@
 
 #pragma once
 
-///*************************************************************************
-//  MACROS / CONSTANTS
-///*************************************************************************
+//**************************************************************************
+//  CONSTANTS / MACROS
+//**************************************************************************
 
-// mirroring types
+// Mirroring types.
 #define PPU_MIRROR_NONE       0
 #define PPU_MIRROR_VERT       1
 #define PPU_MIRROR_HORZ       2
 #define PPU_MIRROR_HIGH       3
 #define PPU_MIRROR_LOW        4
-#define PPU_MIRROR_4SCREEN    5 // Same effect as NONE, but signals that we should never mirror
+#define PPU_MIRROR_4SCREEN    5 // Same effect as NONE, but signals that we should never mirror.
 
-#define PPU_DRAW_BG       0
-#define PPU_DRAW_OAM      1
-
-/* constant definitions */
 #define VISIBLE_SCREEN_WIDTH         (32*8) /* Visible screen width */
 #define VISIBLE_SCREEN_HEIGHT        (30*8) /* Visible screen height */
-#define SPRITERAM_SIZE          0x100   /* spriteram size */
 
-///*************************************************************************
-//  TYPE DEFINITIONS
-///*************************************************************************
+#define NTH_BIT(x, n) (((x) >> (n)) & 1)
 
-// ======================> ppu2c0x_device
 
-class ppu2c0x_device :  public device_t,
+//**************************************************************************
+//  FORWARD DECLARATIONS
+//**************************************************************************
+
+extern bool g_nes_p1_a_pressed_edge;
+
+class nes_exrom_device;
+class nes_txrom_device;
+class nes_sxrom_device;
+class m6502_device;
+
+
+//**************************************************************************
+//  ppu2c0x_device
+//**************************************************************************
+
+class ppu2c0x_device : public device_t,
 						public device_memory_interface,
 						public device_video_interface
 {
 public:
 	typedef device_delegate<void (int scanline, bool vblank, bool blanked)> scanline_delegate;
 	typedef device_delegate<void (int scanline, bool vblank, bool blanked)> hblank_delegate;
-	typedef device_delegate<void (int *ppu_regs)> nmi_delegate;
 	typedef device_delegate<int (int address, int data)> vidaccess_delegate;
 	typedef device_delegate<void (offs_t offset)> latch_delegate;
+	typedef device_delegate<void (int scanline, unsigned dot)> ppu_to_mapper_delegate;
 
 	enum
 	{
@@ -69,15 +77,30 @@ public:
 		// are non-rendering and non-vblank.
 	};
 
+	// CPU-visible PPU register interface.
 	virtual uint8_t read(offs_t offset);
-	virtual void write(offs_t offset, uint8_t data);
+	virtual void write(offs_t offset, uint8_t val);
 	virtual uint8_t palette_read(offs_t offset);
 	virtual void palette_write(offs_t offset, uint8_t data);
 
-	template <typename T> void set_cpu_tag(T &&tag) { m_cpu.set_tag(std::forward<T>(tag)); }
-	auto int_callback() { return m_int_callback.bind(); }
+	template <typename T>
+	void set_cpu_tag(T &&tag)
+	{
+		m_cpu.set_tag(std::forward<T>(tag));
+	}
 
-	/* routines */
+	auto int_callback()
+	{
+		return m_int_callback.bind();
+	}
+
+	// ---------------------------------------------------------------------
+	// Legacy renderer / compatibility surface.
+	//
+	// These are still declared because derived PPUs and old MAME rendering
+	// paths may depend on the virtual API even though the current NES path is
+	// driven by the cycle-accurate renderer below.
+	// ---------------------------------------------------------------------
 	void apply_color_emphasis_and_clamp(bool is_pal_or_dendy, int color_emphasis, double& R, double& G, double& B);
 	rgb_t nespal_to_RGB(int color_intensity, int color_num, int color_emphasis, bool is_pal_or_dendy);
 	virtual void init_palette_tables();
@@ -86,7 +109,7 @@ public:
 	virtual void shift_tile_plane_data(uint8_t &pix);
 	virtual void draw_tile_pixel(uint8_t pix, int color, uint32_t back_pen, uint32_t *&dest);
 	virtual void draw_tile(uint8_t *line_priority, int color_byte, int color_bits, int address, int start_x, uint32_t back_pen, uint32_t *&dest);
-	virtual void draw_background( uint8_t *line_priority );
+	virtual void draw_background(uint8_t *line_priority);
 	virtual void draw_back_pen(uint32_t* dst, int back_pen);
 	void draw_background_pen();
 
@@ -97,46 +120,101 @@ public:
 	virtual void draw_sprite_pixel_low(bitmap_rgb32& bitmap, int pixel_data, int pixel, int sprite_xpos, int color, int sprite_index, uint8_t* line_priority);
 	virtual void draw_sprite_pixel_high(bitmap_rgb32& bitmap, int pixel_data, int pixel, int sprite_xpos, int color, int sprite_index, uint8_t* line_priority);
 	virtual void read_extra_sprite_bits(int sprite_index);
-
 	virtual int apply_sprite_pattern_page(int index1, int size);
 	virtual void draw_sprites(uint8_t *line_priority);
+
 	void render_scanline();
 	virtual void scanline_increment_fine_ycounter();
 	void update_visible_enabled_scanline();
 	void update_visible_disabled_scanline();
 	void update_visible_scanline();
 	void update_scanline();
-
-	void spriteram_dma(address_space &space, const uint8_t page);
 	void render(bitmap_rgb32 &bitmap, int flipx, int flipy, int sx, int sy, const rectangle &cliprect);
 	uint32_t screen_update(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect);
 
-	int get_current_scanline() { return m_scanline; }
-	template <typename... T> void set_scanline_callback(T &&... args) { m_scanline_callback_proc.set(std::forward<T>(args)...); m_scanline_callback_proc.resolve(); /* FIXME: if this is supposed to be set at config time, it should be resolved on start */ }
-	template <typename... T> void set_hblank_callback(T &&... args) { m_hblank_callback_proc.set(std::forward<T>(args)...); m_hblank_callback_proc.resolve(); /* FIXME: if this is supposed to be set at config time, it should be resolved on start */ }
-	template <typename... T> void set_vidaccess_callback(T &&... args) { m_vidaccess_callback_proc.set(std::forward<T>(args)...); m_vidaccess_callback_proc.resolve(); /* FIXME: if this is supposed to be set at config time, it should be resolved on start */ }
+	int get_current_scanline() { return scanline; }
+	int get_current_dot() { return dot; }
+
+	template <typename... T>
+	void set_scanline_callback(T &&... args)
+	{
+		m_scanline_callback_proc.set(std::forward<T>(args)...);
+		m_scanline_callback_proc.resolve();
+	}
+
+	template <typename... T>
+	void set_hblank_callback(T &&... args)
+	{
+		m_hblank_callback_proc.set(std::forward<T>(args)...);
+		m_hblank_callback_proc.resolve();
+	}
+
+	template <typename... T>
+	void set_vidaccess_callback(T &&... args)
+	{
+		m_vidaccess_callback_proc.set(std::forward<T>(args)...);
+		m_vidaccess_callback_proc.resolve();
+	}
+
 	void set_scanlines_per_frame(int scanlines) { m_scanlines_per_frame = scanlines; }
-
-	// MMC5 has to be able to check this
-	int is_sprite_8x16() { return m_regs[PPU_CONTROL0] & PPU_CONTROL0_SPRITE_SIZE; }
-	int get_draw_phase() { return m_draw_phase; }
-	int get_tilenum() { return m_tilecount; }
-
-	//27/12/2002 (HACK!)
-	template <typename... T> void set_latch(T &&... args) { m_latch.set(std::forward<T>(args)...); m_latch.resolve(); /* FIXME: if this is supposed to be set at config time, it should be resolved on start */ }
-
-	//  void update_screen(bitmap_t &bitmap, const rectangle &cliprect);
-
 	uint16_t get_vram_dest();
 	void set_vram_dest(uint16_t dest);
-
 	void ppu2c0x(address_map &map);
 
-	bool in_vblanking() { return (m_scanline >= m_vblank_first_scanline - 1); }
+	// ---------------------------------------------------------------------
+	// Cycle-accurate NES PPU path.
+	// ---------------------------------------------------------------------
+	void run_prerender_scanline_dot();
+	void run_scanline_241_dot();
+	void run_visible_scanline_dot();
+	void run_render_pipeline_dot();
+	void run_bg_fetch_dot();
+	void reload_bg_shift_registers();
+	void do_pixel_output_and_sprite_zero();
+
+	void do_sprite_evaluation();
+	bool calc_sprite_tile_addr(uint8_t y, uint8_t index, uint8_t attrib, bool is_high);
+	void do_sprite_loading();
+	unsigned get_sprite_pixel(unsigned &spr_pal, bool &spr_behind_bg, bool &spr_is_s0);
+
+	void copy_vert();
+	void copy_horiz();
+	void bump_vert();
+	void bump_horiz();
+	void apply_scroll_ops();
+
+	void do_2007_post_access_bump();
+	void write_oam_data_reg(uint8_t val);
+	void write_oam_dma_byte(uint8_t val);
+
+	void set_nmi(bool s);
+	void set_mapper(int mapper_number);
+	void reset();
+	void tick();
+
+	void retro_fix_previous_pixel_after_ppumask_write();
+
+	template <typename... T>
+	void set_latch(T &&... args)
+	{
+		m_latch.set(std::forward<T>(args)...);
+		m_latch.resolve();
+	}
+
+	template <typename... T>
+	void set_ppu_to_mapper(T &&... args)
+	{
+		m_ppu_to_mapper.set(std::forward<T>(args)...);
+		m_ppu_to_mapper.resolve();
+	}
+
 protected:
 	ppu2c0x_device(const machine_config& mconfig, device_type type, const char* tag, device_t* owner, uint32_t clock, address_map_constructor internal_map);
+	ppu2c0x_device(const machine_config &mconfig, device_type type, const char *tag, device_t *owner, uint32_t clock = 0);
 
-	// registers definition
+	// ---------------------------------------------------------------------
+	// PPU register indexes.
+	// ---------------------------------------------------------------------
 	enum
 	{
 		PPU_CONTROL0 = 0,
@@ -150,101 +228,474 @@ protected:
 		PPU_MAX_REG
 	};
 
-	// bit definitions for (some of) the registers
+	// ---------------------------------------------------------------------
+	// PPU register bit definitions.
+	// ---------------------------------------------------------------------
 	enum
 	{
-		PPU_CONTROL0_INC               = 0x04,
-		PPU_CONTROL0_SPR_SELECT        = 0x08,
-		PPU_CONTROL0_CHR_SELECT        = 0x10,
-		PPU_CONTROL0_SPRITE_SIZE       = 0x20,
-		PPU_CONTROL0_NMI               = 0x80,
+		PPU_CONTROL0_INC         = 0x04,
+		PPU_CONTROL0_SPR_SELECT  = 0x08,
+		PPU_CONTROL0_CHR_SELECT  = 0x10,
+		PPU_CONTROL0_SPRITE_SIZE = 0x20,
+		PPU_CONTROL0_NMI         = 0x80,
 
-		PPU_CONTROL1_DISPLAY_MONO      = 0x01,
-		PPU_CONTROL1_BACKGROUND_L8     = 0x02,
-		PPU_CONTROL1_SPRITES_L8        = 0x04,
-		PPU_CONTROL1_BACKGROUND        = 0x08,
-		PPU_CONTROL1_SPRITES           = 0x10,
-		PPU_CONTROL1_COLOR_EMPHASIS    = 0xe0,
+		PPU_CONTROL1_DISPLAY_MONO   = 0x01,
+		PPU_CONTROL1_BACKGROUND_L8  = 0x02,
+		PPU_CONTROL1_SPRITES_L8     = 0x04,
+		PPU_CONTROL1_BACKGROUND     = 0x08,
+		PPU_CONTROL1_SPRITES        = 0x10,
+		PPU_CONTROL1_COLOR_EMPHASIS = 0xe0,
 
-		PPU_STATUS_8SPRITES            = 0x20,
-		PPU_STATUS_SPRITE0_HIT         = 0x40,
-		PPU_STATUS_VBLANK              = 0x80
+		PPU_STATUS_8SPRITES    = 0x20,
+		PPU_STATUS_SPRITE0_HIT = 0x40,
+		PPU_STATUS_VBLANK      = 0x80
 	};
 
-	// construction/destruction
-	ppu2c0x_device(const machine_config &mconfig, device_type type, const char *tag, device_t *owner, uint32_t clock = 0);
+	enum Sprite_size
+	{
+		EIGHT_BY_EIGHT = 0,
+		EIGHT_BY_SIXTEEN
+	};
 
+	enum class ppu_fetch_phase : uint8_t
+	{
+		NONE,
+		NT,
+		AT,
+		PTL,
+		PTH,
+		SPR_NT,
+		SPR_AT,
+		SPR_PTL,
+		SPR_PTH,
+		DUMMY338,
+		DUMMY340
+	};
+
+	// ---------------------------------------------------------------------
+	// Delayed register write/read latches.
+	// ---------------------------------------------------------------------
+	struct PPUDelayedLatch
+	{
+		bool has_pending;
+		uint8_t value;
+		uint16_t value16;
+		int apply_dot;
+		int apply_scanline;
+		int apply_ppu;
+	};
+
+	PPUDelayedLatch pending_2000;
+	PPUDelayedLatch pending_2001;
+	PPUDelayedLatch pending_2004;
+	PPUDelayedLatch pending_2006;
+
+	void apply_delayed_2000(uint8_t val);
+	void apply_delayed_2001(uint8_t val);
+
+	// ---------------------------------------------------------------------
+	// Device overrides.
+	// ---------------------------------------------------------------------
 	virtual void device_start() override;
 	virtual void device_config_complete() override;
-
-	// device_config_memory_interface overrides
 	virtual space_config_vector memory_space_config() const override;
 
-	TIMER_CALLBACK_MEMBER(hblank_tick);
-	TIMER_CALLBACK_MEMBER(nmi_tick);
-	TIMER_CALLBACK_MEMBER(scanline_tick);
+	// ---------------------------------------------------------------------
+	// Internal memory/bus helpers.
+	// ---------------------------------------------------------------------
+	uint8_t readbyte(offs_t address);
+	inline uint8_t readbyte(uint16_t bus_addr, uint16_t mem_addr);
+	inline void writebyte(offs_t address, uint8_t data);
 
-	// address space configurations
-	const address_space_config      m_space_config;
+	void ppu_bus_address_drive(uint16_t addr);
+	void ppu_bus_a12_observe(uint16_t addr);
+	uint8_t ppu_bus_read(uint16_t addr, ppu_fetch_phase phase);
 
-	required_device<cpu_device> m_cpu;
+	inline void clock_bg_shifters_only();
+	void do_prerender_oam_sweep();
 
+	void init_startup_only_state();
+	void init_runtime_reset_state();
+	void resolve_mapper_ppu_devices();
 	void start_nopalram();
 
-	int                         m_scanlines_per_frame;  /* number of scanlines per frame */
-	int                         m_security_value;       /* 2C05 protection */
-	int                         m_vblank_first_scanline;  /* the very first scanline where VBLANK occurs */
+	// ---------------------------------------------------------------------
+	// Address space / attached CPU.
+	// ---------------------------------------------------------------------
+	const address_space_config m_space_config;
+	required_device<cpu_device> m_cpu;
 
-	// used in rendering
+	// ---------------------------------------------------------------------
+	// Legacy/common PPU configuration and compatibility state.
+	// ---------------------------------------------------------------------
+	int m_scanlines_per_frame;       // Number of scanlines per frame.
+	int m_security_value;            // 2C05 protection.
+	int m_vblank_first_scanline;     // First scanline where VBLANK occurs.
+	int m_mapper_number;
+
+	uint16_t bg_pat_addr_tile;       // Latched background pattern table base used by BG fetches.
 	uint8_t m_planebuf[2];
-	int                         m_scanline;         /* scanline count */
-	std::unique_ptr<uint8_t[]>  m_spriteram;           /* sprite ram */
+	int m_scanline;
+
+	// Used by ppu2c0x_vt.cpp / derived legacy paths.
+	std::unique_ptr<uint8_t[]> m_spriteram;
 
 	int m_videoram_addr_mask;
 	int m_global_refresh_mask;
 	int m_line_write_increment_large;
-	bool m_paletteram_in_ppuspace; // sh6578 doesn't have the palette in PPU space, so various side-effects don't apply
-	std::vector<uint8_t>        m_palette_ram;          /* shouldn't be in main memory! */
-	std::unique_ptr<bitmap_rgb32>                m_bitmap;          /* target bitmap */
-	int                         m_regs[PPU_MAX_REG];        /* registers */
-	int                         m_tile_page;            /* current tile page */
-	int                         m_back_color;           /* background color */
-	int                         m_refresh_data;         /* refresh-related */
-	int                         m_x_fine;               /* refresh-related */
-	int                         m_toggle;               /* used to latch hi-lo scroll */
-	int                         m_tilecount;            /* MMC5 can change attributes to subsets of the 34 visible tiles */
-	latch_delegate              m_latch;
+	bool m_paletteram_in_ppuspace;
 
-	uint8_t readbyte(offs_t address);
+	std::vector<uint8_t> m_palette_ram;
+	std::unique_ptr<bitmap_rgb32> m_bitmap;
+	int m_regs[PPU_MAX_REG];
 
-	uint32_t m_nespens[0x40*8];
+	// Legacy renderer / sh6578-related state.
+	int m_tile_page;
+	int m_back_color;
+	int m_refresh_data;
+	int m_x_fine;
+	int m_toggle;
+	int m_tilecount;
+
+	latch_delegate m_latch;
+	ppu_to_mapper_delegate m_ppu_to_mapper;
+
+	// ---------------------------------------------------------------------
+	// Core PPU scroll/address/register state.
+	// ---------------------------------------------------------------------
+	unsigned m_prerender_line;
+
+	// VRAM address/scroll registers. 15 bits are meaningful.
+	unsigned t;
+	unsigned v;
+	uint8_t fine_x;
+	unsigned v_inc;                 // $2000 bit 2.
+	uint16_t sprite_pat_addr;       // $2000 bit 3.
+	uint16_t bg_pat_addr;           // $2000 bit 4.
+	Sprite_size sprite_size;        // $2000 bit 5.
+	bool nmi_on_vblank;             // $2000 bit 7.
+	bool m_nmi;
+	bool nmi_pending;
+	int nmi_delay;
+	bool suppress_vblank_flag;
+
+	// $2001 decoded state.
+	uint8_t grayscale_color_mask;   // 0x30 if grayscale is enabled, otherwise 0x3f.
+	bool show_bg_left_8;
+	bool show_sprites_left_8;
+	uint16_t tint_bits;
+	unsigned bg_clip_comp;
+	unsigned sprite_clip_comp;
+
+	// $2002 decoded state.
+	bool sprite_overflow;
+	bool sprite_zero_hit;
+	bool in_vblank;
+
+	// $2003/$2004/OAM register state.
+	uint8_t oam[0x100];
+	uint8_t sec_oam[0x20];
+	bool m_sec_is_sprite0[8];
+
+	uint8_t oam_addr;
+	unsigned sec_oam_addr;
+	uint8_t oam_data;
+	uint8_t oam_eval_addr;
+
+	uint8_t sprite_addr_h;
+	uint8_t sprite_addr_l;
+	bool oam_copy_done;
+	bool oam_addr_overflow;
+	bool sec_oam_addr_overflow;
+	bool overflow_detection;
+	int overflow_bug_counter;
+	bool sprite_eval_in_range;
+
+	// $2005/$2006 write toggle.
+	bool write_flip_flop;
+
+	// $2007 read buffer.
+	uint8_t ppu_data_reg;
+
+	// ---------------------------------------------------------------------
+	// PPU timing counters.
+	// ---------------------------------------------------------------------
+	bool odd_frame;
+	int scanline;
+	int dot;
+	uint64_t frame;
+	bool skip_dot;
+
+	// Current PPU address bus value.
+	unsigned ppu_addr_bus;
+
+	// ---------------------------------------------------------------------
+	// Background fetch pipeline.
+	// ---------------------------------------------------------------------
+	uint8_t nt_byte;
+	uint8_t at_byte;
+	uint8_t bg_byte_l;
+	uint8_t bg_byte_h;
+
+	uint16_t bg_shift_l;
+	uint16_t bg_shift_h;
+	uint16_t at_shift_l;
+	uint16_t at_shift_h;
+
+	uint8_t at_latch_l;
+	uint8_t at_latch_h;
+
+	bool inhibit_bg_shift_one_dot;
+
+	uint16_t m_bgfetch_v_nt = 0;
+	uint16_t m_bgfetch_v_at = 0;
+	uint16_t m_bgfetch_v_pt = 0;
+	uint16_t m_bgfetch_pat_pt = 0;
+	uint16_t m_bgfetch_nt_addr;
+	uint16_t m_bgfetch_at_addr;
+
+	// ---------------------------------------------------------------------
+	// Sprite evaluation / sprite output pipeline.
+	// ---------------------------------------------------------------------
+	uint8_t sprite_attribs[8];
+	uint8_t sprite_x[8];
+	uint8_t sprite_x_cnt[8];
+	uint8_t sprite_pat_l[8];
+	uint8_t sprite_pat_h[8];
+	uint8_t sprite_shift_count[8];
+
+	bool s0_on_next_scanline;
+	bool s0_on_cur_scanline;
+
+	uint8_t sprite_y;
+	uint8_t sprite_index;
+	bool sprite_in_range;
+
+	uint8_t sprite0_eval_addr;
+	uint8_t sprite0_pat;
+
+	bool sprite_go_this_line;
+	bool sprite_go_next_line;
+	bool sprite_force_immediate_applied;
+	bool sprite_sl0_early_shift_pending;
+
+	uint8_t oam_latch_addr = 0;
+	bool sec_oam_full;
+	uint8_t oam_2004_latch;
+	uint8_t sec_oam_last_write;
+
+	bool s_after_wrap;
+	bool sl0_stale_s0_loaded;
+	bool sl0_stale_sprite0_identity;
+
+	uint8_t overflow_eval_phase = 0;
+	uint8_t overflow_finish_bytes = 0;
+
+	bool sprite_eval_initialized;
+
+	// ---------------------------------------------------------------------
+	// Decoded render-enable state.
+	//
+	// *_output_enabled follows the immediate/current PPUMASK output-visible state.
+	// *_pipeline_enabled follows the delayed/internal render pipeline state.
+	// ---------------------------------------------------------------------
+	bool bg_output_enabled;
+	bool spr_output_enabled;
+	bool bg_pipeline_enabled;
+	bool spr_pipeline_enabled;
+
+	// ---------------------------------------------------------------------
+	// OAM corruption / sprite eval edge cases.
+	// ---------------------------------------------------------------------
+	bool oam_corrupt_pending;
+	uint8_t oam_corrupt_seed;
+
+	// ---------------------------------------------------------------------
+	// Previous visible pixel state for retroactive $2001 edge behavior.
+	// ---------------------------------------------------------------------
+	bool prev_pixel_valid = false;
+	int prev_pixel_scanline = 0;
+	unsigned prev_pixel_x = 0;
+
+	unsigned prev_bg_pixel_pat = 0;
+	unsigned prev_attr_bits = 0;
+
+	unsigned prev_spr_pat = 0;
+	unsigned prev_spr_pal = 0;
+	bool prev_spr_behind_bg = false;
+	bool prev_spr_is_s0 = false;
+
+	uint8_t prev_sprite0_pat = 0;
+	uint8_t prev_backdrop_pal_index = 0;
+
+	bool retro_ppumask_color = false;
+	bool retro_ppumask_render = false;
+
+	// ---------------------------------------------------------------------
+	// Delayed $2007 read/write state.
+	// ---------------------------------------------------------------------
+	struct ppu2007_delayed_write
+	{
+		bool pending = false;
+		int delay = 0;
+		uint16_t addr = 0;
+		uint8_t data = 0;
+	};
+
+	struct ppu2007_delayed_read
+	{
+		bool pending = false;
+		int delay = 0;
+		uint16_t addr = 0;
+
+		// false = delayed direct refill from addr
+		// true  = delayed rendering refill from the next real PPU bus read
+		bool use_next_ppu_read_for_refill = false;
+
+		// Rendering $2007 reads mature first, then wait here until an allowed
+		// PPU fetch supplies the refill value.
+		bool waiting_for_refill_bus_read = false;
+	};
+
+	ppu2007_delayed_write m_2007_write;
+	ppu2007_delayed_read m_2007_read;
+
+	bool ppu2007_buffer_fill_armed;
+	bool ppu2007_buffer_fill_arm_pending = false;
+	bool ppu_bus_read_can_fill_2007;
+
+	bool ppu2007_post_bump_pending;
+	int ppu2007_post_bump_delay;
+
+	uint16_t sprite_nt_fetch_v;
+	uint16_t sprite_nt_fetch_v_new;
+
+	void schedule_2007_write(uint16_t addr, uint8_t data, int delay);
+	void schedule_2007_read(uint16_t addr, int delay, bool use_next_ppu_read_for_refill);
+	void schedule_2007_post_access_bump();
+
+	// ---------------------------------------------------------------------
+	// Delayed fine-X / scroll operation state.
+	// ---------------------------------------------------------------------
+	uint8_t pending_fine_x;
+	bool pending_fine_x_valid;
+	int pending_fine_x_delay;
+
+	bool scroll_inc_h_pending = false;
+	bool scroll_inc_v_pending = false;
+	bool scroll_copy_h_pending = false;
+	bool scroll_copy_v_pending = false;
+	bool scroll_copy_conflict_pending = false;
+	bool scroll_copy_conflict_h_pending = false;
+	bool scroll_copy_conflict_v_pending = false;
+
+	// ---------------------------------------------------------------------
+	// Mapper hooks / cached mapper capability flags.
+	// ---------------------------------------------------------------------
+	nes_exrom_device *m_mmc5 = nullptr;
+	nes_txrom_device *m_mmc3 = nullptr;
+	nes_sxrom_device *m_mmc1_sxrom = nullptr;
+
+	bool m_has_mmc3_a12 = false;
+	bool m_has_mmc5_ppu = false;
+	bool m_has_mmc1_phase = false;
+	bool m_has_chr_latch = false;
+
+	// ---------------------------------------------------------------------
+	// Save-state replacements for old function-local statics.
+	// ---------------------------------------------------------------------
+	uint8_t m_eval_wrap_byte = 0;
+	uint8_t m_eval_prev_oam_latch_addr = 0x00;
+
+	int m_save_sprite_size = 0;
+	void presave();
+	void postload();
+
+	// ---------------------------------------------------------------------
+	// PPU internal register/open-bus latch.
+	//
+	// This models the PPU-side I/O latch. It is not CPU open bus.
+	// ---------------------------------------------------------------------
+	uint8_t m_ppu_io_db = 0x00;
+	uint64_t m_ppu_io_db_decay_at[8] = {};
+
+	// Counts chosen to match the screenshot profile. These are hardware-profile
+	// constants, not universal NES constants.
+	static constexpr uint16_t ppudecay_count_for_bit[8] =
+	{
+		0x04f4,
+		0x0398,
+		0x02e3,
+		0x030b,
+		0x39e1,
+		0xbdca,
+		0x39e1,
+		0x02a6
+	};
+
+	uint64_t ppudecay_now() const;
+	uint64_t ppudecay_count_to_cpu_cycles(uint16_t count) const;
+	void ppu_open_bus_drive(uint8_t data);
+	uint8_t ppu_open_bus_peek();
+	void ppu_open_bus_drive_masked(uint8_t data, uint8_t mask);
+
+	// ---------------------------------------------------------------------
+	// Palette / utility helpers.
+	// ---------------------------------------------------------------------
+	uint32_t m_nespens[0x40 * 8];
+
+	uint8_t rev_byte(uint8_t n)
+	{
+		static uint8_t const rev_table[] =
+		{
+			0x00, 0x80, 0x40, 0xC0, 0x20, 0xA0, 0x60, 0xE0, 0x10, 0x90, 0x50, 0xD0, 0x30, 0xB0, 0x70, 0xF0,
+			0x08, 0x88, 0x48, 0xC8, 0x28, 0xA8, 0x68, 0xE8, 0x18, 0x98, 0x58, 0xD8, 0x38, 0xB8, 0x78, 0xF8,
+			0x04, 0x84, 0x44, 0xC4, 0x24, 0xA4, 0x64, 0xE4, 0x14, 0x94, 0x54, 0xD4, 0x34, 0xB4, 0x74, 0xF4,
+			0x0C, 0x8C, 0x4C, 0xCC, 0x2C, 0xAC, 0x6C, 0xEC, 0x1C, 0x9C, 0x5C, 0xDC, 0x3C, 0xBC, 0x7C, 0xFC,
+			0x02, 0x82, 0x42, 0xC2, 0x22, 0xA2, 0x62, 0xE2, 0x12, 0x92, 0x52, 0xD2, 0x32, 0xB2, 0x72, 0xF2,
+			0x0A, 0x8A, 0x4A, 0xCA, 0x2A, 0xAA, 0x6A, 0xEA, 0x1A, 0x9A, 0x5A, 0xDA, 0x3A, 0xBA, 0x7A, 0xFA,
+			0x06, 0x86, 0x46, 0xC6, 0x26, 0xA6, 0x66, 0xE6, 0x16, 0x96, 0x56, 0xD6, 0x36, 0xB6, 0x76, 0xF6,
+			0x0E, 0x8E, 0x4E, 0xCE, 0x2E, 0xAE, 0x6E, 0xEE, 0x1E, 0x9E, 0x5E, 0xDE, 0x3E, 0xBE, 0x7E, 0xFE,
+			0x01, 0x81, 0x41, 0xC1, 0x21, 0xA1, 0x61, 0xE1, 0x11, 0x91, 0x51, 0xD1, 0x31, 0xB1, 0x71, 0xF1,
+			0x09, 0x89, 0x49, 0xC9, 0x29, 0xA9, 0x69, 0xE9, 0x19, 0x99, 0x59, 0xD9, 0x39, 0xB9, 0x79, 0xF9,
+			0x05, 0x85, 0x45, 0xC5, 0x25, 0xA5, 0x65, 0xE5, 0x15, 0x95, 0x55, 0xD5, 0x35, 0xB5, 0x75, 0xF5,
+			0x0D, 0x8D, 0x4D, 0xCD, 0x2D, 0xAD, 0x6D, 0xED, 0x1D, 0x9D, 0x5D, 0xDD, 0x3D, 0xBD, 0x7D, 0xFD,
+			0x03, 0x83, 0x43, 0xC3, 0x23, 0xA3, 0x63, 0xE3, 0x13, 0x93, 0x53, 0xD3, 0x33, 0xB3, 0x73, 0xF3,
+			0x0B, 0x8B, 0x4B, 0xCB, 0x2B, 0xAB, 0x6B, 0xEB, 0x1B, 0x9B, 0x5B, 0xDB, 0x3B, 0xBB, 0x7B, 0xFB,
+			0x07, 0x87, 0x47, 0xC7, 0x27, 0xA7, 0x67, 0xE7, 0x17, 0x97, 0x57, 0xD7, 0x37, 0xB7, 0x77, 0xF7,
+			0x0F, 0x8F, 0x4F, 0xCF, 0x2F, 0xAF, 0x6F, 0xEF, 0x1F, 0x9F, 0x5F, 0xDF, 0x3F, 0xBF, 0x7F, 0xFF
+		};
+
+		return rev_table[n];
+	}
 
 private:
-	inline void writebyte(offs_t address, uint8_t data);
+	m6502_device* m_maincpu6502 = nullptr;
+
 	inline uint16_t apply_grayscale_and_emphasis(uint8_t color);
 
+	scanline_delegate m_scanline_callback_proc;
+	hblank_delegate m_hblank_callback_proc;
+	vidaccess_delegate m_vidaccess_callback_proc;
+	devcb_write_line m_int_callback;
 
-	scanline_delegate           m_scanline_callback_proc;   /* optional scanline callback */
-	hblank_delegate             m_hblank_callback_proc; /* optional hblank callback */
-	vidaccess_delegate          m_vidaccess_callback_proc;  /* optional video access callback */
-	devcb_write_line            m_int_callback;         /* nmi access callback from interface */
-
-	int                         m_refresh_latch;        /* refresh-related */
-	int                         m_add;              /* vram increment amount */
-	int                         m_videomem_addr;        /* videomem address pointer */
-	int                         m_data_latch;           /* latched videomem data */
-	int                         m_buffered_data;
-	int                         m_sprite_page;          /* current sprite page */
-	int                         m_scan_scale;           /* scan scale */
-	int                         m_draw_phase;           /* MMC5 uses different regs for BG and OAM */
-
-	// timers
-	emu_timer                   *m_hblank_timer;        /* hblank period at end of each scanline */
-	emu_timer                   *m_nmi_timer;           /* NMI timer */
-	emu_timer                   *m_scanline_timer;      /* scanline timer */
+	// Legacy MAME render/helper state.
+	int m_refresh_latch;
+	int m_add;
+	int m_videomem_addr;
+	int m_data_latch;
+	int m_buffered_data;
+	int m_sprite_page;
+	int m_scan_scale;
 };
 
-class ppu2c0x_rgb_device : public ppu2c0x_device {
+
+//**************************************************************************
+//  RGB PPUs
+//**************************************************************************
+
+class ppu2c0x_rgb_device : public ppu2c0x_device
+{
 protected:
 	ppu2c0x_rgb_device(const machine_config &mconfig, device_type type, const char *tag, device_t *owner, uint32_t clock = 0);
 
@@ -254,52 +705,67 @@ private:
 	required_region_ptr<uint8_t> m_palette_data;
 };
 
-class ppu2c02_device : public ppu2c0x_device {
+
+//**************************************************************************
+//  Concrete PPU device types
+//**************************************************************************
+
+class ppu2c02_device : public ppu2c0x_device
+{
 public:
 	ppu2c02_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock = 0);
 };
 
-class ppu2c03b_device : public ppu2c0x_rgb_device {
+class ppu2c03b_device : public ppu2c0x_rgb_device
+{
 public:
 	ppu2c03b_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock = 0);
 };
 
-class ppu2c04_device : public ppu2c0x_rgb_device {
+class ppu2c04_device : public ppu2c0x_rgb_device
+{
 public:
 	ppu2c04_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock = 0);
 };
 
-class ppu2c07_device : public ppu2c0x_device {
+class ppu2c07_device : public ppu2c0x_device
+{
 public:
 	ppu2c07_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock = 0);
 };
 
-class ppupalc_device : public ppu2c0x_device {
+class ppupalc_device : public ppu2c0x_device
+{
 public:
 	ppupalc_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock = 0);
 };
 
-class ppu2c05_01_device : public ppu2c0x_rgb_device {
+class ppu2c05_01_device : public ppu2c0x_rgb_device
+{
 public:
 	ppu2c05_01_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock = 0);
 };
 
-class ppu2c05_02_device : public ppu2c0x_rgb_device {
+class ppu2c05_02_device : public ppu2c0x_rgb_device
+{
 public:
 	ppu2c05_02_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock = 0);
 };
 
-class ppu2c05_03_device : public ppu2c0x_rgb_device {
+class ppu2c05_03_device : public ppu2c0x_rgb_device
+{
 public:
 	ppu2c05_03_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock = 0);
 };
 
-class ppu2c05_04_device : public ppu2c0x_rgb_device {
+class ppu2c05_04_device : public ppu2c0x_rgb_device
+{
 public:
 	ppu2c05_04_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock = 0);
 };
 
-class ppu2c04_clone_device : public ppu2c0x_device {
+class ppu2c04_clone_device : public ppu2c0x_device
+{
 public:
 	ppu2c04_clone_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock = 0);
 
@@ -318,10 +784,15 @@ protected:
 private:
 	required_region_ptr<uint8_t> m_palette_data;
 
-	std::unique_ptr<uint8_t[]>   m_spritebuf; /* buffered sprite ram for next frame */
+	// Buffered sprite RAM for next frame.
+	std::unique_ptr<uint8_t[]> m_spritebuf;
 };
 
-// device type definition
+
+//**************************************************************************
+//  Device type declarations
+//**************************************************************************
+
 DECLARE_DEVICE_TYPE(PPU_2C02,    ppu2c02_device)       // NTSC NES
 DECLARE_DEVICE_TYPE(PPU_2C03B,   ppu2c03b_device)      // Playchoice 10
 DECLARE_DEVICE_TYPE(PPU_2C04,    ppu2c04_device)       // Vs. Unisystem

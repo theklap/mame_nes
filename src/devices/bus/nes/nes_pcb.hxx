@@ -31,7 +31,10 @@ static const nes_pcb pcb_list[] =
 	{ "gxrom",            STD_GXROM },
 	{ "un1rom",           STD_UN1ROM },
 	{ "sxrom",            STD_SXROM },
+	{ "sxrom_ext",        STD_SXROM_EXT },
+	{ "snrom",            STD_SNROM },
 	{ "sorom",            STD_SOROM },
+	{ "surom",            STD_SUROM },
 	{ "szrom",            STD_SZROM },
 	{ "txrom",            STD_TXROM },
 	{ "hkrom",            STD_HKROM },
@@ -665,7 +668,12 @@ void nes_cart_slot_device::call_load_pcb()
 	if (m_pcb_id == KONAMI_VRC7)
 		m_cart->set_vrc_lines(nes_cart_get_line(get_feature("vrc7-pin19")), 0, 0);
 
-	if (m_pcb_id == STD_SXROM || m_pcb_id == STD_SOROM)
+	if (m_pcb_id == STD_SXROM ||
+		m_pcb_id == STD_SXROM_EXT ||
+		m_pcb_id == STD_SNROM ||
+		m_pcb_id == STD_SOROM ||
+		m_pcb_id == STD_SUROM ||
+		m_pcb_id == STD_SZROM)
 	{
 		if (get_feature("mmc1_type") != nullptr)
 		{

@@ -44,6 +44,7 @@ public:
 	virtual void write_h(offs_t offset, uint8_t data) override;
 
 	virtual void pcb_reset() override;
+	virtual void ppu_latch(offs_t offset) override;
 };
 
 

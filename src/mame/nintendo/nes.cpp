@@ -22,11 +22,13 @@
 
 void nes_state::nes_map(address_map &map)
 {
+
 	map(0x0000, 0x07ff).ram().mirror(0x1800).share("mainram");                              // RAM
 	map(0x2000, 0x3fff).rw(m_ppu, FUNC(ppu2c0x_device::read), FUNC(ppu2c0x_device::write)); // PPU registers
-	map(0x4014, 0x4014).w(m_ppu, FUNC(ppu2c0x_device::spriteram_dma));                            // stupid address space hole
+	//map(0x4014, 0x4014).w(m_ppu, FUNC(ppu2c0x_device::spriteram_dma));					// stupid address space hole
 	map(0x4016, 0x4016).rw(FUNC(nes_state::nes_in0_r), FUNC(nes_state::nes_in0_w));         // IN0 - input port 1
 	map(0x4017, 0x4017).r(FUNC(nes_state::nes_in1_r));                                      // IN1 - input port 2
+	
 	// 0x4100-0x5fff -> LOW HANDLER defined on a pcb base
 	// 0x6000-0x7fff -> MID HANDLER defined on a pcb base
 	// 0x8000-0xffff -> HIGH HANDLER defined on a pcb base
@@ -42,38 +44,63 @@ static INPUT_PORTS_START( famicom )
 	PORT_BIT( 0x01, IP_ACTIVE_HIGH, IPT_OTHER) PORT_NAME("Change Disk Side") PORT_CODE(KEYCODE_SPACE)
 INPUT_PORTS_END
 
-
 void nes_state::nes(machine_config &config)
 {
 	// basic machine hardware
 	rp2a03_device &maincpu(RP2A03G(config, m_maincpu, NTSC_APU_CLOCK));
 	maincpu.set_addrmap(AS_PROGRAM, &nes_state::nes_map);
+	
+	// sound hardware
+	SPEAKER(config, "mono").front_center();
+	maincpu.add_route(ALL_OUTPUTS, "mono", 0.90);
+	
 
 	SCREEN(config, m_screen, SCREEN_TYPE_RASTER);
-	m_screen->set_refresh_hz(60.0988);
+	// NES NTSC composite timing
+	const double master_clock = 21'477'272.0;
+	const double ppu_pixel_clock = master_clock / 4.0;
+
+	// NTSC composite frame rate w/ odd-frame skip
+	//const double composite_frame_rate =
+	//	ppu_pixel_clock / 89341.5; // = 60.098813 Hz
+
+	m_screen->set_raw(
+		ppu_pixel_clock,
+		341, 0, 256,  // htotal=341 dots, visible x=0..255
+		262, 0, 240   // vtotal=262 lines, visible y=0..239
+	);
+
+	//m_screen->set_refresh_hz(composite_frame_rate);
+	
+	//SCREEN(config, m_screen, SCREEN_TYPE_LCD);
+	//m_screen->set_raw(21.477272_MHz_XTAL/4, 341, 0, 257, ((89341.5/341)), 0, 240);
+	
+//	m_screen->set_refresh_hz(60.0988);
+	//m_screen->set_refresh_hz(60098800);
 	// This isn't used so much to calulate the vblank duration (the PPU code tracks that manually) but to determine
 	// the number of cycles in each scanline for the PPU scanline timer. Since the PPU has 20 vblank scanlines + 2
 	// non-rendering scanlines, we compensate. This ends up being 2500 cycles for the non-rendering portion, 2273
 	// cycles for the actual vblank period.
-	m_screen->set_vblank_time(ATTOSECONDS_IN_USEC((113.66/(NTSC_APU_CLOCK.dvalue()/1000000)) *
-							 (ppu2c0x_device::VBLANK_LAST_SCANLINE_NTSC-ppu2c0x_device::VBLANK_FIRST_SCANLINE+1+2)));
-	m_screen->set_size(32*8, 262);
-	m_screen->set_visarea(0*8, 32*8-1, 0*8, 30*8-1);
+//	m_screen->set_vblank_time(ATTOSECONDS_IN_USEC((113.66/(NTSC_APU_CLOCK.dvalue()/1000000)) *
+//							 (ppu2c0x_device::VBLANK_LAST_SCANLINE_NTSC-ppu2c0x_device::VBLANK_FIRST_SCANLINE+1+2)));
+	//m_screen->set_vblank_time(0);
+	//m_screen->set_size(341, 262);
+	//m_screen->set_size(32*8, 262);
+//	m_screen->set_size(340, 261);
+//	m_screen->set_visarea((0*8), (32*8-1), (0*8), (30*8-1));
+	//m_screen->set_visarea(0, 255, 0, 239);
 	m_screen->set_screen_update(FUNC(nes_state::screen_update_nes));
 	m_screen->screen_vblank().set(FUNC(nes_state::screen_vblank_nes));
 
 	PPU_2C02(config, m_ppu);
 	m_ppu->set_cpu_tag(m_maincpu);
 	m_ppu->int_callback().set_inputline(m_maincpu, INPUT_LINE_NMI);
-
-	// sound hardware
-	SPEAKER(config, "mono").front_center();
-	maincpu.add_route(ALL_OUTPUTS, "mono", 0.90);
+	
 
 	NES_CONTROL_PORT(config, m_ctrl1, nes_control_port1_devices, "joypad").set_screen_tag(m_screen);
 	NES_CONTROL_PORT(config, m_ctrl2, nes_control_port2_devices, "joypad").set_screen_tag(m_screen);
 	NES_CONTROL_PORT(config, m_special, nes_control_special_devices, nullptr).set_screen_tag(m_screen);
-
+	
 	NES_CART_SLOT(config, m_cartslot, NTSC_APU_CLOCK, nes_cart, nullptr).set_must_be_loaded(true);
 	SOFTWARE_LIST(config, "cart_list").set_original("nes");
 	SOFTWARE_LIST(config, "ade_list").set_original("nes_ade");         // Camerica/Codemasters Aladdin Deck Enhancer mini-carts
@@ -100,8 +127,10 @@ void nes_state::nespal(machine_config &config)
 	m_screen->set_refresh_hz(50.0070);
 	m_screen->set_vblank_time(ATTOSECONDS_IN_USEC((106.53/(PAL_APU_CLOCK.dvalue()/1000000)) *
 							 (ppu2c0x_device::VBLANK_LAST_SCANLINE_PAL-ppu2c0x_device::VBLANK_FIRST_SCANLINE+1+2)));
-	m_screen->set_size(32*8, 312);
-	m_screen->set_visarea(0*8, 32*8-1, 0*8, 30*8-1);
+	//m_screen->set_size(32*8, 312);
+	//m_screen->set_visarea(0*8, 32*8-1, 0*8, 30*8-1);
+	m_screen->set_size(256, 240);
+	m_screen->set_visarea(8, 247, 8, 231);
 }
 
 void nes_state::famicom(machine_config &config)
@@ -193,6 +222,7 @@ void nes_state::setup_disk(nes_disksys_device *slot)
 		m_ppu->set_scanline_callback(*slot, FUNC(device_nes_cart_interface::scanline_irq));
 		m_ppu->set_hblank_callback(*slot, FUNC(nes_disksys_device::hblank_irq));
 		m_ppu->set_latch(*slot, FUNC(device_nes_cart_interface::ppu_latch));
+		m_ppu->set_ppu_to_mapper(*slot, FUNC(device_nes_cart_interface::ppu_to_mapper));
 	}
 }
 
@@ -205,6 +235,7 @@ MACHINE_START_MEMBER( nes_state, fds )
 	// register saves
 	save_item(NAME(m_last_frame_flip));
 	save_pointer(NAME(m_ciram), 0x800);
+
 }
 
 MACHINE_RESET_MEMBER( nes_state, fds )
@@ -281,6 +312,8 @@ MACHINE_START_MEMBER( nes_state, famitwin )
 		// replace the famicom disk ROM with the twin famicom one (until we modernize the floppy drive)
 		m_maincpu->space(AS_PROGRAM).install_rom(0xe000, 0xffff, memregion("maincpu")->base() + 0xe000);
 	}
+	// Force scheduler quantum to 1 CPU cycle (debug/diagnostic)
+	machine().scheduler().perfect_quantum(attotime::from_ticks(1, m_maincpu->clock()*3));
 }
 
 MACHINE_RESET_MEMBER( nes_state, famitwin )
@@ -293,6 +326,8 @@ MACHINE_RESET_MEMBER( nes_state, famitwin )
 
 	// the rest is the same as for nes/famicom/dendy
 	m_maincpu->reset();
+	// Force scheduler quantum to 1 CPU cycle (debug/diagnostic)
+	//machine().scheduler().perfect_quantum(attotime::from_ticks(1, m_maincpu->clock()*3));
 }
 
 void nes_state::famitwin(machine_config &config)

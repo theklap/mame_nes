@@ -17,6 +17,8 @@ public:
 	nes_nina001_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock);
 
 	virtual void write_m(offs_t offset, u8 data) override;
+	virtual void pcb_reset() override;
+	virtual void chr_w(offs_t offset, u8 data) override;
 };
 
 

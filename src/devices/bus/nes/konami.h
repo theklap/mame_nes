@@ -59,7 +59,7 @@ private:
 
 
 // ======================> nes_konami_vrc3_device
-
+class m6502_device;
 class nes_konami_vrc3_device : public nes_nrom_device
 {
 public:
@@ -69,6 +69,7 @@ public:
 	virtual void write_h(offs_t offset, u8 data) override;
 
 	virtual void pcb_reset() override;
+	virtual void ppu_to_mapper(int scanline, unsigned dot) override;
 
 protected:
 	// device-level overrides
@@ -77,16 +78,18 @@ protected:
 	TIMER_CALLBACK_MEMBER(irq_timer_tick);
 
 private:
+	m6502_device* m_maincpu6502 = nullptr;
 	u16 m_irq_count, m_irq_count_latch;
 	int m_irq_enable, m_irq_enable_latch;
 	int m_irq_mode;
+	int m_irq_delay;
 
 	emu_timer *irq_timer;
 };
 
 
 // ======================> nes_konami_vrc4_device
-
+class m6502_device;
 class nes_konami_vrc4_device : public nes_nrom_device
 {
 public:
@@ -98,8 +101,11 @@ public:
 	virtual void write_h(offs_t offset, u8 data) override;
 
 	virtual void pcb_reset() override;
+	
+	virtual void ppu_to_mapper(int scanline, unsigned dot) override;
 
 protected:
+	m6502_device* m_maincpu6502 = nullptr;
 	// construction/destruction
 	nes_konami_vrc4_device(const machine_config &mconfig, device_type type, const char *tag, device_t *owner, u32 clock);
 
@@ -126,6 +132,7 @@ protected:
 	int m_irq_enable, m_irq_enable_latch;
 	int m_irq_mode;
 	int m_irq_prescale;
+	int m_irq_delay;
 
 	emu_timer *irq_timer;
 };
@@ -138,15 +145,21 @@ class nes_konami_vrc6_device : public nes_konami_vrc4_device
 public:
 	// construction/destruction
 	nes_konami_vrc6_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock);
-
+	virtual void pcb_reset() override;
 	virtual void write_h(offs_t offset, u8 data) override;
+	virtual u8 nt_r(offs_t offset) override;
+	virtual void nt_w(offs_t offset, u8 data) override;
 
 protected:
 	// device-level overrides
 	virtual void device_add_mconfig(machine_config &config) override;
-
+	virtual void device_start() override;
+	virtual void set_chr() override;
+	u8 vrc6_nt_bank(int nt) const;
 private:
 	required_device<vrc6snd_device> m_vrc6snd;
+	u8 m_vrc6_b003 = 0;
+	u8 m_vrc6_chr[8];
 };
 
 

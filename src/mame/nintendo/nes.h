@@ -38,10 +38,21 @@ public:
 	required_device<cpu_device> m_maincpu;
 	optional_device<nes_control_port_device> m_ctrl1;
 	optional_device<nes_control_port_device> m_ctrl2;
+	m6502_device* m_maincpu6502;
 
 	uint8_t nes_in0_r();
 	uint8_t nes_in1_r();
 	void nes_in0_w(uint8_t data);
+	
+	// DMC DMA during $4016 read causes extra $4016 read.
+	// needed so we dont go into infinite loop
+	bool first;
+	int64_t last_2016_read;
+
+	bool p1_a_pressed_edge() const { return m_p1_a_pressed_edge; }
+	void clear_p1_a_pressed_edge() { m_p1_a_pressed_edge = false; }
+	bool m_p1_a_prev = false;
+	bool m_p1_a_pressed_edge = false;
 };
 
 class nes_state : public nes_base_state
@@ -64,12 +75,14 @@ public:
 	uint8_t fc_in0_r();
 	uint8_t fc_in1_r();
 	void fc_in0_w(uint8_t data);
+
 	virtual void machine_start() override;
 	virtual void machine_reset() override;
 	virtual void video_start() override;
 	virtual void video_reset() override;
 	uint32_t screen_update_nes(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect);
 	void screen_vblank_nes(int state);
+	
 
 	void init_famicom();
 
@@ -97,7 +110,7 @@ public:
 private:
 	// video-related
 	int m_last_frame_flip = 0;
-
+	
 	// misc
 	ioport_port       *m_io_disksel = nullptr;
 

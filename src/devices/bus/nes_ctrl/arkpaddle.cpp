@@ -146,11 +146,28 @@ u8 nes_vausfc_device::read_exp(offs_t offset)
 //-------------------------------------------------
 //  write
 //-------------------------------------------------
-
+//Lock the inputs to be between 62 and F2
 void nes_vaus_device::write(u8 data)
 {
 	if (write_strobe(data))
-		m_latch = ~m_paddle->read();
+	{
+		u16 raw = m_paddle->read() & 0x1ff;
+
+		const u16 in_min  = 0x090;
+		const u16 in_max  = 0x1D0;
+		const u8  out_min = 0x62;
+		const u8  out_max = 0xF2;
+
+		if (raw < in_min)
+			raw = in_min;
+		else if (raw > in_max)
+			raw = in_max;
+
+		u8 target = out_min + ((raw - in_min) * (out_max - out_min)) / (in_max - in_min);
+
+		// ROM reads bits 8..1, then inverts
+		m_latch = (u16((~target) & 0xff) << 1);
+	}
 }
 
 void nes_vausfc_device::write(u8 data)
