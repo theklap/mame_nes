@@ -333,7 +333,6 @@ void nesapu_device::device_start()
 		m_APU.pulse[n].vol = 0;
 
 		m_APU.pulse[n].halt_len_loop_env = false;
-		m_APU.pulse[n].envelope_loop = false;
 		m_APU.pulse[n].env_start_flag = false;
 
 		m_APU.pulse[n].sweep_target_period = 0;
@@ -442,7 +441,6 @@ void nesapu_device::device_start()
 		save_item(NAME(m_APU.pulse[i].sweep_reload_flag), i);
 		save_item(NAME(m_APU.pulse[i].vol), i);
 		save_item(NAME(m_APU.pulse[i].halt_len_loop_env), i);
-		save_item(NAME(m_APU.pulse[i].envelope_loop), i);
 		save_item(NAME(m_APU.pulse[i].env_start_flag), i);
 
 		save_item(NAME(m_APU.pulse[i].sweep_target_period), i);
@@ -2132,7 +2130,7 @@ void nesapu_device::clock_env_and_tri_lin()
 
 				if (m_APU.pulse[n].env_vol > 0)
 					--m_APU.pulse[n].env_vol;
-				else if (m_APU.pulse[n].envelope_loop)
+				else if (m_APU.pulse[n].halt_len_loop_env)
 					m_APU.pulse[n].env_vol = 15;
 			}
 			else
@@ -2560,9 +2558,6 @@ void nesapu_device::write(offs_t offset, u8 value)
 		/* squares */
 		case apu_t::WRA0: //$4000 / $4004	DDLC VVVV	Duty (D), envelope loop / length counter halt (L), constant volume (C), volume/envelope (V)
 		case apu_t::WRB0: // $4004
-		{
-			const bool bit5 = (value & 0x20) != 0;
-
 			// Bits 7:6 select the pulse duty sequence.
 			m_APU.pulse[chan].duty = (value >> 6) & 0x03;
 
@@ -2572,25 +2567,20 @@ void nesapu_device::write(offs_t offset, u8 value)
 			// Low 4 bits are the constant volume value or envelope divider period.
 			m_APU.pulse[chan].vol = value & 0x0F;
 
-			// Bit 5 has two effects:
-			//   - length counter halt
-			//   - envelope loop
-			//
-			// The length-halt effect is delayed for 10.len_halt_timing.
-			// Do not delay the envelope-loop latch through that same path.
-			m_APU.pulse[chan].envelope_loop = bit5;
-
+			// Bit 5 controls envelope looping / length counter halt.
+			// In this core, apply that control change one APU cycle later
+			// to match your delayed halt timing behavior.
 			if (chan == 0) {
-				temp_halt_len_loop_env_0 = bit5;
+				temp_halt_len_loop_env_0 = (value & 0x20) != 0;
 				delay_halt_len_loop_0 = 2;
 			} else {
-				temp_halt_len_loop_env_1 = bit5;
+				temp_halt_len_loop_env_1 = (value & 0x20) != 0;
 				delay_halt_len_loop_1 = 2;
 			}
 
+			// Refresh output state in case gating changes immediately.
 			update_pulse_output_level(chan);
 			break;
-		}
 
 		case apu_t::WRA1: // $4001
 		case apu_t::WRB1: // $4005
