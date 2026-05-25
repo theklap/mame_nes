@@ -96,3 +96,6 @@ This work is focused on hardware-shaped behavior rather than game-specific hacks
 ## Acknowledgements
 
 This work was guided by NESdev documentation, hardware behavior research, test ROMs, and commercial game testing.
+
+Build with:
+make SUBTARGET=nes SOURCES=src\mame\nintendo\nes.cpp
