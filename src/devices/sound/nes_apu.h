@@ -230,7 +230,7 @@ private:
 	devcb_write_line m_irq_handler;
 	devcb_read8      m_mem_read_cb;
 
-	static constexpr u32 OUT_FIFO_SIZE = 65536;
+	static constexpr u32 OUT_FIFO_SIZE = 2048;
 
 	stream_buffer::sample_t m_hp90_prev_in;
 	stream_buffer::sample_t m_hp90_prev_out;
@@ -250,6 +250,8 @@ private:
 	u64 m_resample_step;
 
 	bool m_output_dirty;
+	uint64_t m_audio_fifo_overflows = 0;
+	uint64_t m_audio_fifo_underflows = 0;
 	stream_buffer::sample_t m_cached_output;
 
 	stream_buffer::sample_t m_square_lut[31];

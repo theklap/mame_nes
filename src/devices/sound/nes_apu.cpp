@@ -71,6 +71,8 @@ void nesapu_device::device_stop()
 		osd_printf_info("\tExplicit DMA Abort Detected: Case -1 = %d\n", detect_abort_1);
 		osd_printf_info("\tExplicit DMA Abort Detected: Case -2 or -3 = %d\n", detect_abort_2_3);
 		osd_printf_info("\tImplicit DMA Abort Detected: Case -8 or -9 = %d\n", detect_abort_8_9);
+		osd_printf_info("\tAudio FIFO overflows = %llu\n", (unsigned long long)m_audio_fifo_overflows);
+		osd_printf_info("\tAudio FIFO underflows = %llu\n", (unsigned long long)m_audio_fifo_underflows);
 	}
 }
 
@@ -331,6 +333,7 @@ void nesapu_device::device_start()
 		m_APU.pulse[n].vol = 0;
 
 		m_APU.pulse[n].halt_len_loop_env = false;
+		m_APU.pulse[n].envelope_loop = false;
 		m_APU.pulse[n].env_start_flag = false;
 
 		m_APU.pulse[n].sweep_target_period = 0;
@@ -439,6 +442,7 @@ void nesapu_device::device_start()
 		save_item(NAME(m_APU.pulse[i].sweep_reload_flag), i);
 		save_item(NAME(m_APU.pulse[i].vol), i);
 		save_item(NAME(m_APU.pulse[i].halt_len_loop_env), i);
+		save_item(NAME(m_APU.pulse[i].envelope_loop), i);
 		save_item(NAME(m_APU.pulse[i].env_start_flag), i);
 
 		save_item(NAME(m_APU.pulse[i].sweep_target_period), i);
@@ -2128,7 +2132,7 @@ void nesapu_device::clock_env_and_tri_lin()
 
 				if (m_APU.pulse[n].env_vol > 0)
 					--m_APU.pulse[n].env_vol;
-				else if (m_APU.pulse[n].halt_len_loop_env)
+				else if (m_APU.pulse[n].envelope_loop)
 					m_APU.pulse[n].env_vol = 15;
 			}
 			else
@@ -2250,13 +2254,6 @@ void nesapu_device::clock_len_and_sweep()
 // APU put/get boundary.
 bool nesapu_device::frame_unit_clock_allowed()
 {
-	// Hardware-ish pulse coalescing.
-	//
-	// The frame units are driven by quarter/half-frame pulse lines.
-	// A normal frame-counter decode and a delayed $4017 reset can both try
-	// to assert those pulse lines around the same CPU/APU boundary.
-	//
-	// Coalesce by APU cycle instead of using a magic 2:1 or 3:2 countdown.
 	const uint64_t apu_cycle = uint64_t(cpu_cycle) >> 1;
 
 	return last_frame_unit_pulse_apu_cycle != apu_cycle;
@@ -2264,10 +2261,6 @@ bool nesapu_device::frame_unit_clock_allowed()
 
 void nesapu_device::arm_frame_unit_clock_block()
 {
-	// Mark this APU cycle as having already emitted a frame-unit pulse.
-	//
-	// This replaces:
-	//     frame_unit_clock_block_until = apu_clk1_is_high ? 2 : 1;
 	const uint64_t apu_cycle = uint64_t(cpu_cycle) >> 1;
 
 	last_frame_unit_pulse_apu_cycle = apu_cycle;
@@ -2567,6 +2560,9 @@ void nesapu_device::write(offs_t offset, u8 value)
 		/* squares */
 		case apu_t::WRA0: //$4000 / $4004	DDLC VVVV	Duty (D), envelope loop / length counter halt (L), constant volume (C), volume/envelope (V)
 		case apu_t::WRB0: // $4004
+		{
+			const bool bit5 = (value & 0x20) != 0;
+
 			// Bits 7:6 select the pulse duty sequence.
 			m_APU.pulse[chan].duty = (value >> 6) & 0x03;
 
@@ -2576,20 +2572,25 @@ void nesapu_device::write(offs_t offset, u8 value)
 			// Low 4 bits are the constant volume value or envelope divider period.
 			m_APU.pulse[chan].vol = value & 0x0F;
 
-			// Bit 5 controls envelope looping / length counter halt.
-			// In this core, apply that control change one APU cycle later
-			// to match your delayed halt timing behavior.
+			// Bit 5 has two effects:
+			//   - length counter halt
+			//   - envelope loop
+			//
+			// The length-halt effect is delayed for 10.len_halt_timing.
+			// Do not delay the envelope-loop latch through that same path.
+			m_APU.pulse[chan].envelope_loop = bit5;
+
 			if (chan == 0) {
-				temp_halt_len_loop_env_0 = (value & 0x20) != 0;
+				temp_halt_len_loop_env_0 = bit5;
 				delay_halt_len_loop_0 = 2;
 			} else {
-				temp_halt_len_loop_env_1 = (value & 0x20) != 0;
+				temp_halt_len_loop_env_1 = bit5;
 				delay_halt_len_loop_1 = 2;
 			}
 
-			// Refresh output state in case gating changes immediately.
 			update_pulse_output_level(chan);
 			break;
+		}
 
 		case apu_t::WRA1: // $4001
 		case apu_t::WRB1: // $4005
@@ -2627,7 +2628,10 @@ void nesapu_device::write(offs_t offset, u8 value)
 		case apu_t::WRA3:
 		case apu_t::WRB3: // $4003 / $4007
 			// If the channel is enabled, reload the length counter from bits 7:3.
-			// In this core, the length reload is applied one APU cycle later.
+			// Schedule the length reload through the delayed register-effect path.
+			// delay = 2 means it will not commit on the current post-write tick;
+			// it can land on the next APU tick before the frame length clock.
+			// This is needed for 11.len_reload_timing edge cases.
 			if (m_APU.pulse[chan].enabled) {
 				if (chan == 0) {
 					temp_len_cnt_0_reload_value = len_table[(value >> 3) & 0x1F];
@@ -2649,10 +2653,9 @@ void nesapu_device::write(offs_t offset, u8 value)
 			m_APU.pulse[chan].env_start_flag = true;
 
 			// Refresh sweep/output state after the timer update.
-			//if (!m_APU.pulse[chan].enabled) {
-				update_sweep_target_period(chan);
-				update_pulse_output_level(chan);
-			//}
+			update_sweep_target_period(chan);
+			update_pulse_output_level(chan);
+
 			break;
 
 		/* triangle */
@@ -2817,7 +2820,7 @@ void nesapu_device::write(offs_t offset, u8 value)
 				frame_irq_suppress_clear_cycle = 0;
 				update_irq_output();
 			}
-			
+
 			// The frame counter reset does not happen immediately.
 			// It takes effect after either 3 or 4 CPU cycles depending on the
 			// current CPU/APU phase, so schedule the delayed reset here.
@@ -2832,12 +2835,25 @@ void nesapu_device::write(offs_t offset, u8 value)
 			if (dmc_irq)
 				set_dmc_irq(false);
 			
-			for (int n = 0; n < 2; ++n) {
+			/*for (int n = 0; n < 2; ++n) {
 				m_APU.pulse[n].enabled = (value & (1 << n)) != 0;
 				if (!m_APU.pulse[n].enabled) {
 					m_APU.pulse[n].len_cnt = 0;
 					update_pulse_output_level(n);
 				}
+			}*/
+			for (int n = 0; n < 2; ++n)
+			{
+				const bool old_enabled = m_APU.pulse[n].enabled;
+				const bool new_enabled = (value & (1 << n)) != 0;
+
+				m_APU.pulse[n].enabled = new_enabled;
+
+				if (!new_enabled)
+					m_APU.pulse[n].len_cnt = 0;
+
+				if (old_enabled != new_enabled || !new_enabled)
+					update_pulse_output_level(n);
 			}
 
 			tri_enabled = (value & 0x04) != 0;
@@ -3372,8 +3388,10 @@ void nesapu_device::push_out_sample(stream_buffer::sample_t sample)
 {
 	const uint32_t next_w = (m_out_fifo_w + 1) % OUT_FIFO_SIZE;
 
-	if (next_w == m_out_fifo_r)
+	if (next_w == m_out_fifo_r) {
+		 ++m_audio_fifo_overflows;
 		m_out_fifo_r = (m_out_fifo_r + 1) % OUT_FIFO_SIZE;
+	}
 
 	m_out_fifo[m_out_fifo_w] = sample;
 	m_out_fifo_w = next_w;
@@ -3383,6 +3401,7 @@ void nesapu_device::push_out_sample(stream_buffer::sample_t sample)
 bool nesapu_device::pop_out_sample(stream_buffer::sample_t &sample)
 {
 	if (m_out_fifo_r == m_out_fifo_w) {
+		++m_audio_fifo_underflows;
 		return false;
 	}
 

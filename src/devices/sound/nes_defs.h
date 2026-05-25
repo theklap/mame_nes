@@ -64,6 +64,7 @@ struct apu_t
 		unsigned env_div_cnt;
 		unsigned env_vol;
 		bool     halt_len_loop_env;
+		bool 	 envelope_loop;
 		bool     env_start_flag;
 		
 		u8 output = 0;
