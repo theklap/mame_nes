@@ -1331,12 +1331,6 @@ void ppu2c0x_device::tick() {
 		}
 	}
 	
-	if(skip_dot && scanline == 0 && dot == 0) {
-		dot++;
-		skip_dot=false;
-		screen().reset_origin(scanline, dot);
-	}
-	
 	switch (scanline) {
 		case 0 ... 239     : run_visible_scanline_dot();   	break;
 		case 241           : run_scanline_241_dot();       	break;
@@ -1364,17 +1358,23 @@ void ppu2c0x_device::tick() {
 			ppu2007_post_bump_delay = 0;
 		}
 	}
-	
-	// Odd-frame skip: skip dot 340, not 339
-	//337 for no 2001 delay - 338
-	//338 for 1 ppu cycle delay - 339
-	//339 for 2 ppu cycle delay - 340
-	if (scanline == 261 && dot == 340 && odd_frame && (bg_pipeline_enabled || spr_pipeline_enabled)) { //(bg_pipeline_enabled || spr_pipeline_enabled)  (bg_output_enabled || spr_output_enabled)
-		skip_dot=true;
+		
+	// Odd-frame skip.
+	// At this point the current dot's work has already executed.
+	// If we are sitting at prerender dot 340 on an odd rendered frame,
+	// skip the normal dot++/wrap path and jump straight to scanline 0 dot 0.
+	if (scanline == 261 && dot == 339 && odd_frame && (bg_pipeline_enabled || spr_pipeline_enabled)) {
 		sprite_sl0_early_shift_pending = true;   // applies to scanline 0, pixel 0
-	}
 
-	++dot;	
+		dot = 0;
+		scanline = 0;
+		suppress_vblank_flag = false;
+		odd_frame = !odd_frame;
+		screen().reset_origin(scanline, dot);
+		frame++;
+	} else {
+		++dot;
+	}
 
 	// Rendering $2007 reads mature at the start of the tick, but must not be
 	// filled by bus reads that already occurred during this same dot. Arm the
@@ -3512,7 +3512,7 @@ void ppu2c0x_device::write(offs_t offset, uint8_t val)
 			// Delay pipeline/render-domain change by 3 PPU cycles.
 			pending_2001.has_pending = true;
 			pending_2001.value       = val;
-			pending_2001.apply_ppu   = 3;
+			pending_2001.apply_ppu   = 2;
 
 			// Output OFF is immediate.
 			// Output ON is delayed and happens in apply_delayed_2001() with the pipe.

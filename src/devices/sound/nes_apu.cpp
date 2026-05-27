@@ -276,10 +276,10 @@ void nesapu_device::device_start()
 	// --------------------------------------------------
 
 	dmc_period = dmc_periods[0];
-	dmc_period_cnt = dmc_period - 1;
+	dmc_period_cnt = dmc_period;
 
 	noise_period = noise_periods[0];
-	noise_period_cnt = noise_period - 1;
+	noise_period_cnt = noise_period + 1;
 
 	// --------------------------------------------------
 	// Mixer lookup tables.
@@ -799,7 +799,7 @@ void nesapu_device::device_reset()
 	// --------------------------------------------------
 
 	noise_enabled = false;
-	noise_period_cnt = noise_period - 1;
+	noise_period_cnt = noise_period + 1;
 	noise_len_cnt = 0;
 
 	noise_env_start_flag = false;
@@ -822,7 +822,7 @@ void nesapu_device::device_reset()
 	// output unit so no stale DMA transaction survives into the next test.
 	// --------------------------------------------------
 
-	dmc_period_cnt = dmc_period - 1;
+	dmc_period_cnt = dmc_period;
 
 	dmc_sample_cur_addr = 0x0000;//dmc_sample_start_addr;
 	dmc_bytes_remaining = 0;
@@ -1107,50 +1107,42 @@ void nesapu_device::tick() {
 		update_irq_output();
 	}
 	
-	// Pulse
-	if (!apu_clk1_is_high) {
-		if (m_APU.pulse[0].period_cnt == 0)	{
-			m_APU.pulse[0].period_cnt = m_APU.pulse[0].period;
+	// Pulse timers tick on every other CPU/APU cycle.
+	if (!apu_clk1_is_high)
+	{
+		if (--m_APU.pulse[0].period_cnt == 0)
+		{
+			m_APU.pulse[0].period_cnt = m_APU.pulse[0].period + 1;
 			clock_pulse_generator(0);
 		}
-		else {
-			--m_APU.pulse[0].period_cnt;
-		}
 
-		if (m_APU.pulse[1].period_cnt == 0) {
-			m_APU.pulse[1].period_cnt = m_APU.pulse[1].period;
+		if (--m_APU.pulse[1].period_cnt == 0)
+		{
+			m_APU.pulse[1].period_cnt = m_APU.pulse[1].period + 1;
 			clock_pulse_generator(1);
 		}
-		else {
-			--m_APU.pulse[1].period_cnt;
-		}
-	}
-	
-	// Triangle timer ticks every CPU/APU tick.
-	if (tri_period_cnt == 0)
-	{
-		tri_period_cnt = tri_period;
-		clock_triangle_generator();
-	}
-	else
-	{
-		--tri_period_cnt;
-	}
-	
-	// Noise
-	if (noise_period_cnt == 0) {
-		noise_period_cnt = noise_period - 1;
-		clock_noise_generator();
-	} else {
-		--noise_period_cnt;
 	}
 
-	// DMC
-	if (dmc_period_cnt == 0) {
-		dmc_period_cnt = dmc_period - 1;
+	// Triangle timer ticks every CPU/APU cycle.
+	if (--tri_period_cnt == 0)
+	{
+		tri_period_cnt = tri_period + 1;
+		clock_triangle_generator();
+	}
+
+	// Noise timer.
+	if (--noise_period_cnt == 0)
+	{
+		noise_period_cnt = noise_period + 1;
+		clock_noise_generator();
+	}
+
+	// DMC timer.
+	// DMC period table values are already the full countdown interval.
+	if (--dmc_period_cnt == 0)
+	{
+		dmc_period_cnt = dmc_period;
 		clock_dmc();
-	} else {
-		--dmc_period_cnt;
 	}
 
 	// If $4011 did not collide with a DMC output clock this APU tick,
@@ -1162,7 +1154,92 @@ void nesapu_device::tick() {
 	// Mixing
 	// Latch exactly one mixed output sample for this APU tick, then let the
 	// sound stream consume latched history instead of re-synthesizing "now".
-	accumulate_output_sample(calc_current_output());
+//	accumulate_output_sample(calc_current_output());
+	
+// Mixing
+// Latch exactly one mixed output sample for this APU tick, then let the
+// sound stream consume latched history instead of re-synthesizing "now".
+const auto mixed = calc_current_output();
+
+static bool mix_jump_initialized = false;
+static stream_buffer::sample_t last_mixed = 0.0;
+static uint64_t last_mix_jump_log_cycle = 0;
+
+if (!mix_jump_initialized)
+{
+	mix_jump_initialized = true;
+	last_mixed = mixed;
+	accumulate_output_sample(mixed);
+}
+else
+{
+	const auto diff = std::abs(mixed - last_mixed);
+
+	if (cpu_cycle >= 1000 &&
+		diff > stream_buffer::sample_t(0.20) &&
+		cpu_cycle - last_mix_jump_log_cycle > 1000)
+	{
+		last_mix_jump_log_cycle = cpu_cycle;
+
+		logerror("APU MIX JUMP cpu=%lld diff=%f mix=%f last=%f frame=%u "
+		         "P0 out=%d len=%d per=%d cnt=%d duty=%d pos=%d env=%d vol=%d const=%d halt=%d "
+		         "P1 out=%d len=%d per=%d cnt=%d duty=%d pos=%d env=%d vol=%d const=%d halt=%d "
+		         "TRI out=%d len=%d lin=%d per=%d cnt=%d pos=%d "
+		         "NOI out=%d len=%d per=%d cnt=%d env=%d vol=%d "
+		         "DMC ctr=%d bytes=%d buf=%d active=%d bits=%d\n",
+			(long long)cpu_cycle,
+			double(diff),
+			double(mixed),
+			double(last_mixed),
+			frame_counter_clock,
+
+			m_APU.pulse[0].output_level,
+			m_APU.pulse[0].len_cnt,
+			m_APU.pulse[0].period,
+			m_APU.pulse[0].period_cnt,
+			m_APU.pulse[0].duty,
+			m_APU.pulse[0].waveform_pos,
+			m_APU.pulse[0].env_vol,
+			m_APU.pulse[0].vol,
+			m_APU.pulse[0].const_vol ? 1 : 0,
+			m_APU.pulse[0].halt_len_loop_env ? 1 : 0,
+
+			m_APU.pulse[1].output_level,
+			m_APU.pulse[1].len_cnt,
+			m_APU.pulse[1].period,
+			m_APU.pulse[1].period_cnt,
+			m_APU.pulse[1].duty,
+			m_APU.pulse[1].waveform_pos,
+			m_APU.pulse[1].env_vol,
+			m_APU.pulse[1].vol,
+			m_APU.pulse[1].const_vol ? 1 : 0,
+			m_APU.pulse[1].halt_len_loop_env ? 1 : 0,
+
+			tri_output_level,
+			tri_len_cnt,
+			tri_lin_cnt,
+			tri_period,
+			tri_period_cnt,
+			tri_waveform_pos,
+
+			noise_output_level,
+			noise_len_cnt,
+			noise_period,
+			noise_period_cnt,
+			noise_env_vol,
+			noise_vol,
+
+			dmc_counter,
+			dmc_bytes_remaining,
+			dmc_sample_buffer_has_data ? 1 : 0,
+			dpcm_active ? 1 : 0,
+			dmc_bits_remaining);
+	}
+
+	last_mixed = mixed;
+	accumulate_output_sample(mixed);
+}
+	
 	//m_stream->update();
 	//if (m_output_dirty)
 	//{
@@ -1251,7 +1328,7 @@ void nesapu_device::tick_mmc5_audio()
 		{
 			if (m_APU.pulse[n].period_cnt == 0)
 			{
-				m_APU.pulse[n].period_cnt = m_APU.pulse[n].period;
+				m_APU.pulse[n].period_cnt = m_APU.pulse[n].period + 1;
 				clock_pulse_generator(n);
 			}
 			else
@@ -2627,6 +2704,23 @@ void nesapu_device::write(offs_t offset, u8 value)
 
 		case apu_t::WRA3:
 		case apu_t::WRB3: // $4003 / $4007
+logerror("APU PULSE%d WRITE $%04X value=%02X cpu=%lld frame=%u "
+	         "BEFORE len=%d per=%d cnt=%d duty=%d pos=%d env=%d vol=%d out=%d enabled=%d\n",
+		chan,
+		(chan == 0) ? 0x4003 : 0x4007,
+		value,
+		(long long)cpu_cycle,
+		frame_counter_clock,
+		m_APU.pulse[chan].len_cnt,
+		m_APU.pulse[chan].period,
+		m_APU.pulse[chan].period_cnt,
+		m_APU.pulse[chan].duty,
+		m_APU.pulse[chan].waveform_pos,
+		m_APU.pulse[chan].env_vol,
+		m_APU.pulse[chan].vol,
+		m_APU.pulse[chan].output_level,
+		m_APU.pulse[chan].enabled ? 1 : 0);
+
 			// If the channel is enabled, reload the length counter from bits 7:3.
 			// Schedule the length reload through the delayed register-effect path.
 			// delay = 2 means it will not commit on the current post-write tick;
@@ -2654,7 +2748,7 @@ void nesapu_device::write(offs_t offset, u8 value)
 
 			// Refresh sweep/output state after the timer update.
 			update_sweep_target_period(chan);
-			update_pulse_output_level(chan);
+			//update_pulse_output_level(chan);
 
 			break;
 
