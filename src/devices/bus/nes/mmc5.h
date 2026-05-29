@@ -35,7 +35,7 @@ public:
 	//virtual void hblank_irq(int scanline, bool vblank, bool blanked) override;
 	virtual void pcb_reset() override;
 	
-	virtual void ppu_to_mapper(int scanline, unsigned dot) override;
+	virtual void ppu_to_mapper(int scanline, unsigned dot, int ppu_tick) override;
 	void mmc5_cpu_cycle();
 	void mmc5_end_frame();
 	void mmc5_clock_ppu_read(offs_t ppu_addr_bus, bool is_nt_fetch, bool is_at_fetch, bool is_bg_pattern, bool is_spr_pattern);

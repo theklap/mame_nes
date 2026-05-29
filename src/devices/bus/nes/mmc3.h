@@ -24,7 +24,7 @@ public:
 	virtual void chr_cb(int start, int bank, int source);
 
 	//virtual void hblank_irq(int scanline, bool vblank, bool blanked) override;
-	virtual void ppu_to_mapper(int scanline, unsigned dot) override;	//called from ppu
+	virtual void ppu_to_mapper(int scanline, unsigned dot, int ppu_tick) override;	//called from ppu
 	void observe_ppu_a12(uint16_t ppu_addr, uint64_t cpu_cycles);		//called from ppu
 	
 	virtual void pcb_reset() override;

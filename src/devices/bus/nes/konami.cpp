@@ -387,7 +387,7 @@ TIMER_CALLBACK_MEMBER(nes_konami_vrc3_device::irq_timer_tick)
 	}
 }
 
-void nes_konami_vrc3_device::ppu_to_mapper(int scanline, unsigned dot) {
+void nes_konami_vrc3_device::ppu_to_mapper(int scanline, unsigned dot, int ppu_tick) {
 	if (m_irq_delay > 0)
 	{
 		--m_irq_delay;
@@ -451,7 +451,7 @@ void nes_konami_vrc3_device::write_h(offs_t offset, u8 data)
  In MAME: Supported
 
  -------------------------------------------------*/
-void nes_konami_vrc4_device::ppu_to_mapper(int scanline, unsigned dot) {
+void nes_konami_vrc4_device::ppu_to_mapper(int scanline, unsigned dot, int ppu_tick) {
 	if (m_irq_delay > 0)
 	{
 		--m_irq_delay;

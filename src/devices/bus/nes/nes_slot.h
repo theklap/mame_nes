@@ -255,7 +255,7 @@ public:
 	uint32_t get_misc_rom_size() const { return m_misc_rom_size; }
 
 	virtual void ppu_latch(offs_t offset) {}
-	virtual void ppu_to_mapper(int scanline, unsigned dot) {}
+	virtual void ppu_to_mapper(int scanline, unsigned dot, int ppu_tick) {}
 	
 	virtual void hblank_irq(int scanline, bool vblank, bool blanked) {}
 	virtual void scanline_irq(int scanline, bool vblank, bool blanked) {}

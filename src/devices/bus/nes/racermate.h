@@ -20,7 +20,7 @@ public:
 	// device-level overrides
 	virtual void device_start() override;
 	virtual void write_h(offs_t offset, uint8_t data) override;
-	virtual void ppu_to_mapper(int scanline, unsigned dot) override;
+	virtual void ppu_to_mapper(int scanline, unsigned dot, int ppu_tick) override;
 
 	virtual void pcb_reset() override;
 

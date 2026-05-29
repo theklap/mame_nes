@@ -508,7 +508,7 @@ void nes_exrom_device::mmc5_reset_scanline_irq_state()
 	}
 }
 
-void nes_exrom_device::ppu_to_mapper(int scanline, unsigned dot)
+void nes_exrom_device::ppu_to_mapper(int scanline, unsigned dot, int ppu_tick)
 {
 	bool queue_irq = false;
 

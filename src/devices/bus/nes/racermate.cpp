@@ -203,7 +203,7 @@ void nes_racermate_device::clock_irq_counter()
 }
 
 
-void nes_racermate_device::ppu_to_mapper(int scanline, unsigned dot)
+void nes_racermate_device::ppu_to_mapper(int scanline, unsigned dot, int ppu_tick)
 {
 	if (m_irq_delay > 0)
 	{

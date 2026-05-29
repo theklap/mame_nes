@@ -245,7 +245,7 @@ private:
 	u64 m_resample_phase;
 	u64 m_resample_step;
 
-	bool m_output_dirty;
+	//bool m_output_dirty;
 	uint64_t m_audio_fifo_overflows = 0;
 	uint64_t m_audio_fifo_underflows = 0;
 	stream_buffer::sample_t m_cached_output;

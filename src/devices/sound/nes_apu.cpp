@@ -112,7 +112,6 @@ void nesapu_device::device_start()
 	m_resample_step = 0;
 
 	m_cached_output = 0.0;
-	m_output_dirty = true;
 
 	cpu_cycle = 0;
 	apu_clk1_is_high = false;
@@ -156,7 +155,7 @@ void nesapu_device::device_start()
 	dmc_4015_load_defer_delay = 0;
 	
 	//dmc_4011_write_pending = false;
-	dmc_4011_old_counter = 0;
+	//dmc_4011_old_counter = 0;
 
 	detect_abort_1 = 0;
 	detect_abort_2_3 = 0;
@@ -462,7 +461,6 @@ void nesapu_device::device_start()
 	
 	save_item(NAME(run_ppu));
 	save_item(NAME(m_cached_output));
-	save_item(NAME(m_output_dirty));
 
 	save_item(NAME(tri_enabled));
 	save_item(NAME(tri_period_cnt));
@@ -519,7 +517,7 @@ void nesapu_device::device_start()
 	save_item(NAME(dmc_4015_load_defer_pending));
 	save_item(NAME(dmc_4015_load_defer_delay));
 	//save_item(NAME(dmc_4011_write_pending));
-	save_item(NAME(dmc_4011_old_counter));
+	//save_item(NAME(dmc_4011_old_counter));
 	save_item(NAME(m_dmc_cpu_bus_latch));
 
 	save_item(NAME(delayed_frame_timer_reset));
@@ -605,7 +603,6 @@ void nesapu_device::device_start()
 	m_output_accum = 0.0;
 
 	m_cached_output = 0.0;
-	m_output_dirty = true;
 }
 
 void nesapu_device::device_reset()
@@ -664,7 +661,6 @@ void nesapu_device::device_reset()
 	m_resample_phase = 0;
 
 	m_cached_output = 0.0;
-	m_output_dirty = true;
 
 	// --------------------------------------------------
 	// Debug/stat counters
@@ -782,7 +778,7 @@ void nesapu_device::device_reset()
 	dmc_4015_load_defer_delay = 0;
 	
 	//dmc_4011_write_pending = false;
-	dmc_4011_old_counter = 0;
+	//dmc_4011_old_counter = 0;
 
 	// --------------------------------------------------
 	// Frame counter / IRQ reset behavior.
@@ -864,7 +860,6 @@ void nesapu_device::device_reset()
 	update_irq_output();
 
 	m_cached_output = 0.0;
-	m_output_dirty = true;
 	
 	dma_engine_reset();
 }
@@ -986,7 +981,6 @@ void nesapu_device::tick() {
 	if (delayed_frame_irq_clear > 0 && --delayed_frame_irq_clear == 0) {
 		frame_irq = false;
 		frame_irq_output = false;
-		//frame_irq_no_clear_before = 0;
 
 		// Cancel any pending frame IRQ output publication.
 		delayed_frame_irq = 0;
@@ -1013,7 +1007,6 @@ void nesapu_device::tick() {
 	if (frame_irq_suppress_clear_cycle > 0 && --frame_irq_suppress_clear_cycle == 0) {
 		frame_irq = false;
 		frame_irq_output = false;
-		//frame_irq_no_clear_before = 0;
 		// Cancel any pending frame IRQ output publication.
 		delayed_frame_irq = 0;
 		delayed_frame_irq_after_dmc = false;
@@ -1060,28 +1053,12 @@ void nesapu_device::tick() {
 		clock_dmc();
 	}
 
-	// If $4011 did not collide with a DMC output clock this APU tick,
-	// clear the marker before mixing. The counter was already loaded immediately
-	// by the $4011 write handler.
-	//if (dmc_4011_write_pending)
-	//	dmc_4011_write_pending = false;
-
 	// Mixing
 	// Latch exactly one mixed output sample for this APU tick, then let the
 	// sound stream consume latched history instead of re-synthesizing "now".
 	accumulate_output_sample(calc_current_output());
 	
-	//m_stream->update();
-	//if (m_output_dirty)
-	//{
-	//	m_cached_output = calc_current_output();
-	//	m_output_dirty = false;
-	//}
-
-	//accumulate_output_sample(m_cached_output);
-
-	//apu_cycle++;
-	
+		
 	// Clock the PPU from the APU/CPU tick stream.
 	//
 	// Boot edge case:
@@ -1095,9 +1072,9 @@ void nesapu_device::tick() {
 	}
 	else
 	{
-		m_ppu_dev->tick();
-		m_ppu_dev->tick();
-		m_ppu_dev->tick();
+		m_ppu_dev->tick(1);
+		m_ppu_dev->tick(2);
+		m_ppu_dev->tick(3);
 	}
 }
 
@@ -1850,28 +1827,15 @@ void nesapu_device::dma_engine_finish_dmc_read()
 
 
 void nesapu_device::clock_dmc() {
-	
-	// If $4011 wrote the DAC on the same APU tick that the DMC output unit clocks,
-	// model the DMC clock as operating from the pre-write counter value.
-	//
-	// This keeps normal $4011 writes immediate while preventing a same-tick write
-	// from cleanly overriding the DMC delta step.
-	//if (dmc_4011_write_pending) {
-	//	dmc_counter = dmc_4011_old_counter;
-	//	dmc_4011_write_pending = false;
-	//}
-	
 	if (dpcm_active) {
 		if (dmc_shift_reg & 1) {
 			if (dmc_counter < 126) {
 				dmc_counter += 2;
-				m_output_dirty = true;
 			}
 		}
 		else {
 			if (dmc_counter > 1) {
 				dmc_counter -= 2;
-				m_output_dirty = true;
 			}
 		}
 
@@ -1914,25 +1878,9 @@ void nesapu_device::clock_triangle_generator()
 {
 	if (tri_len_cnt > 0 && tri_lin_cnt > 0)
 	{
-		//if (tri_period <= 1)
-		//{
-		//	if (tri_output_level != 0)
-		//	{
-		//		tri_output_level = 0;
-		//		m_output_dirty = true;
-		//	}
-		//	return;
-		//}
-
 		tri_waveform_pos = (tri_waveform_pos + 1) & 0x1f;
 
-		const uint8_t new_output = tri_waveform_steps[tri_waveform_pos];
-
-		if (tri_output_level != new_output)
-		{
-			tri_output_level = new_output;
-			m_output_dirty = true;
-		}
+		tri_output_level = tri_waveform_steps[tri_waveform_pos];
 	}
 }
 
@@ -2196,31 +2144,19 @@ void nesapu_device::clock_pulse_generator(unsigned n)
 void nesapu_device::update_pulse_output_level(unsigned n) 
 {
 	const bool sweep_mutes = (m_APU.pulse[n].sweep_target_period > 0x7FF);
-
 	const bool period_mutes = (m_APU.pulse[n].period < 8);
 
-	if (m_APU.pulse[n].len_cnt == 0 || 
-		period_mutes ||
-		!pulse_duties[m_APU.pulse[n].duty][m_APU.pulse[n].waveform_pos] || 
-		sweep_mutes)
-	{
-		if (m_APU.pulse[n].output_level != 0)
-		{
-			m_APU.pulse[n].output_level = 0;
-			m_output_dirty = true;
-		}
-	} 
-	else
-	{
-		const uint8_t new_output =
-			m_APU.pulse[n].const_vol ? m_APU.pulse[n].vol : m_APU.pulse[n].env_vol;
+	uint8_t new_output = 0;
 
-		if (m_APU.pulse[n].output_level != new_output)
-		{
-			m_APU.pulse[n].output_level = new_output;
-			m_output_dirty = true;
-		}
+	if (m_APU.pulse[n].len_cnt != 0 &&
+		!period_mutes &&
+		pulse_duties[m_APU.pulse[n].duty][m_APU.pulse[n].waveform_pos] &&
+		!sweep_mutes)
+	{
+		new_output = m_APU.pulse[n].const_vol ? m_APU.pulse[n].vol : m_APU.pulse[n].env_vol;
 	}
+
+	m_APU.pulse[n].output_level = new_output;
 }
 
 void nesapu_device::update_sweep_target_period(unsigned n) {
@@ -2232,13 +2168,6 @@ void nesapu_device::update_sweep_target_period(unsigned n) {
     m_APU.pulse[n].sweep_target_period = (int)m_APU.pulse[n].period + addition;
 }
 
-/*void nesapu_device::update_noise_output_level() {
-	noise_output_level = 
-		(noise_len_cnt == 0 || !(noise_shift_reg & 1)) ? 
-		0 : 
-		(noise_const_vol ? noise_vol : noise_env_vol); // Premultiply by 2
-}*/
-
 void nesapu_device::update_noise_output_level()
 {
 	uint8_t new_output = 0;
@@ -2246,11 +2175,7 @@ void nesapu_device::update_noise_output_level()
 	if (noise_len_cnt != 0 && !(noise_shift_reg & 1))
 		new_output = noise_const_vol ? noise_vol : noise_env_vol;
 
-	if (noise_output_level != new_output)
-	{
-		noise_output_level = new_output;
-		m_output_dirty = true;
-	}
+	noise_output_level = new_output;
 }
 
 uint8_t nesapu_device::read(offs_t offset)
@@ -2359,7 +2284,6 @@ void nesapu_device::write(offs_t offset, u8 value)
 
 			// Refresh sweep/output state after the timer update.
 			update_sweep_target_period(chan);
-			//update_pulse_output_level(chan);
 
 			break;
 
@@ -2436,7 +2360,6 @@ void nesapu_device::write(offs_t offset, u8 value)
 			// Low 4 bits select the noise timer period.
 			noise_period = noise_periods[value & 0x0F];
 			
-			//noise_period_cnt = noise_period - 1;
 			break;
 
 		case apu_t::WRD3: // $400F
@@ -2453,9 +2376,7 @@ void nesapu_device::write(offs_t offset, u8 value)
 			}
 
 			// Refresh output state in case gating changes immediately.
-			//if (!noise_enabled) {
-				update_noise_output_level();
-			//}
+			update_noise_output_level();
 			break;
 
 		/* DMC */
@@ -2479,16 +2400,7 @@ void nesapu_device::write(offs_t offset, u8 value)
 
 		case apu_t::WRE1:  // $4011: direct 7-bit DMC DAC load
 		{
-			//dmc_4011_write_pending = true;
-			dmc_4011_old_counter = dmc_counter;
-			
-			const uint8_t new_counter = value & 0x7F;
-
-			if (dmc_counter != new_counter)
-			{
-				dmc_counter = new_counter;
-				m_output_dirty = true;
-			}
+			dmc_counter = value & 0x7F;
 			break;
 		}
 
@@ -2540,13 +2452,6 @@ void nesapu_device::write(offs_t offset, u8 value)
 			if (dmc_irq)
 				set_dmc_irq(false);
 			
-			/*for (int n = 0; n < 2; ++n) {
-				m_APU.pulse[n].enabled = (value & (1 << n)) != 0;
-				if (!m_APU.pulse[n].enabled) {
-					m_APU.pulse[n].len_cnt = 0;
-					update_pulse_output_level(n);
-				}
-			}*/
 			for (int n = 0; n < 2; ++n)
 			{
 				const bool old_enabled = m_APU.pulse[n].enabled;
@@ -2979,17 +2884,10 @@ void nesapu_device::set_frame_irq(bool s)
 		// The actual CPU IRQ output is intentionally delayed and is published
 		// later by delayed_frame_irq.
 		frame_irq = true;
-		// This is armed during clock_frame_counter(), after the guard service point
-		// has already run for this tick, so 3 preserves the old "do not clear until
-		// three APU ticks have passed" behavior.
-		//frame_irq_no_clear_before = 3;
 
 		if (!dmc_loading_sample_byte) {
 			// This is armed during clock_frame_counter(), before the countdown
 			// service point in tick(), so add one extra count:
-			//
-			//   old +2 => countdown 3
-			//   old +3 => countdown 4
 			delayed_frame_irq = apu_clk1_is_high ? 3 : 4;
 			delayed_frame_irq_after_dmc = false;
 		}
@@ -3010,16 +2908,6 @@ void nesapu_device::set_dmc_irq(bool s)
 	if (s)
 	{
 		// Publish DMC IRQ to the CPU after the core's IRQ-output delay.
-		//
-		// Important ordering:
-		// The DMC read path intentionally does:
-		//
-		//   tick();
-		//   dmc_read();
-		//
-		// so this delay is armed after the current tick's IRQ-delay service
-		// point has already run. Keep this at 2. Do not compensate here with
-		// 3; that was the wrong fix when dmc_read() was ordered before tick().
 		delayed_dmc_irq = 2;
 	}
 	else
@@ -3041,16 +2929,6 @@ void nesapu_device::update_irq_output()
 
 void nesapu_device::set_frame_irq_flag_only()
 {
-	// Used for the inhibit/suppress timing window:
-	// show the frame IRQ flag in $4015, but do not assert the CPU IRQ line.
-	if (!frame_irq) {
-		// This prevents immediate $4015 read-clear for the first few ticks
-		// after the flag becomes visible.
-		//frame_irq_no_clear_before = 3;
-		//frame_irq_no_clear_before = apu_clk1_is_high ? 3 : 2;
-		//frame_irq_no_clear_before = frame_irq_suppress_clear_cycle;
-	}
-
 	frame_irq = true;
 	frame_irq_output = false;
 
@@ -3068,7 +2946,6 @@ void nesapu_device::set_frame_irq_flag_only()
 // Read status register at $4015
 u8 nesapu_device::status_r()
 {
-	//uint8_t res = 0x00;
 	uint8_t res =
 		(dmc_irq                   		 << 7) |
 		(frame_irq                 		 << 6) |
@@ -3083,7 +2960,6 @@ u8 nesapu_device::status_r()
 	// not clear the frame IRQ flag yet.
 	//   0  = clear is allowed
 	//   >0 = reads may see bit 6, but must not clear the flag yet
-	//if (frame_irq && frame_irq_no_clear_before == 0)
 	if (frame_irq)
 		set_frame_irq(false);
 

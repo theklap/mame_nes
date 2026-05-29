@@ -377,7 +377,7 @@ void nes_txrom_device::mmc3_irq_clock()
     }
 }
 
-void nes_txrom_device::ppu_to_mapper(int scanline, unsigned dot)
+void nes_txrom_device::ppu_to_mapper(int scanline, unsigned dot, int ppu_tick)
 {
 	m_scanline = scanline;
 	m_dot = dot;

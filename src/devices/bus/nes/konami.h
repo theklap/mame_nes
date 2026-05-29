@@ -69,7 +69,7 @@ public:
 	virtual void write_h(offs_t offset, u8 data) override;
 
 	virtual void pcb_reset() override;
-	virtual void ppu_to_mapper(int scanline, unsigned dot) override;
+	virtual void ppu_to_mapper(int scanline, unsigned dot, int ppu_tick) override;
 
 protected:
 	// device-level overrides
@@ -102,7 +102,7 @@ public:
 
 	virtual void pcb_reset() override;
 	
-	virtual void ppu_to_mapper(int scanline, unsigned dot) override;
+	virtual void ppu_to_mapper(int scanline, unsigned dot, int ppu_tick) override;
 
 protected:
 	m6502_device* m_maincpu6502 = nullptr;
