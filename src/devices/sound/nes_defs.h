@@ -31,18 +31,14 @@
 /* APU type */
 struct apu_t
 {
-	
 	/* CHANNEL TYPE DEFINITIONS */
 
 	/* Square Wave */
 	struct square_t
 	{
-		// Range 0-15
-		// (Potentially) affected by
-		//   - volume updates,
-		//   - length counter updates,
-		//   - period updates,
-		//   - and waveform position updates
+		// Range 0-15.
+		// Recomputed whenever gating, envelope, length, period, sweep,
+		// or waveform position can affect the audible pulse output.
 		unsigned output_level;
 
 		bool     enabled = false;
@@ -65,11 +61,9 @@ struct apu_t
 		unsigned env_vol;
 		bool     halt_len_loop_env;
 		bool     env_start_flag;
-		
-		u8 output = 0;
 
 		// Recalculated whenever anything happens that might affect the sweep
-		// target period. Not sure if this optimization is still worthwhile.
+		// target period.
 		int sweep_target_period;
 	};
 
@@ -102,88 +96,32 @@ struct apu_t
 /* CONSTANTS */
 
 // Length counter look-up table
-uint8_t const len_table[] = {
+static constexpr u8 len_table[] = {
 	  10, 254, 20,  2, 40,  4, 80,  6, 160,  8, 60, 10, 14, 12, 26, 14,
 	  12,  16, 24, 18, 48, 20, 96, 22, 192, 24, 72, 26, 16, 28, 32, 30 };
 
-uint16_t const ntsc_noise_periods[] =
+static constexpr u16 ntsc_noise_periods[] =
 	{ 4, 8, 16, 32, 64, 96, 128, 160, 202, 254, 380, 508, 762, 1016, 2034, 4068 };
-uint16_t const pal_noise_periods[]  =
+static constexpr u16 pal_noise_periods[] =
 	{ 4, 8, 14, 30, 60, 88, 118, 148, 188, 236, 354, 472, 708,  944, 1890, 3778 };
 
-uint16_t const ntsc_dmc_periods[] =
+static constexpr u16 ntsc_dmc_periods[] =
 	{ 428, 380, 340, 320, 286, 254, 226, 214, 190, 160, 142, 128, 106,  84,  72,  54 };
-uint16_t const pal_dmc_periods[] =
+static constexpr u16 pal_dmc_periods[] =
 	{ 398, 354, 316, 298, 276, 236, 210, 198, 176, 148, 132, 118,  98,  78,  66,  50 };
 
 /* ratios of pos/neg pulse for square waves */
 /* 2/16 = 12.5%, 4/16 = 25%, 8/16 = 50%, 12/16 = 75% */
-static uint8_t const pulse_duties[4][8] =
+static constexpr u8 pulse_duties[4][8] =
       { { 0, 1, 0, 0, 0, 0, 0, 0 },
         { 0, 1, 1, 0, 0, 0, 0, 0 },
         { 0, 1, 1, 1, 1, 0, 0, 0 },
         { 1, 0, 0, 1, 1, 1, 1, 1 } };
 
 // Premultiply by three to save multiplication during mixing
-uint8_t const tri_waveform_steps[32] =
+static constexpr u8 tri_waveform_steps[32] =
   { 15, 14, 13, 12, 11, 10, 9, 8, 7, 6,  5,  4,  3,  2,  1,  0,
      0,  1,  2,  3,  4,  5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 };
 	 
 	 
-struct mmc5_sound_t
-{
-	/* CHANNEL TYPE DEFINITIONS */
-
-	/* Square Wave */
-	struct square_t
-	{
-		square_t()
-		{
-			for (auto & elem : regs)
-				elem = 0;
-		}
-
-		u8 regs[4];
-		s32 freq = 0;
-		float phaseacc = 0.0;
-		float env_phase = 0.0;
-		u8 adder = 0;
-		u8 env_vol = 0;
-		bool enabled = false;
-		u8 output = 0;
-	};
-
-	/* DPCM Wave */
-	struct pcm_t
-	{
-		pcm_t()
-		{
-			for (auto & elem : regs)
-				elem = 0;
-		}
-
-		u8 regs[2];
-		bool irq_enabled = false;
-		bool irq_line = false;
-		u8 output = 0;
-	};
-
-
-	/* REGISTER DEFINITIONS */
-	static constexpr unsigned WRA0    = 0x00;
-	static constexpr unsigned WRA1    = 0x01;
-	static constexpr unsigned WRA2    = 0x02;
-	static constexpr unsigned WRA3    = 0x03;
-	static constexpr unsigned WRB0    = 0x04;
-	static constexpr unsigned WRB1    = 0x05;
-	static constexpr unsigned WRB2    = 0x06;
-	static constexpr unsigned WRB3    = 0x07;
-	static constexpr unsigned WRE0    = 0x10;
-	static constexpr unsigned WRE1    = 0x11;
-	static constexpr unsigned SMASK   = 0x15;
-
-	/* Sound channels */
-	square_t   squ[2];
-	pcm_t      pcm;
-};
 #endif // MAME_SOUND_NES_DEFS_H

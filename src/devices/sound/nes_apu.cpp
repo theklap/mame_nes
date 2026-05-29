@@ -600,11 +600,6 @@ void nesapu_device::device_start()
 	m_resample_phase = 0;
 	m_resample_step = uint64_t(double(clock()) * 4294967296.0 / double(m_stream->sample_rate()));
 	
-	logerror("APU clock=%f sample_rate=%f resample_step=%llu\n",
-		double(clock()),
-		double(m_stream->sample_rate()),
-		(unsigned long long)m_resample_step);
-	
 	assert(m_resample_step > 0);
 
 	m_output_accum = 0.0;
@@ -972,20 +967,8 @@ void nesapu_device::tick() {
 	}
 	//End 11.len_reload_timing is delayed by 1 cycle
 	
-	// Frame-unit block countdown.
-	// The block is armed by
-	// arm_frame_unit_clock_block() and counts down once per APU tick.
-	//if (frame_unit_clock_block_until > 0)
-	//	--frame_unit_clock_block_until;
-	
 	//clock here before irq delay or fails IRQ timing
 	clock_frame_counter();
-	
-	// $4015 frame IRQ read-clear guard countdown.
-	// While this countdown is non-zero, $4015 reads may see frame_irq set
-	// but must not clear it yet.
-	//if (frame_irq_no_clear_before > 0)
-		//--frame_irq_no_clear_before;
 	
 	// IRQ in APU is delayed before sending to CPU.
 	//

@@ -14,12 +14,6 @@
 #pragma once
 
 
-//**************************************************************************
-//  TYPE DEFINITIONS
-//**************************************************************************
-
-// ======================> mmc5snd_device
-
 class mmc5snd_device : public device_t, public device_sound_interface
 {
 public:
@@ -27,6 +21,13 @@ public:
 
 	u8 read(offs_t offset);
 	void write(offs_t offset, u8 data);
+	
+	void pcm_read(u8 data);
+
+	bool irq_pending() const;
+	void clear_irq();
+	void schedule_irq_delay();
+	bool clock_irq_delay();
 
 protected:
 	virtual void device_start() override;
@@ -77,16 +78,16 @@ private:
 
 	u8 m_pcm_mode;
 	u8 m_pcm_dac;
+	bool m_pcm_irq_pending;
 
 	u32 m_frame_accum;
-	bool m_length_clock_phase;
 	bool m_timer_divider;
+	int m_pcm_irq_delay;
 
 	sound_stream *m_stream;
 };
 
 
-// device type definition
 DECLARE_DEVICE_TYPE(MMC5SND, mmc5snd_device)
 
 #endif // MAME_SOUND_MMC5SND_H

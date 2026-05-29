@@ -39,8 +39,6 @@ public:
 	void update_irq_output();
 	void set_frame_irq_flag_only();
 
-	void set_mmc5(bool s);
-
 	void presave();
 	void postload();
 
@@ -48,7 +46,6 @@ public:
 
 protected:
 	nesapu_device(const machine_config &mconfig, device_type type, const char *tag, device_t *owner, u32 clock);
-
 
 	virtual void device_start() override;
 	virtual void device_stop() override;
@@ -60,7 +57,6 @@ protected:
 
 private:
 	
-	void tick_mmc5_audio();
 	//============================================================
 	//  Types
 	//============================================================
@@ -270,9 +266,6 @@ private:
 	bool cpu_reading;
 	bool run_ppu;
 
-	// MMC5 path disables normal PPU ticking in this APU device.
-	bool mmc5;
-
 	// Latched CPU read address used by DMC/APU bus conflict handling.
 	u16 m_dmc_cpu_bus_latch;
 
@@ -316,7 +309,7 @@ private:
 	bool dmc_4015_load_defer_pending;
 	s32  dmc_4015_load_defer_delay;
 
-	bool dmc_4011_write_pending;
+	//bool dmc_4011_write_pending;
 	u8   dmc_4011_old_counter;
 
 	//============================================================
@@ -353,7 +346,7 @@ private:
 	s32  delayed_frame_irq_clear;
 	s32  delayed_dmc_irq;
 
-	s32 frame_irq_no_clear_before;
+	//s32 frame_irq_no_clear_before;
 	s32 frame_irq_suppress_clear_cycle;
 
 	// Save-state mirrors for enum class values.
@@ -436,7 +429,7 @@ private:
 	//============================================================
 
 	nes_dma_engine m_dma_engine;
-	uint8_t m_mmc5_pcm_dac = 0;
+
 	//============================================================
 	//  Helpers - mixer / output
 	//============================================================

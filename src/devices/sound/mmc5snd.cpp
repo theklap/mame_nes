@@ -6,7 +6,7 @@
     mmc5snd.cpp
     Nintendo MMC5 add-on sound
 
-    MMC5 provides two additional pulse channels and a simple PCM DAC.
+    MMC5 provides two additional pulse channels and one PCM DAC.
 
 ***************************************************************************/
 
@@ -25,10 +25,11 @@ mmc5snd_device::mmc5snd_device(const machine_config &mconfig, const char *tag, d
 	: device_t(mconfig, MMC5SND, tag, owner, clock)
 	, device_sound_interface(mconfig, *this)
 	, m_pcm_mode(0)
-	, m_pcm_dac(0)
+	, m_pcm_dac(0xef)
+	, m_pcm_irq_pending(false)
 	, m_frame_accum(0)
-	, m_length_clock_phase(false)
 	, m_timer_divider(false)
+	, m_pcm_irq_delay(0)
 	, m_stream(nullptr)
 {
 }
@@ -55,10 +56,11 @@ void mmc5snd_device::device_start()
 
 	save_item(NAME(m_pcm_mode));
 	save_item(NAME(m_pcm_dac));
+	save_item(NAME(m_pcm_irq_pending));
 	save_item(NAME(m_frame_accum));
-	save_item(NAME(m_length_clock_phase));
 	save_item(NAME(m_timer_divider));
-	
+	save_item(NAME(m_pcm_irq_delay));
+
 	logerror("MMC5 Expanded Audio Loaded\n");
 }
 
@@ -86,10 +88,63 @@ void mmc5snd_device::device_reset()
 	}
 
 	m_pcm_mode = 0;
-	m_pcm_dac = 0;
+	m_pcm_irq_pending = false;
 	m_frame_accum = 0;
-	m_length_clock_phase = false;
 	m_timer_divider = false;
+	m_pcm_irq_delay = 0;
+
+	// NESdev notes the MMC5 DAC power-on voltage has been observed as
+	// roughly $EF or $FF and is not affected by reset.  Leave m_pcm_dac alone.
+}
+
+
+//-------------------------------------------------
+//  irq_pending
+//-------------------------------------------------
+
+bool mmc5snd_device::irq_pending() const
+{
+	return m_pcm_irq_pending && BIT(m_pcm_mode, 7);
+}
+
+
+//-------------------------------------------------
+//  clear_irq
+//-------------------------------------------------
+
+void mmc5snd_device::clear_irq()
+{
+	m_pcm_irq_pending = false;
+	m_pcm_irq_delay = 0;
+}
+
+
+//-------------------------------------------------
+//  schedule_irq_delay
+//-------------------------------------------------
+
+void mmc5snd_device::schedule_irq_delay()
+{
+	if (irq_pending() && m_pcm_irq_delay == 0) {
+		m_pcm_irq_delay = 2;
+	}
+}
+
+
+//-------------------------------------------------
+//  clock_irq_delay
+//-------------------------------------------------
+
+bool mmc5snd_device::clock_irq_delay()
+{
+	if (m_pcm_irq_delay > 0) {
+		--m_pcm_irq_delay;
+		if (m_pcm_irq_delay == 0 && irq_pending()) {
+			return true;
+		}
+	}
+
+	return false;
 }
 
 
@@ -110,9 +165,10 @@ u16 mmc5snd_device::period(int chan) const
 u8 mmc5snd_device::pulse_output(int chan) const
 {
 	const pulse_t &pulse = m_pulse[chan];
-	const u16 timer_period = period(chan);
 
-	if (!pulse.enabled || pulse.length_counter == 0 || timer_period < 8)
+	// Unlike the native APU pulse channels, MMC5 does not silence timer values
+	// below 8. They may produce ultrasonic output, but the channel is not muted.
+	if (!pulse.enabled || pulse.length_counter == 0)
 		return 0;
 
 	const u8 duty = (pulse.control >> 6) & 0x03;
@@ -132,8 +188,8 @@ u8 mmc5snd_device::pulse_output(int chan) const
 
 void mmc5snd_device::clock_pulse_timers()
 {
-	// NES pulse timers advance on every other CPU cycle.  With the stream
-	// running at CPU clock, divide by two here so frequency is CPU / (16 * (period + 1)).
+	// MMC5 pulse channels are APU-like: timer clocks the 8-step pulse sequencer
+	// on every other CPU cycle.
 	m_timer_divider = !m_timer_divider;
 	if (!m_timer_divider)
 		return;
@@ -142,7 +198,7 @@ void mmc5snd_device::clock_pulse_timers()
 	{
 		if (pulse.timer == 0)
 		{
-			pulse.timer = pulse.timer_low | ((pulse.timer_high & 0x07) << 8);
+			pulse.timer = (pulse.timer_low | ((pulse.timer_high & 0x07) << 8)) + 1;
 			pulse.duty_step = (pulse.duty_step + 1) & 0x07;
 		}
 		else
@@ -207,8 +263,9 @@ void mmc5snd_device::clock_length_counters()
 
 void mmc5snd_device::clock_frame_sequencer()
 {
-	// Approximate the APU frame sequencer timing at 240 Hz for envelope clocks.
-	// Length counters clock every other envelope tick, i.e. 120 Hz.
+	// MMC5 does not use APU $4017 frame mode. Envelope and length clocks are
+	// fixed at about 240 Hz. This is intentionally independent from the 2A03
+	// frame counter mode.
 	m_frame_accum += 240;
 
 	while (m_frame_accum >= clock())
@@ -216,10 +273,7 @@ void mmc5snd_device::clock_frame_sequencer()
 		m_frame_accum -= clock();
 
 		clock_envelopes();
-
-		m_length_clock_phase = !m_length_clock_phase;
-		if (m_length_clock_phase)
-			clock_length_counters();
+		clock_length_counters();
 	}
 }
 
@@ -235,14 +289,40 @@ void mmc5snd_device::sound_stream_update(sound_stream &stream, std::vector<read_
 		clock_frame_sequencer();
 		clock_pulse_timers();
 
-		// Two 4-bit pulse channels plus the 7-bit PCM DAC.
-		// Keep this intentionally conservative; external route gain can be tuned per board.
-		const s32 tmp = (pulse_output(0) + pulse_output(1)) * 4 + (m_pcm_dac & 0x7f);
+		// MMC5 channel polarity is reversed compared to the native APU.
+		// $5011 uses all 8 bits; bit 7 can make PCM roughly twice as loud.
+		const s32 pulse = (pulse_output(0) + pulse_output(1)) * 4;
+		const s32 pcm = m_pcm_dac;
 
-		outputs[0].put_int(i, tmp, 512);
+		outputs[0].put_int(i, -(pulse + pcm), 768);
 	}
 }
 
+//-------------------------------------------------
+//  pcm_read
+//-------------------------------------------------
+
+void mmc5snd_device::pcm_read(u8 data)
+{
+	// PCM read mode only.
+	if (!BIT(m_pcm_mode, 0))
+		return;
+
+	m_stream->update();
+
+	// In PCM read mode, CPU reads from $8000-$BFFF feed the PCM DAC.
+	// A read value of $00 does not change the DAC and instead trips the PCM IRQ latch.
+	if (data == 0x00)
+	{
+		m_pcm_irq_pending = true;
+		schedule_irq_delay();
+	}
+	else
+	{
+		m_pcm_dac = data;
+		clear_irq();
+	}
+}
 
 //-------------------------------------------------
 //  read
@@ -254,6 +334,13 @@ u8 mmc5snd_device::read(offs_t offset)
 
 	switch (offset & 0x1f)
 	{
+		case 0x10:
+		{
+			const u8 ret = (irq_pending() ? 0x80 : 0x00) | (m_pcm_mode & 0x01);
+			clear_irq();
+			return ret;
+		}
+
 		case 0x15:
 			return (m_pulse[0].length_counter ? 0x01 : 0x00) |
 				   (m_pulse[1].length_counter ? 0x02 : 0x00);
@@ -283,10 +370,11 @@ void mmc5snd_device::write(offs_t offset, u8 data)
 			break;
 
 		case 0x03:
-			m_pulse[0].timer_high = data;
+			m_pulse[0].timer_high = data & 0x07;
 			m_pulse[0].timer = period(0);
 			m_pulse[0].duty_step = 0;
 			m_pulse[0].envelope_start = true;
+
 			if (m_pulse[0].enabled)
 				m_pulse[0].length_counter = LENGTH_TABLE[(data >> 3) & 0x1f];
 			break;
@@ -300,20 +388,44 @@ void mmc5snd_device::write(offs_t offset, u8 data)
 			break;
 
 		case 0x07:
-			m_pulse[1].timer_high = data;
+			m_pulse[1].timer_high = data & 0x07;
 			m_pulse[1].timer = period(1);
 			m_pulse[1].duty_step = 0;
 			m_pulse[1].envelope_start = true;
+
 			if (m_pulse[1].enabled)
 				m_pulse[1].length_counter = LENGTH_TABLE[(data >> 3) & 0x1f];
 			break;
 
 		case 0x10:
-			m_pcm_mode = data;
+			// Bit 7 = PCM IRQ enable.
+			// Bit 0 = PCM read mode. Other bits are not audio-control state here.
+			m_pcm_mode = data & 0x81;
+
+			// Disabling the PCM IRQ output cancels a delayed PCM IRQ assertion,
+			// but does not necessarily destroy the DAC value.
+			if (!BIT(m_pcm_mode, 7))
+				m_pcm_irq_delay = 0;
+			else
+				schedule_irq_delay();
 			break;
 
 		case 0x11:
-			m_pcm_dac = data & 0x7f;
+			// Writes are ignored in PCM read mode.
+			if (BIT(m_pcm_mode, 0))
+				break;
+
+			// Writing $00 does not change the DAC; it trips the PCM IRQ latch.
+			if (data == 0x00)
+			{
+				m_pcm_irq_pending = true;
+				schedule_irq_delay();
+			}
+			else
+			{
+				m_pcm_dac = data;
+				clear_irq();
+			}
 			break;
 
 		case 0x15:
@@ -322,6 +434,7 @@ void mmc5snd_device::write(offs_t offset, u8 data)
 
 			if (!m_pulse[0].enabled)
 				m_pulse[0].length_counter = 0;
+
 			if (!m_pulse[1].enabled)
 				m_pulse[1].length_counter = 0;
 			break;
