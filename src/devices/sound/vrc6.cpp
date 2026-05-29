@@ -88,6 +88,14 @@ void vrc6snd_device::device_reset()
 	m_master_freq = 0;
 }
 
+u16 vrc6snd_device::period_to_ticks(u8 low, u8 high) const
+{
+	u16 period = low | ((high & 0x0f) << 8);
+	u16 ticks = (period + 1) >> m_master_freq;
+
+	return ticks ? ticks : 1;
+}
+
 //-------------------------------------------------
 //  sound_stream_update - handle update requests for
 //  our sound stream
@@ -109,7 +117,7 @@ void vrc6snd_device::sound_stream_update(sound_stream &stream, std::vector<read_
 		{
 			if (m_ticks[0] == 0)
 			{
-				m_ticks[0] = (m_pulsefrql[0] | ((m_pulsefrqh[0] & 0xf) << 8)) >> m_master_freq;
+				m_ticks[0] = period_to_ticks(m_pulsefrql[0], m_pulsefrqh[0]);
 
 				m_pulseduty[0] = (m_pulseduty[0] - 1) & 0xf;
 				if (m_pulsectrl[0] & 0x80)
@@ -141,7 +149,7 @@ void vrc6snd_device::sound_stream_update(sound_stream &stream, std::vector<read_
 		{
 			if (m_ticks[1] == 0)
 			{
-				m_ticks[1] = (m_pulsefrql[1] | ((m_pulsefrqh[1] & 0xf) << 8)) >> m_master_freq;
+				m_ticks[1] = period_to_ticks(m_pulsefrql[1], m_pulsefrqh[1]);
 
 				m_pulseduty[1] = (m_pulseduty[1] - 1) & 0xf;
 				if (m_pulsectrl[1] & 0x80)
@@ -173,7 +181,7 @@ void vrc6snd_device::sound_stream_update(sound_stream &stream, std::vector<read_
 		{
 			if (m_ticks[2] == 0)
 			{
-				m_ticks[2] = (m_sawfrql | ((m_sawfrqh & 0xf) << 8)) >> m_master_freq;
+				m_ticks[2] = period_to_ticks(m_sawfrql, m_sawfrqh);
 
 				// only update on even steps
 				if ((m_sawclock > 0) && (!(m_sawclock & 1)))
@@ -194,6 +202,7 @@ void vrc6snd_device::sound_stream_update(sound_stream &stream, std::vector<read_
 		}
 		else
 		{
+			m_sawaccum = 0;
 			m_output[2] = 0;
 		}
 
@@ -224,7 +233,7 @@ void vrc6snd_device::write(offs_t offset, u8 data)
 					m_pulsefrql[0] = data;
 					if (!(m_pulsefrqh[0] & 0x80))
 					{
-						m_ticks[0] = (m_pulsefrql[0] | ((m_pulsefrqh[0] & 0xf) << 8)) >> m_master_freq;
+						m_ticks[0] = period_to_ticks(m_pulsefrql[0], m_pulsefrqh[0]);
 					}
 					break;
 
@@ -234,7 +243,7 @@ void vrc6snd_device::write(offs_t offset, u8 data)
 					if (!(data & 0x80))
 					{
 						m_pulseduty[0] = 15;
-						m_ticks[0] = (m_pulsefrql[0] | ((m_pulsefrqh[0] & 0xf) << 8)) >> m_master_freq;
+						m_ticks[0] = period_to_ticks(m_pulsefrql[0], m_pulsefrqh[0]);
 					}
 					break;
 
@@ -249,15 +258,17 @@ void vrc6snd_device::write(offs_t offset, u8 data)
 
 					if (!(m_pulsefrqh[0] & 0x80))
 					{
-						m_ticks[0] = (m_pulsefrql[0] | ((m_pulsefrqh[0] & 0xf) << 8)) >> m_master_freq;
+						m_ticks[0] = period_to_ticks(m_pulsefrql[0], m_pulsefrqh[0]);
 					}
 					if (!(m_pulsefrqh[1] & 0x80))
 					{
-						m_ticks[1] = (m_pulsefrql[1] | ((m_pulsefrqh[1] & 0xf) << 8)) >> m_master_freq;
+						m_ticks[1] = period_to_ticks(m_pulsefrql[1], m_pulsefrqh[1]);
 					}
 					if (!(m_sawfrqh & 0x80))
 					{
-						m_ticks[2] = (m_sawfrql | ((m_sawfrqh & 0xf) << 8)) >> m_master_freq;
+						m_sawaccum = 0;
+						m_sawclock = 0;
+						m_output[2] = 0;
 					}
 					break;
 			}
@@ -275,7 +286,7 @@ void vrc6snd_device::write(offs_t offset, u8 data)
 					m_pulsefrql[1] = data;
 					if (!(m_pulsefrqh[1] & 0x80))
 					{
-						m_ticks[1] = (m_pulsefrql[1] | ((m_pulsefrqh[1] & 0xf) << 8)) >> m_master_freq;
+						m_ticks[1] = period_to_ticks(m_pulsefrql[1], m_pulsefrqh[1]);
 					}
 					break;
 
@@ -285,7 +296,7 @@ void vrc6snd_device::write(offs_t offset, u8 data)
 					if (!(data & 0x80))
 					{
 						m_pulseduty[1] = 15;
-						m_ticks[1] = (m_pulsefrql[1] | ((m_pulsefrqh[1] & 0xf) << 8)) >> m_master_freq;
+						m_ticks[1] = period_to_ticks(m_pulsefrql[1], m_pulsefrqh[1]);
 					}
 					break;
 			}
@@ -303,17 +314,21 @@ void vrc6snd_device::write(offs_t offset, u8 data)
 					m_sawfrql = data;
 					if (!(m_sawfrqh & 0x80))
 					{
-						m_ticks[2] = (m_sawfrql | ((m_sawfrqh & 0xf) << 8)) >> m_master_freq;
+						m_ticks[2] = period_to_ticks(m_sawfrql, m_sawfrqh);
 					}
 					break;
 
 				case 2:
 					m_sawfrqh = data;
-					// if disabling channel, reset phase
+
+					// If disabling saw, force accumulator/output to zero.
+					// Do not reset m_ticks[2]; NESdev notes clearing E does not reset
+					// the frequency divider, so the first re-enabled step may be shortened.
 					if (!(data & 0x80))
 					{
 						m_sawaccum = 0;
-						m_ticks[2] = (m_sawfrql | ((m_sawfrqh & 0xf) << 8)) >> m_master_freq;
+						m_sawclock = 0;
+						m_output[2] = 0;
 					}
 					break;
 			}

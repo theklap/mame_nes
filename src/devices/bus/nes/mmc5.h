@@ -7,7 +7,8 @@
 
 #include "nxrom.h"
 
-#include "sound/nes_apu.h"  // temp hack to pass the additional sound regs to APU...
+#include "sound/mmc5snd.h"
+#include "sound/nes_apu.h"
 #include "video/ppu2c0x.h"  // this has to be included so that IRQ functions can access ppu2c0x_device::BOTTOM_VISIBLE_SCANLINE
 
 
@@ -137,7 +138,8 @@ protected:
 	uint8_t 	m_ram_hi_banks[4];     		// Resolved PRG-RAM bank number for each high CPU 8K slot $8000-$FFFF
 
 	required_device<ppu2c0x_device> m_ppu;
-	required_device<nesapu_device> m_sound;
+	required_device<mmc5snd_device> m_sound;
+	
 };
 
 

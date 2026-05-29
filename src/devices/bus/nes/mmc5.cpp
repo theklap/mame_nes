@@ -144,7 +144,6 @@ void nes_exrom_device::device_start()
 	save_item(NAME(delay_irq));
 	m_maincpu6502 = machine().root_device().subdevice<m6502_device>("maincpu");
 	m_ppu->set_mapper(5);
-	m_sound->set_mmc5(true);
 	m_maincpu6502->set_is_mmc5(true);
 	m_phase_nt = false;
 	m_phase_at = false;
@@ -199,7 +198,6 @@ void nes_exrom_device::pcb_reset()
 	m_ram_hi_banks[3] = 0;
 	
 	m_ppu->set_mapper(5);
-	m_sound->set_mmc5(true);
 	m_maincpu6502->set_is_mmc5(true);
 	
 	m_vcount = 0;
@@ -512,12 +510,22 @@ void nes_exrom_device::mmc5_reset_scanline_irq_state()
 
 void nes_exrom_device::ppu_to_mapper(int scanline, unsigned dot)
 {
+	bool queue_irq = false;
+
 	if (delay_irq > 0)
 	{
 		--delay_irq;
 		if (delay_irq == 0) {
-			m_maincpu6502->queue_delayed_mapper_irq(2);
+			queue_irq = true;
 		}
+	}
+
+	if (m_sound->clock_irq_delay()) {
+		queue_irq = true;
+	}
+
+	if (queue_irq) {
+		m_maincpu6502->queue_delayed_mapper_irq(2);
 	}
 	
 	m_vcount = scanline;
@@ -774,33 +782,36 @@ uint8_t nes_exrom_device::read_l(offs_t offset)
 		}
 	}
 
-	switch (offset)
-	{
-	case 0x1204:
-	{
-		uint8_t value = (irq_pending ? 0x80 : 0x00) | (in_frame ? 0x40 : 0x00) | (get_open_bus() & 0x3f);
-		if (!machine().side_effects_disabled())
+	switch (offset)	{
+		case 0x1010:
+		case 0x1015:
+			return m_sound->read(offset & 0x1f);
+
+		case 0x1204:
 		{
-			irq_pending = false;
-			set_irq_line(CLEAR_LINE);
-			if(delay_irq > 0) {
-				m_maincpu6502->cancel_delayed_mapper_irq();
-				delay_irq = 0;
+			uint8_t value = (irq_pending ? 0x80 : 0x00) | (in_frame ? 0x40 : 0x00) | (get_open_bus() & 0x3f);
+			if (!machine().side_effects_disabled())
+			{
+				irq_pending = false;
+				set_irq_line(CLEAR_LINE);
+				if(delay_irq > 0) {
+					m_maincpu6502->cancel_delayed_mapper_irq();
+					delay_irq = 0;
+				}
 			}
+			return value;
 		}
-		return value;
-	}
 
-	case 0x1205:
-		return (m_mult1 * m_mult2) & 0xff;
+		case 0x1205:
+			return (m_mult1 * m_mult2) & 0xff;
 
-	case 0x1206:
-		return ((m_mult1 * m_mult2) & 0xff00) >> 8;
+		case 0x1206:
+			return ((m_mult1 * m_mult2) & 0xff00) >> 8;
 
-	default:
-		if (!machine().side_effects_disabled())
-			LOGMASKED(LOG_UNHANDLED, "MMC5 uncaught read, offset: %04x\n", offset + 0x4100);
-		return get_open_bus();
+		default:
+			if (!machine().side_effects_disabled())
+				LOGMASKED(LOG_UNHANDLED, "MMC5 uncaught read, offset: %04x\n", offset + 0x4100);
+			return get_open_bus();
 	}
 }
 
@@ -1095,6 +1106,8 @@ uint8_t nes_exrom_device::read_h(offs_t offset)
 		break;
 	}
 
+	u8 ret = 0;
+
 	if (ram_override)
 	{
 		const int ram_bank = m_ram_hi_banks[bank] & 0x07;
@@ -1106,35 +1119,46 @@ uint8_t nes_exrom_device::read_h(offs_t offset)
 		if (!m_battery.empty() && !m_prgram.empty())
 		{
 			if (ram_bank & 0x04)
-				return m_prgram[addr & (m_prgram.size() - 1)];
-
-			return m_battery[addr & (m_battery.size() - 1)];
+				ret = m_prgram[addr & (m_prgram.size() - 1)];
+			else
+				ret = m_battery[addr & (m_battery.size() - 1)];
 		}
-
 		// Single-chip volatile WRAM fallback.
 		// Commercial single-chip boards normally only respond to banks 0-3.
 		// Banks 4-7 select a missing chip, so return open bus.
-		if (!m_prgram.empty())
+		else if (!m_prgram.empty())
 		{
 			if (ram_bank & 0x04)
-				return get_open_bus();
-
-			return m_prgram[((ram_bank & 0x03) * 0x2000 + addr) & (m_prgram.size() - 1)];
+				ret = get_open_bus();
+			else
+				ret = m_prgram[((ram_bank & 0x03) * 0x2000 + addr) & (m_prgram.size() - 1)];
 		}
-
 		// Single-chip battery WRAM fallback.
-		if (!m_battery.empty())
+		else if (!m_battery.empty())
 		{
 			if (ram_bank & 0x04)
-				return get_open_bus();
-
-			return m_battery[((ram_bank & 0x03) * 0x2000 + addr) & (m_battery.size() - 1)];
+				ret = get_open_bus();
+			else
+				ret = m_battery[((ram_bank & 0x03) * 0x2000 + addr) & (m_battery.size() - 1)];
 		}
-
-		return get_open_bus();
+		else
+		{
+			ret = get_open_bus();
+		}
+	}
+	else
+	{
+		ret = hi_access_rom(offset);
 	}
 
-	return hi_access_rom(offset);
+	// MMC5 PCM read mode samples CPU reads from $8000-$BFFF only.
+	// read_h() offset is CPU $8000-$FFFF as $0000-$7FFF, so bank 0/1 means
+	// $8000-$BFFF. This should happen for ROM reads and RAM-override reads.
+	if (bank < 2) {
+		m_sound->pcm_read(ret);
+	}
+
+	return ret;
 }
 
 void nes_exrom_device::write_h(offs_t offset, uint8_t data)
@@ -1213,12 +1237,10 @@ void nes_exrom_device::write_h(offs_t offset, uint8_t data)
 //-------------------------------------------------
 //  device_add_mconfig - add device configuration
 //-------------------------------------------------
-
 void nes_exrom_device::device_add_mconfig(machine_config &config)
 {
-	// additional sound hardware
 	SPEAKER(config, "addon").front_center();
 
-	// TODO: temporary; will be separated device
-	NES_APU(config, m_sound, XTAL(21'477'272)/12).add_route(ALL_OUTPUTS, "addon", 0.90);
+	MMC5SND(config, m_sound, XTAL(21'477'272)/12);
+	m_sound->add_route(ALL_OUTPUTS, "addon", 0.90);
 }

@@ -34,6 +34,8 @@ protected:
 	virtual void sound_stream_update(sound_stream &stream, std::vector<read_stream_view> const &inputs, std::vector<write_stream_view> &outputs) override;
 
 private:
+	u16 period_to_ticks(u8 low, u8 high) const;
+	
 	u8 m_freqctrl, m_pulsectrl[2], m_sawrate, m_master_freq;
 	u8 m_pulsefrql[2], m_pulsefrqh[2], m_pulseduty[2];
 	u8 m_sawfrql, m_sawfrqh, m_sawclock, m_sawaccum;
