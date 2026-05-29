@@ -62,18 +62,15 @@ apu2a03_device::apu2a03_device(const machine_config& mconfig, const char* tag, d
 
 void nesapu_device::device_stop()
 {
-	if (!mmc5)
-	{
-		osd_printf_info("\n[NES APU STATS]\n");
-		osd_printf_info("\tTest L [APU Delta Modulation Channel] Detected = %d\n", detect_test_l);
-		osd_printf_info("\tTest M [APU Delta Modulation Channel] Detected = %d\n", detect_test_m);
-		osd_printf_info("\tExplicit DMA Abort Detected: Case 0 = %d\n", detect_abort_0);
-		osd_printf_info("\tExplicit DMA Abort Detected: Case -1 = %d\n", detect_abort_1);
-		osd_printf_info("\tExplicit DMA Abort Detected: Case -2 or -3 = %d\n", detect_abort_2_3);
-		osd_printf_info("\tImplicit DMA Abort Detected: Case -8 or -9 = %d\n", detect_abort_8_9);
-		osd_printf_info("\tAudio FIFO overflows = %llu\n", (unsigned long long)m_audio_fifo_overflows);
-		osd_printf_info("\tAudio FIFO underflows = %llu\n", (unsigned long long)m_audio_fifo_underflows);
-	}
+	osd_printf_info("\n[NES APU STATS]\n");
+	osd_printf_info("\tTest L [APU Delta Modulation Channel] Detected = %d\n", detect_test_l);
+	osd_printf_info("\tTest M [APU Delta Modulation Channel] Detected = %d\n", detect_test_m);
+	osd_printf_info("\tExplicit DMA Abort Detected: Case 0 = %d\n", detect_abort_0);
+	osd_printf_info("\tExplicit DMA Abort Detected: Case -1 = %d\n", detect_abort_1);
+	osd_printf_info("\tExplicit DMA Abort Detected: Case -2 or -3 = %d\n", detect_abort_2_3);
+	osd_printf_info("\tImplicit DMA Abort Detected: Case -8 or -9 = %d\n", detect_abort_8_9);
+	osd_printf_info("\tAudio FIFO overflows = %llu\n", (unsigned long long)m_audio_fifo_overflows);
+	osd_printf_info("\tAudio FIFO underflows = %llu\n", (unsigned long long)m_audio_fifo_underflows);
 }
 
 //-------------------------------------------------
@@ -121,8 +118,6 @@ void nesapu_device::device_start()
 	apu_clk1_is_high = false;
 	cpu_reading = false;
 	run_ppu = false;
-
-	mmc5 = false;
 
 	m_dmc_cpu_bus_latch = 0;
 
@@ -538,14 +533,12 @@ void nesapu_device::device_start()
 	save_item(NAME(delayed_frame_irq_after_dmc));
 	save_item(NAME(delayed_frame_irq_clear));
 	save_item(NAME(delayed_dmc_irq));
-	//save_item(NAME(frame_irq_no_clear_before));
 	save_item(NAME(frame_irq_suppress_clear_cycle));
 	save_item(NAME(m_save_frame_counter_mode));
 	save_item(NAME(m_save_new_frame_counter_mode));
 	save_item(NAME(inhibit_frame_irq));
 
 	save_item(NAME(cpu_cycle));
-	save_item(NAME(mmc5));
 	save_item(NAME(apu_clk1_is_high));
 	save_item(NAME(cpu_reading));
 	
@@ -589,7 +582,6 @@ void nesapu_device::device_start()
 	save_item(NAME(detect_test_l));
 	save_item(NAME(detect_test_m));
 	save_item(NAME(detect_abort_8_9));
-	save_item(NAME(m_mmc5_pcm_dac));
 
 	// --------------------------------------------------
 	// Final startup values.
@@ -607,72 +599,22 @@ void nesapu_device::device_start()
 	m_output_accum = 0.0;
 	m_resample_phase = 0;
 	m_resample_step = uint64_t(double(clock()) * 4294967296.0 / double(m_stream->sample_rate()));
-logerror("APU clock=%f sample_rate=%f resample_step=%llu\n",
-	double(clock()),
-	double(m_stream->sample_rate()),
-	(unsigned long long)m_resample_step);
+	
+	logerror("APU clock=%f sample_rate=%f resample_step=%llu\n",
+		double(clock()),
+		double(m_stream->sample_rate()),
+		(unsigned long long)m_resample_step);
+	
 	assert(m_resample_step > 0);
 
 	m_output_accum = 0.0;
 
 	m_cached_output = 0.0;
 	m_output_dirty = true;
-	m_mmc5_pcm_dac = 0;
 }
 
 void nesapu_device::device_reset()
 {
-	if (mmc5)
-	{
-		cpu_cycle = 0;
-		apu_clk1_is_high = false;
-		cpu_reading = false;
-		run_ppu = false;
-
-		m_hp90_prev_in = 0.0;
-		m_hp90_prev_out = 0.0;
-
-		m_hp440_prev_in = 0.0;
-		m_hp440_prev_out = 0.0;
-
-		m_lp14k_prev_out = 0.0;
-
-		m_output_accum = 0.0;
-
-		m_out_fifo_r = 0;
-		m_out_fifo_w = 0;
-		m_last_out_sample = 0.0;
-
-		m_resample_phase = 0;
-
-		m_cached_output = 0.0;
-		m_output_dirty = true;
-
-		frame_counter_clock = 0;
-		frame_unit_clock_block_until = 0;
-		last_frame_unit_pulse_apu_cycle = ~uint64_t(0);
-
-		for (unsigned n = 0; n < 2; ++n)
-		{
-			m_APU.pulse[n].enabled = false;
-			m_APU.pulse[n].waveform_pos = 0;
-			m_APU.pulse[n].len_cnt = 0;
-			m_APU.pulse[n].period_cnt = 1;
-			m_APU.pulse[n].sweep_period_cnt = 1;
-			m_APU.pulse[n].env_div_cnt = 0;
-			m_APU.pulse[n].env_vol = 0;
-			m_APU.pulse[n].sweep_reload_flag = false;
-			m_APU.pulse[n].env_start_flag = false;
-			m_APU.pulse[n].output_level = 0;
-		}
-
-		m_mmc5_pcm_dac = 0;
-
-		if (m_apu_timer)
-			m_apu_timer->adjust(attotime::zero);
-
-		return;
-	}
 	// --------------------------------------------------
 	// Reset any CPU/APU DMA handshake and restart the APU tick timer.
 	//
@@ -934,16 +876,6 @@ void nesapu_device::device_reset()
 
 void nesapu_device::postload()
 {
-	if (mmc5)
-	{
-		for (int n = 0; n < 2; n++)
-			update_pulse_output_level(n);
-
-		m_cached_output = 0.0;
-		m_output_dirty = true;
-		return;
-	}
-
 	frame_counter_mode = Frame_counter_mode(m_save_frame_counter_mode);
 	new_frame_counter_mode = Frame_counter_mode(m_save_new_frame_counter_mode);
 
@@ -1154,91 +1086,7 @@ void nesapu_device::tick() {
 	// Mixing
 	// Latch exactly one mixed output sample for this APU tick, then let the
 	// sound stream consume latched history instead of re-synthesizing "now".
-//	accumulate_output_sample(calc_current_output());
-	
-// Mixing
-// Latch exactly one mixed output sample for this APU tick, then let the
-// sound stream consume latched history instead of re-synthesizing "now".
-const auto mixed = calc_current_output();
-
-static bool mix_jump_initialized = false;
-static stream_buffer::sample_t last_mixed = 0.0;
-static uint64_t last_mix_jump_log_cycle = 0;
-
-if (!mix_jump_initialized)
-{
-	mix_jump_initialized = true;
-	last_mixed = mixed;
-	accumulate_output_sample(mixed);
-}
-else
-{
-	const auto diff = std::abs(mixed - last_mixed);
-
-	if (cpu_cycle >= 1000 &&
-		diff > stream_buffer::sample_t(0.20) &&
-		cpu_cycle - last_mix_jump_log_cycle > 1000)
-	{
-		last_mix_jump_log_cycle = cpu_cycle;
-
-		logerror("APU MIX JUMP cpu=%lld diff=%f mix=%f last=%f frame=%u "
-		         "P0 out=%d len=%d per=%d cnt=%d duty=%d pos=%d env=%d vol=%d const=%d halt=%d "
-		         "P1 out=%d len=%d per=%d cnt=%d duty=%d pos=%d env=%d vol=%d const=%d halt=%d "
-		         "TRI out=%d len=%d lin=%d per=%d cnt=%d pos=%d "
-		         "NOI out=%d len=%d per=%d cnt=%d env=%d vol=%d "
-		         "DMC ctr=%d bytes=%d buf=%d active=%d bits=%d\n",
-			(long long)cpu_cycle,
-			double(diff),
-			double(mixed),
-			double(last_mixed),
-			frame_counter_clock,
-
-			m_APU.pulse[0].output_level,
-			m_APU.pulse[0].len_cnt,
-			m_APU.pulse[0].period,
-			m_APU.pulse[0].period_cnt,
-			m_APU.pulse[0].duty,
-			m_APU.pulse[0].waveform_pos,
-			m_APU.pulse[0].env_vol,
-			m_APU.pulse[0].vol,
-			m_APU.pulse[0].const_vol ? 1 : 0,
-			m_APU.pulse[0].halt_len_loop_env ? 1 : 0,
-
-			m_APU.pulse[1].output_level,
-			m_APU.pulse[1].len_cnt,
-			m_APU.pulse[1].period,
-			m_APU.pulse[1].period_cnt,
-			m_APU.pulse[1].duty,
-			m_APU.pulse[1].waveform_pos,
-			m_APU.pulse[1].env_vol,
-			m_APU.pulse[1].vol,
-			m_APU.pulse[1].const_vol ? 1 : 0,
-			m_APU.pulse[1].halt_len_loop_env ? 1 : 0,
-
-			tri_output_level,
-			tri_len_cnt,
-			tri_lin_cnt,
-			tri_period,
-			tri_period_cnt,
-			tri_waveform_pos,
-
-			noise_output_level,
-			noise_len_cnt,
-			noise_period,
-			noise_period_cnt,
-			noise_env_vol,
-			noise_vol,
-
-			dmc_counter,
-			dmc_bytes_remaining,
-			dmc_sample_buffer_has_data ? 1 : 0,
-			dpcm_active ? 1 : 0,
-			dmc_bits_remaining);
-	}
-
-	last_mixed = mixed;
-	accumulate_output_sample(mixed);
-}
+	accumulate_output_sample(calc_current_output());
 	
 	//m_stream->update();
 	//if (m_output_dirty)
@@ -1262,7 +1110,7 @@ else
 		if (cpu_cycle >= 0)
 			run_ppu = true;
 	}
-	else // if (!mmc5)
+	else
 	{
 		m_ppu_dev->tick();
 		m_ppu_dev->tick();
@@ -1275,72 +1123,6 @@ TIMER_CALLBACK_MEMBER(nesapu_device::apu_tick) {
 	tick_apu();
 }
 
-void nesapu_device::set_mmc5(bool s)
-{
-	mmc5 = s;
-
-	if (mmc5 && !m_mmc5)
-		m_mmc5 = machine().root_device().subdevice<nes_exrom_device>("nes_slot:exrom");
-}
-
-void nesapu_device::tick_mmc5_audio()
-{
-	// MMC5 expansion-audio tick.
-	//
-	// This path intentionally does not:
-	//   - run native DMC/OAM DMA
-	//   - tick PPU
-	//   - publish native frame IRQ
-	//   - clock native triangle/noise
-	//
-	// MMC5 does not use the native $4017 delayed-reset collision guard here.
-	// There is only one local frame-clock source in this path.
-
-	++frame_counter_clock;
-
-	if (frame_counter_clock == 7457 ||
-		frame_counter_clock == 14913 ||
-		frame_counter_clock == 22371 ||
-		frame_counter_clock == 29829)
-	{
-		// MMC5 pulse envelopes use the APU-style envelope unit.
-		// In mmc5 mode, clock_env_and_tri_lin() returns after pulse envelopes.
-		clock_env_and_tri_lin();
-
-		// MMC5 length counter is reported to operate twice as fast as
-		// native APU length, likely at envelope rate.
-		for (int n = 0; n < 2; n++)
-		{
-			if (!m_APU.pulse[n].halt_len_loop_env && m_APU.pulse[n].len_cnt > 0)
-			{
-				--m_APU.pulse[n].len_cnt;
-				update_pulse_output_level(n);
-			}
-		}
-	}
-
-	if (frame_counter_clock == 29830)
-		frame_counter_clock = 0;
-
-	if (!apu_clk1_is_high)
-	{
-		for (int n = 0; n < 2; n++)
-		{
-			if (m_APU.pulse[n].period_cnt == 0)
-			{
-				m_APU.pulse[n].period_cnt = m_APU.pulse[n].period + 1;
-				clock_pulse_generator(n);
-			}
-			else
-			{
-				--m_APU.pulse[n].period_cnt;
-			}
-		}
-	}
-
-	accumulate_output_sample(calc_current_output());
-}
-
 void nesapu_device::tick_apu()
 {
 	// We run this callback after the CPU has already executed its current cycle.
@@ -1348,18 +1130,14 @@ void nesapu_device::tick_apu()
 	cpu_cycle        = m_maincpu_dev->total_cycles() - 1;
 	apu_clk1_is_high = ((cpu_cycle & 0x01) == 0);
 	cpu_reading      = m_maincpu6502->get_cpu_is_reading();
-	
+	//IR               = m_maincpu6502->get_IR();
+
 	// MMC5 has extra per-CPU-cycle behavior that must be serviced before the
 	// normal APU/DMC/OAM DMA handling below. After that, run the shared APU tick
 	// and stop here.
-	if(mmc5) {
-		if (m_mmc5) {
-			m_mmc5->mmc5_cpu_cycle();
-		}
-		tick_mmc5_audio();
-		return;
+	if (m_mmc5) {
+		m_mmc5->mmc5_cpu_cycle();
 	}
-	//IR               = m_maincpu6502->get_IR();
 
 	// Track the interval until the DMC sample buffer becomes empty, and then
 	// how many CPU cycles have elapsed since it became empty.
@@ -2190,9 +1968,6 @@ void nesapu_device::check_frame_irq() {
 //   - clocks noise envelope
 //   - clocks triangle linear counter
 //
-// MMC5 expansion-audio instance:
-//   - clocks only MMC5 pulse envelopes
-//   - does not touch native noise/triangle state
 void nesapu_device::clock_env_and_tri_lin() 
 {
 	// Pulse channels
@@ -2224,12 +1999,6 @@ void nesapu_device::clock_env_and_tri_lin()
 
 		update_pulse_output_level(n);
 	}
-
-	// MMC5 expansion audio has only the two pulse envelopes here.
-	// Do not clock native noise envelope or triangle linear counter
-	// on the mapper-owned MMC5 audio instance.
-	if (mmc5)
-		return;
 
 	// Noise channel
 	if (noise_env_start_flag)
@@ -2285,9 +2054,6 @@ void nesapu_device::clock_len_and_sweep()
 			update_pulse_output_level(n);
 		}
 
-		if (mmc5)
-			continue;
-
 		if (m_APU.pulse[n].sweep_period_cnt == 0 &&
 			m_APU.pulse[n].sweep_enabled &&
 			m_APU.pulse[n].sweep_shift > 0 &&
@@ -2306,9 +2072,6 @@ void nesapu_device::clock_len_and_sweep()
 			--m_APU.pulse[n].sweep_period_cnt;
 		}
 	}
-
-	if (mmc5)
-		return;
 
 	if (!tri_halt_flag && tri_len_cnt > 0)
 		--tri_len_cnt;
@@ -2449,11 +2212,9 @@ void nesapu_device::clock_pulse_generator(unsigned n)
 
 void nesapu_device::update_pulse_output_level(unsigned n) 
 {
-	const bool sweep_mutes =
-		!mmc5 && (m_APU.pulse[n].sweep_target_period > 0x7FF);
+	const bool sweep_mutes = (m_APU.pulse[n].sweep_target_period > 0x7FF);
 
-	const bool period_mutes =
-		!mmc5 && (m_APU.pulse[n].period < 8);
+	const bool period_mutes = (m_APU.pulse[n].period < 8);
 
 	if (m_APU.pulse[n].len_cnt == 0 || 
 		period_mutes ||
@@ -2511,32 +2272,6 @@ void nesapu_device::update_noise_output_level()
 
 uint8_t nesapu_device::read(offs_t offset)
 {
-	if (mmc5)
-	{
-		const uint16_t reg = (offset >= 0x5000)
-			? uint16_t(offset)
-			: uint16_t(0x5000 | (offset & 0x1f));
-
-		switch (reg)
-		{
-			case 0x5015:
-			{
-				uint8_t res = m_maincpu6502->get_open_bus() & 0xfc;
-
-				if (m_APU.pulse[0].len_cnt > 0)
-					res |= 0x01;
-
-				if (m_APU.pulse[1].len_cnt > 0)
-					res |= 0x02;
-
-				return res;
-			}
-
-			default:
-				return m_maincpu6502->get_open_bus();
-		}
-	}
-
 	return m_maincpu6502->get_open_bus();
 }
 
@@ -2544,96 +2279,6 @@ uint8_t nesapu_device::read(offs_t offset)
 void nesapu_device::write(offs_t offset, u8 value)
 {
 	//logerror("Write:  $%02X at $%04X, cpu: %d\n", value, offset, m_maincpu6502->total_cycles());
-	if (mmc5)
-	{
-		const uint16_t reg = (offset >= 0x5000)
-			? uint16_t(offset)
-			: uint16_t(0x5000 | (offset & 0x1f));
-
-		switch (reg)
-		{
-			case 0x5000:
-			case 0x5004:
-			{
-				const int chan = (reg == 0x5004) ? 1 : 0;
-
-				m_APU.pulse[chan].duty = (value >> 6) & 0x03;
-				m_APU.pulse[chan].halt_len_loop_env = (value & 0x20) != 0;
-				m_APU.pulse[chan].const_vol = (value & 0x10) != 0;
-				m_APU.pulse[chan].vol = value & 0x0f;
-
-				update_pulse_output_level(chan);
-				break;
-			}
-
-			case 0x5001:
-			case 0x5005:
-				// MMC5 pulse has no sweep.
-				break;
-
-			case 0x5002:
-			case 0x5006:
-			{
-				const int chan = (reg == 0x5006) ? 1 : 0;
-
-				m_APU.pulse[chan].period =
-					(m_APU.pulse[chan].period & ~0x00ff) | value;
-
-				update_pulse_output_level(chan);
-				break;
-			}
-
-			case 0x5003:
-			case 0x5007:
-			{
-				const int chan = (reg == 0x5007) ? 1 : 0;
-
-				m_APU.pulse[chan].period =
-					(m_APU.pulse[chan].period & ~0x0700) | ((value & 0x07) << 8);
-
-				if (m_APU.pulse[chan].enabled)
-					m_APU.pulse[chan].len_cnt = len_table[(value >> 3) & 0x1f];
-
-				m_APU.pulse[chan].waveform_pos = 0;
-				m_APU.pulse[chan].env_start_flag = true;
-
-				update_pulse_output_level(chan);
-				break;
-			}
-
-			case 0x5010:
-				// You can add PCM IRQ/read-mode later.
-				// For first pass, latch nothing or add small fields.
-				break;
-
-			case 0x5011:
-				// MMC5 PCM is 8-bit. In write mode, $00 does not change the DAC.
-				// PCM IRQ/read-mode can be added later.
-				if (value != 0x00)
-				{
-					m_mmc5_pcm_dac = value;
-					m_output_dirty = true;
-				}
-				break;
-
-			case 0x5015:
-				for (int n = 0; n < 2; n++)
-				{
-					m_APU.pulse[n].enabled = (value & (1 << n)) != 0;
-
-					if (!m_APU.pulse[n].enabled)
-						m_APU.pulse[n].len_cnt = 0;
-
-					update_pulse_output_level(n);
-				}
-				break;
-
-			default:
-				break;
-		}
-
-		return;
-	}
 
 	// For pulse channel registers, bit 2 selects the channel:
 	//   0 = pulse 1 ($4000-$4003)
@@ -2704,23 +2349,6 @@ void nesapu_device::write(offs_t offset, u8 value)
 
 		case apu_t::WRA3:
 		case apu_t::WRB3: // $4003 / $4007
-logerror("APU PULSE%d WRITE $%04X value=%02X cpu=%lld frame=%u "
-	         "BEFORE len=%d per=%d cnt=%d duty=%d pos=%d env=%d vol=%d out=%d enabled=%d\n",
-		chan,
-		(chan == 0) ? 0x4003 : 0x4007,
-		value,
-		(long long)cpu_cycle,
-		frame_counter_clock,
-		m_APU.pulse[chan].len_cnt,
-		m_APU.pulse[chan].period,
-		m_APU.pulse[chan].period_cnt,
-		m_APU.pulse[chan].duty,
-		m_APU.pulse[chan].waveform_pos,
-		m_APU.pulse[chan].env_vol,
-		m_APU.pulse[chan].vol,
-		m_APU.pulse[chan].output_level,
-		m_APU.pulse[chan].enabled ? 1 : 0);
-
 			// If the channel is enabled, reload the length counter from bits 7:3.
 			// Schedule the length reload through the delayed register-effect path.
 			// delay = 2 means it will not commit on the current post-write tick;
@@ -3587,20 +3215,6 @@ stream_buffer::sample_t nesapu_device::apply_analog_filter(stream_buffer::sample
 
 stream_buffer::sample_t nesapu_device::calc_current_output()
 {
-	if (mmc5)
-	{
-		const int pulse_sum =
-			m_APU.pulse[0].output_level + m_APU.pulse[1].output_level;
-
-		stream_buffer::sample_t out = m_square_lut[pulse_sum];
-
-		out += stream_buffer::sample_t(m_mmc5_pcm_dac) / stream_buffer::sample_t(255.0) *
-			stream_buffer::sample_t(0.35);
-
-		// MMC5 pulse and PCM polarity are reversed compared to the native APU.
-		return -out;
-	}
-
 	const int pulse_sum =
 		m_APU.pulse[0].output_level + m_APU.pulse[1].output_level;
 
