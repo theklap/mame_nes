@@ -1977,7 +1977,7 @@ void nesapu_device::clock_env_and_tri_lin()
 	}
 
 // Half frame
-void nesapu_device::clock_len_and_sweep() 
+/*void nesapu_device::clock_len_and_sweep() 
 {
 	for (int n = 0; n < 2; ++n) {
 		if (!m_APU.pulse[n].halt_len_loop_env && m_APU.pulse[n].len_cnt > 0) {
@@ -1995,6 +1995,44 @@ void nesapu_device::clock_len_and_sweep()
 				update_pulse_output_level(n);
 		}
 
+
+		if (m_APU.pulse[n].sweep_reload_flag || m_APU.pulse[n].sweep_period_cnt == 0) {
+			m_APU.pulse[n].sweep_reload_flag = false;
+			m_APU.pulse[n].sweep_period_cnt = m_APU.pulse[n].sweep_period;
+		} else {
+			--m_APU.pulse[n].sweep_period_cnt;
+		}
+	}
+
+	if (!tri_halt_flag && tri_len_cnt > 0)
+		--tri_len_cnt;
+
+	if (!noise_halt_len_loop_env && noise_len_cnt > 0) {
+		--noise_len_cnt;
+		update_noise_output_level();
+	}
+}*/
+
+void nesapu_device::clock_len_and_sweep() 
+{
+	for (int n = 0; n < 2; ++n) {
+		if (!m_APU.pulse[n].halt_len_loop_env && m_APU.pulse[n].len_cnt > 0) {
+			--m_APU.pulse[n].len_cnt;
+			update_pulse_output_level(n);
+		}
+
+		// BreakingNES SW_UVF blocks sweep when frequency bits [10:2] are zero,
+		// i.e. period < 4.  Keep this separate from output muting, which still
+		// mutes pulse output when period < 8.
+		if (m_APU.pulse[n].sweep_period_cnt == 0 &&
+			m_APU.pulse[n].sweep_enabled &&
+			m_APU.pulse[n].sweep_shift > 0 &&
+			m_APU.pulse[n].period >= 4 &&
+			m_APU.pulse[n].sweep_target_period <= 0x7ff) {
+				m_APU.pulse[n].period = m_APU.pulse[n].sweep_target_period;
+				update_sweep_target_period(n);
+				update_pulse_output_level(n);
+		}
 
 		if (m_APU.pulse[n].sweep_reload_flag || m_APU.pulse[n].sweep_period_cnt == 0) {
 			m_APU.pulse[n].sweep_reload_flag = false;

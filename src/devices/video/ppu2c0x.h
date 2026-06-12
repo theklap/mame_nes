@@ -57,7 +57,7 @@ public:
 	typedef device_delegate<void (int scanline, bool vblank, bool blanked)> hblank_delegate;
 	typedef device_delegate<int (int address, int data)> vidaccess_delegate;
 	typedef device_delegate<void (offs_t offset)> latch_delegate;
-	typedef device_delegate<void (int scanline, unsigned dot)> ppu_to_mapper_delegate;
+	typedef device_delegate<void (int scanline, unsigned dot, int ppu_tick)> ppu_to_mapper_delegate;
 
 	enum
 	{
@@ -175,6 +175,7 @@ public:
 	void do_sprite_evaluation();
 	bool calc_sprite_tile_addr(uint8_t y, uint8_t index, uint8_t attrib, bool is_high);
 	void do_sprite_loading();
+	void do_sprite_loading_oam2addr_only();
 	unsigned get_sprite_pixel(unsigned &spr_pal, bool &spr_behind_bg, bool &spr_is_s0);
 
 	void copy_vert();
@@ -190,7 +191,7 @@ public:
 	void set_nmi(bool s);
 	void set_mapper(int mapper_number);
 	void reset();
-	void tick();
+	void tick(int x);
 
 	void retro_fix_previous_pixel_after_ppumask_write();
 
@@ -313,6 +314,7 @@ protected:
 
 	inline void clock_bg_shifters_only();
 	void do_prerender_oam_sweep();
+	void latch_sec_oam_for_2004();
 
 	void init_startup_only_state();
 	void init_runtime_reset_state();
@@ -425,9 +427,13 @@ protected:
 	int dot;
 	uint64_t frame;
 	bool skip_dot;
+	int ppu_tick_in_cpu_cycle;
 
 	// Current PPU address bus value.
 	unsigned ppu_addr_bus;
+	uint8_t ppu_ext_low_latch = 0;
+	bool ppu2007_ale_read_addr_latch_poison = false;
+	uint8_t ppu2007_ale_read_low_latch = 0;
 
 	// ---------------------------------------------------------------------
 	// Background fetch pipeline.
@@ -492,6 +498,7 @@ protected:
 	uint8_t overflow_finish_bytes = 0;
 
 	bool sprite_eval_initialized;
+	bool m_oam_eval_realigned = false;
 
 	// ---------------------------------------------------------------------
 	// Decoded render-enable state.
@@ -509,6 +516,21 @@ protected:
 	// ---------------------------------------------------------------------
 	bool oam_corrupt_pending;
 	uint8_t oam_corrupt_seed;
+	
+	bool sec_oam_addr_clear_next_line = false;
+	uint8_t oam2_corrupt_addr = 0;
+	bool oam2_corrupt_clear_next_line = false;
+	bool sprite_loading_reenabled_mid_slot = false;
+	uint8_t oam2_addr_hw = 0;
+	bool oam_tail_forced_blank_seen = false;
+	bool sprite_reload_hazard_active = false;
+	uint8_t sprite_reload_hazard_slot = 0;
+	uint8_t sprite_reload_hazard_bus = 0;
+	bool sprite_hold_x_during_forced_blank = false;
+	bool sprite_late_tail_blank_seen = false;
+	bool oam_row_copy_pending = false;
+uint8_t oam_row_copy_src = 0;
+uint8_t oam_row_copy_dst = 0;
 
 	// ---------------------------------------------------------------------
 	// Previous visible pixel state for retroactive $2001 edge behavior.
@@ -573,7 +595,7 @@ protected:
 	void schedule_2007_write(uint16_t addr, uint8_t data, int delay);
 	void schedule_2007_read(uint16_t addr, int delay, bool use_next_ppu_read_for_refill);
 	void schedule_2007_post_access_bump();
-
+	
 	// ---------------------------------------------------------------------
 	// Delayed fine-X / scroll operation state.
 	// ---------------------------------------------------------------------

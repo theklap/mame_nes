@@ -127,6 +127,7 @@ protected:
 	bool m_a12_low_seen = false;
 	bool m_c001_had_one_clock = false;
 	bool m_c001_pathology_pending = false;
+	int m_ppu_tick;
 };
 
 

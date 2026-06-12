@@ -72,7 +72,9 @@ nes_txrom_device::nes_txrom_device(const machine_config &mconfig, device_type ty
 	  m_scanline(0),
 	  m_dot(0),
 	  m_mmc3_clocks_since_c001(0xff),
-	  m_mmc3_seen_c001_recent(false)
+	  m_mmc3_seen_c001_recent(false),
+	  m_a12_low_seen(false),
+	  m_c001_pathology_pending(false)
 {
 	std::fill(std::begin(m_mmc_prg_bank), std::end(m_mmc_prg_bank), 0);
 	std::fill(std::begin(m_mmc_vrom_bank), std::end(m_mmc_vrom_bank), 0);
@@ -181,6 +183,9 @@ void nes_txrom_device::mmc3_common_initialize( int prg_mask, int chr_mask, int n
 	m_prev_ppu_addr = 0;
 	m_mmc3_clocks_since_c001 = 0xff;
 	m_mmc3_seen_c001_recent = false;
+	
+	m_a12_low_seen = false;
+	m_c001_pathology_pending = false;
 	
 	// 0 = Sharp/new behavior, nonzero = NEC/old behavior.
 	rev_b_behavior = !nec_irq_behavior;
@@ -343,7 +348,17 @@ void nes_txrom_device::mmc3_irq_clock()
         }
 
         if (m_irq_enable && m_irq_count == 0) {
-            delay_irq = 2;
+			//logerror("ppu_tick_in_cpu_cycle: %d, m_scanline:%d, m_dot: %d \n", m_ppu_tick, m_scanline, m_dot);
+			if(m_ppu_tick == 1) {
+				delay_irq = 3;
+			}
+			if(m_ppu_tick == 2) {
+				delay_irq = 2;
+			}
+			if(m_ppu_tick == 3) {
+				delay_irq = 1;
+			}
+			//m_maincpu6502->queue_delayed_mapper_irq(2);
 		}
     }
     else
@@ -371,7 +386,17 @@ void nes_txrom_device::mmc3_irq_clock()
                 (had_reload_request && m_irq_count == 0);
 
             if (dec_1_to_0 || reload_request_to_0) {
-                delay_irq = 2;
+				//logerror("ppu_tick_in_cpu_cycle: %d, m_scanline:%d, m_dot: %d \n", m_ppu_tick, m_scanline, m_dot);
+                if(m_ppu_tick == 1) {
+					delay_irq = 3;
+				}
+				if(m_ppu_tick == 2) {
+					delay_irq = 2;
+				}
+				if(m_ppu_tick == 3) {
+					delay_irq = 1;
+				}
+				//m_maincpu6502->queue_delayed_mapper_irq(2);
 			}
         }
     }
@@ -379,6 +404,7 @@ void nes_txrom_device::mmc3_irq_clock()
 
 void nes_txrom_device::ppu_to_mapper(int scanline, unsigned dot, int ppu_tick)
 {
+	m_ppu_tick = ppu_tick;
 	m_scanline = scanline;
 	m_dot = dot;
 	if (delay_irq > 0)
@@ -485,7 +511,7 @@ void nes_txrom_device::txrom_write(offs_t offset, uint8_t data)
 		{
 			if (m_mmc3_seen_c001_recent && m_mmc3_clocks_since_c001 == 1)
 			{
-				m_c001_pathology_pending = true;
+				/*m_c001_pathology_pending = true;
 
 				logerror("[MMC3 PATHOLOGY ARMED] cpu=%lld sl=%d dot=%u "
 						 "count=%02X latch=%02X reload=%d enable=%d rev_b=%d\n",
@@ -497,6 +523,7 @@ void nes_txrom_device::txrom_write(offs_t offset, uint8_t data)
 					m_irq_reload ? 1 : 0,
 					m_irq_enable ? 1 : 0,
 					rev_b_behavior ? 1 : 0);
+				*/
 			}
 
 			m_mmc3_seen_c001_recent = true;
