@@ -258,6 +258,12 @@ void ppu2c0x_device::init_runtime_reset_state()
 	memset(sprite_x, 0x00, sizeof(sprite_x));
 	memset(sprite_pat_l, 0x00, sizeof(sprite_pat_l));
 	memset(sprite_pat_h, 0x00, sizeof(sprite_pat_h));
+	memset(sec_oam_source, 0xFF, sizeof(sec_oam_source));
+	memset(sprite_oam_source, 0xFF, sizeof(sprite_oam_source));
+
+	corrupt_resume_high_pending = false;
+	corrupt_resume_high_lane = 0;
+	corrupt_resume_high_value = 0;
 
 	sec_oam_full = false;
 	oam_2004_latch = 0xFF;
@@ -1230,7 +1236,6 @@ void ppu2c0x_device::tick(int x) {
 		ppu_bus_read_can_fill_2007 = false;
 
 		sprite_go_this_line = sprite_go_next_line;
-		sprite_force_immediate_applied = false;
 
 		prev_pixel_valid = false;
 		retro_ppumask_color = false;
@@ -1634,7 +1639,11 @@ void ppu2c0x_device::run_visible_scanline_dot() {
 				if (dot & 1) {
 					oam_data = 0xFF;
 				} else {
-					// write the forced $FF into secondary OAM
+					// A new four-byte OAM2 slot begins at offsets 0, 4, 8...
+					if ((sec_oam_addr & 3) == 0)
+						sec_oam_source[(sec_oam_addr >> 2) & 7] = 0xFF;
+
+					// Write the forced $FF into secondary OAM.
 					sec_oam[sec_oam_addr & 0x1F] = 0xFF;
 					sec_oam_addr = (sec_oam_addr + 1) & 0x1F;
 				}
@@ -1793,33 +1802,6 @@ unsigned ppu2c0x_device::get_sprite_pixel(unsigned &spr_pal, bool &spr_behind_bg
 	// Output is still gated by sprite-enable + left-8 rules (your existing behavior)
 	const bool output_allowed = spr_output_enabled && (show_sprites_left_8 || pixel >= 8);
 
-	// If rendering was NOT enabled at dot 339 last scanline, Fiskbit says the shifters
-	// behave like "already expired" and will output/shift as soon as rendering is enabled.
-if (!sprite_go_this_line && !sprite_force_immediate_applied && vis)
-{
-	// Do not clear all X counters here.
-	//
-	// StarTropics disables rendering for multiple scanlines.  If every stale
-	// sprite X counter is forced to zero when rendering comes back, all stale
-	// sprite units dump at the same screen position, making one long line.
-	//
-	// Only already-started stale shifters need immediate continuation.
-	if (sprite_hold_x_during_forced_blank)
-	{
-		for (unsigned i = 0; i < 8; ++i)
-		{
-			if (sprite_shift_count[i] > 0 && sprite_shift_count[i] < 8)
-				sprite_x_cnt[i] = 0;
-		}
-	}
-	else
-	{
-		memset(sprite_x_cnt, 0, sizeof(sprite_x_cnt));
-	}
-
-	sprite_force_immediate_applied = true;
-}
-
 	// Scanline-0 odd-frame skip glitch:
 	// one early shift/output at X=0, then counting effectively offset by 1.
 	if (scanline == 0 && dot == 2 && sprite_sl0_early_shift_pending)
@@ -1893,22 +1875,20 @@ if (!sprite_go_this_line && !sprite_force_immediate_applied && vis)
 		if (sprite_shift_count[i] < 8)
 		{
 			// X counter counts down even if rendering disabled once started.
-			if (sprite_x_cnt[i] > 0)
+			if (sprite_x_cnt[i] > 0 && sprite_go_this_line)
 			{
-				if (vis || sprite_go_this_line || !sprite_hold_x_during_forced_blank)
-					sprite_x_cnt[i]--;
+
+				sprite_x_cnt[i]--;
 			}
 			else if (vis)
 			{
-				// Pattern shifters only clock when /VIS is asserted.
 				const unsigned p1 = (sprite_pat_h[i] & 0x80) ? 1 : 0;
 				const unsigned p0 = (sprite_pat_l[i] & 0x80) ? 1 : 0;
 				pat = uint8_t((p1 << 1) | p0);
-
+		
 				sprite_pat_h[i] <<= 1;
 				sprite_pat_l[i] <<= 1;
 				sprite_shift_count[i]++;
-				
 			}
 		}
 
@@ -1964,8 +1944,7 @@ void ppu2c0x_device::do_pixel_output_and_sprite_zero()
         uint16_t va = v & 0x3FFF;
         pal_index = ((va & 0x3F00) == 0x3F00) ? (va & 0x1F) : 0;
 
-        bitmap.pix(scanline, pixel) =
-            m_nespens[apply_grayscale_and_emphasis(palette_read(pal_index))];
+      	bitmap.pix(scanline, pixel) = m_nespens[apply_grayscale_and_emphasis(palette_read(pal_index))];
 
         // Latch this pixel as the "previous pixel" for any later retroactive fix
         prev_pixel_valid = true;
@@ -2400,6 +2379,9 @@ void ppu2c0x_device::do_sprite_evaluation()
 	// ------------------------------------------------------------------------
 	if (sprite_eval_in_range)
 	{
+		if ((sec_oam_addr & 3) == 0)
+			sec_oam_source[(sec_oam_addr >> 2) & 7] = oam_eval_addr & 0xFC;
+		
 		oam_latch_addr = (uint8_t)sec_oam_addr;
 
 		if (sprite_addr_l == 2)
@@ -2539,6 +2521,7 @@ void ppu2c0x_device::do_sprite_loading()
 		// low 8 bits from OLD v, high 6 bits from horizontally reloaded v.
 		case 0:
 		{
+			sprite_oam_source[sprite_n] = sec_oam_source[sprite_n];
 			// Only the VERY FIRST garbage NT fetch, dot 257 setup / dot 258 read,
 			// uses the special mixed address.
 			//
@@ -2554,13 +2537,10 @@ void ppu2c0x_device::do_sprite_loading()
 				const uint16_t old_nt_addr = (0x2000 | (sprite_nt_fetch_v     & 0x0FFF)) & 0x3FFF;
 				const uint16_t new_nt_addr = (0x2000 | (sprite_nt_fetch_v_new & 0x0FFF)) & 0x3FFF;
 
-				//ppu_addr_bus = (new_nt_addr & 0x3F00) | (old_nt_addr & 0x00FF);
-				//ppu_addr_bus &= 0x3FFF;
 				ppu_bus_address_drive((new_nt_addr & 0x3F00) | (old_nt_addr & 0x00FF));
 			}
 			else
 			{
-				//ppu_addr_bus = (0x2000 | (sprite_nt_fetch_v_new & 0x0FFF)) & 0x3FFF;
 				ppu_bus_address_drive((0x2000 | (sprite_nt_fetch_v_new & 0x0FFF)) & 0x3FFF);
 			}
 
@@ -2589,7 +2569,6 @@ void ppu2c0x_device::do_sprite_loading()
 		// This uses the normal upcoming-scanline NT address, not old v.
 		case 2:
 		{
-			//ppu_addr_bus = (0x2000 | (sprite_nt_fetch_v_new & 0x0FFF)) & 0x3FFF;
 			ppu_bus_address_drive((0x2000 | (sprite_nt_fetch_v_new & 0x0FFF)) & 0x3FFF);
 			// Render-unit load timing preserved from the old working path.
 			sprite_attribs[sprite_n] = sec_oam[(base + 2) & 0x1F];
@@ -2668,7 +2647,13 @@ void ppu2c0x_device::do_sprite_loading()
 
 			if (sprite_in_range && (sprite_attribs[sprite_n] & 0x40))
 				sprite_pat_h[sprite_n] = rev_byte(sprite_pat_h[sprite_n]);
-
+			
+			if (corrupt_resume_high_pending &&
+				sprite_n == corrupt_resume_high_lane)
+			{
+				sprite_pat_h[sprite_n] = corrupt_resume_high_value;
+				corrupt_resume_high_pending = false;
+			}
 			sprite_shift_count[sprite_n] = 0;
 			break;
 		}
@@ -3099,6 +3084,37 @@ void ppu2c0x_device::apply_delayed_2001(uint8_t val)
 	const bool new_bg_on  = (val & 0x08) != 0;
 	const bool new_spr_on = (val & 0x10) != 0;
 
+	// Any previous incomplete preservation belongs to an older enable edge.
+	if (!prev_pipe && (new_bg_on || new_spr_on))
+		corrupt_resume_high_pending = false;
+
+	// Rendering resumed during sprite loading while stale lane-0 state survived.
+	//
+	// The currently selected fetch slot receives a duplicate of stale lane 0.
+	// Its X counter receives the Y byte of the primary-OAM sprite that supplied
+	// stale lane 0.
+	if (!prev_pipe &&
+		(new_bg_on || new_spr_on) &&
+		(scanline <= 239 || scanline == 261) &&
+		dot >= 257 && dot <= 320 &&
+		sprite_oam_source[0] != 0xFF &&
+		(sprite_pat_l[0] != 0 || sprite_pat_h[0] != 0))
+	{
+		const unsigned sprite_n = (dot - 257) / 8;
+
+		if (sprite_n != 0) {
+			sprite_x[sprite_n] = oam[sprite_oam_source[0] & 0xFC];
+			sprite_x_cnt[sprite_n] = sprite_x[sprite_n];
+			sprite_attribs[sprite_n] = sprite_attribs[0];
+			sprite_pat_l[sprite_n] = sprite_pat_l[0];
+			sprite_pat_h[sprite_n] = sprite_pat_h[0];
+
+			corrupt_resume_high_pending = true;
+			corrupt_resume_high_lane = sprite_n;
+			corrupt_resume_high_value = sprite_pat_h[0];
+		}
+	}
+
 	bg_pipeline_enabled  = new_bg_on;
 	spr_pipeline_enabled = new_spr_on;
 
@@ -3124,22 +3140,10 @@ void ppu2c0x_device::apply_delayed_2001(uint8_t val)
 	if (!prev_pipe && new_pipe)
 	{
 		const bool render_line = (scanline <= 239) || (scanline == 261);
-		const bool in_fetch_region =
-			((dot >= 2 && dot <= 257) || (dot >= 322 && dot <= 337));
+		const bool in_fetch_region = ((dot >= 2 && dot <= 257) || (dot >= 322 && dot <= 337));
 
 		if (render_line && in_fetch_region)
 			inhibit_bg_shift_one_dot = true;
-		
-		const bool on_during_sprite_load = dot >= 257 && dot <= 320;
-
-		const bool on_during_tail_or_wrap = (dot >= 321 && dot <= 340) || (dot >= 1 && dot <= 8);
-
-		sprite_hold_x_during_forced_blank = sprite_late_tail_blank_seen &&
-			render_line &&
-			(on_during_sprite_load || on_during_tail_or_wrap) &&
-			!sprite_go_this_line;
-
-		sprite_late_tail_blank_seen = false;
 	}
 
 	// --------------------------------------------------
@@ -3147,16 +3151,12 @@ void ppu2c0x_device::apply_delayed_2001(uint8_t val)
 	// --------------------------------------------------
 	if (prev_pipe && !new_pipe)
 	{
+		
 		inhibit_bg_shift_one_dot = false;
 
 		const bool render_line = (scanline <= 239) || (scanline == 261);
 		const bool early_window = (dot >= 1 && dot <= 64);
 		const bool late_window  = (dot >= 257 && dot <= 320);
-
-		if (render_line && dot >= 321 && dot <= 340)
-				sprite_late_tail_blank_seen = true;
-
-		sprite_hold_x_during_forced_blank = false;
 
 		if (render_line && (early_window || late_window))
 		{

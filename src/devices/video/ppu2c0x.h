@@ -517,20 +517,12 @@ protected:
 	bool oam_corrupt_pending;
 	uint8_t oam_corrupt_seed;
 	
-	bool sec_oam_addr_clear_next_line = false;
-	uint8_t oam2_corrupt_addr = 0;
-	bool oam2_corrupt_clear_next_line = false;
-	bool sprite_loading_reenabled_mid_slot = false;
-	uint8_t oam2_addr_hw = 0;
-	bool oam_tail_forced_blank_seen = false;
-	bool sprite_reload_hazard_active = false;
-	uint8_t sprite_reload_hazard_slot = 0;
-	uint8_t sprite_reload_hazard_bus = 0;
-	bool sprite_hold_x_during_forced_blank = false;
-	bool sprite_late_tail_blank_seen = false;
-	bool oam_row_copy_pending = false;
-uint8_t oam_row_copy_src = 0;
-uint8_t oam_row_copy_dst = 0;
+	bool corrupt_resume_high_pending;
+	uint8_t corrupt_resume_high_lane;
+	uint8_t corrupt_resume_high_value;
+	// Primary-OAM row that supplied each secondary-OAM/render-unit slot.
+	uint8_t sec_oam_source[8];
+	uint8_t sprite_oam_source[8];
 
 	// ---------------------------------------------------------------------
 	// Previous visible pixel state for retroactive $2001 edge behavior.
