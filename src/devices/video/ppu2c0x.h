@@ -489,6 +489,8 @@ protected:
 	bool sec_oam_full;
 	uint8_t oam_2004_latch;
 	uint8_t sec_oam_last_write;
+	bool oam_data_from_oam1;
+	bool sprite_resume_uses_oam_buffer;
 
 	bool s_after_wrap;
 	bool sl0_stale_s0_loaded;
@@ -523,6 +525,7 @@ protected:
 	// Primary-OAM row that supplied each secondary-OAM/render-unit slot.
 	uint8_t sec_oam_source[8];
 	uint8_t sprite_oam_source[8];
+	bool oam_resume_uses_oam1_buffer;
 
 	// ---------------------------------------------------------------------
 	// Previous visible pixel state for retroactive $2001 edge behavior.

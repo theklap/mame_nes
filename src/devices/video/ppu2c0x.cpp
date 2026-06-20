@@ -1323,6 +1323,14 @@ void ppu2c0x_device::tick(int x) {
 		}
 	}
 
+	// 2C02 pre-render OAMADDR row copy.
+	//
+	// This is separate from render-disable OAM corruption. If render-disable
+	// corruption is pending, that operation takes priority on this PPU cycle.
+	if (scanline == 261 && dot == 0 && (bg_pipeline_enabled || spr_pipeline_enabled) && !oam_corrupt_pending && (oam_addr & 0xF8)) {
+		memcpy(&oam[0], &oam[oam_addr & 0xF8], 8);
+	}
+
 	// Apply OAM corruption exactly once:
 	// on the first PPU cycle that occurs with rendering enabled on a visible/pre-render line.
 	if (oam_corrupt_pending && (bg_pipeline_enabled || spr_pipeline_enabled)) {
