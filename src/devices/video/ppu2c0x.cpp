@@ -862,7 +862,9 @@ void ppu2c0x_device::ppu_bus_address_drive(uint16_t addr)
 
 	// Mapper-specific observers of the raw PPU address bus/access.
 	if (m_has_mmc3_a12 && m_mmc3)
-		m_mmc3->observe_ppu_a12(ppu_addr_bus, m_cpu->total_cycles());
+		m_mmc3->observe_ppu_a12(
+			(ppu_addr_bus >= 0x3F00) ? (ppu_addr_bus & 0x2FFF) : ppu_addr_bus,
+			m_cpu->total_cycles());
 }
 
 uint8_t ppu2c0x_device::ppu_bus_read(uint16_t addr, ppu_fetch_phase phase)
@@ -1091,7 +1093,7 @@ void ppu2c0x_device::ppu_bus_a12_observe(uint16_t addr)
 	addr &= 0x3FFF;
 
 	if (m_has_mmc3_a12 && m_mmc3)
-		m_mmc3->observe_ppu_a12(addr, m_cpu->total_cycles());
+		m_mmc3->observe_ppu_a12((addr >= 0x3F00) ? (addr & 0x2FFF) : addr, m_cpu->total_cycles());
 }
 
 void ppu2c0x_device::tick(int x) {
@@ -1283,6 +1285,7 @@ void ppu2c0x_device::tick(int x) {
 				t = ppuaddr_reload;
 				copy_horiz();
 				copy_vert();
+				ppu_bus_a12_observe(ppuaddr_reload);
 			}
 			else
 			{
@@ -1394,7 +1397,7 @@ void ppu2c0x_device::tick(int x) {
 	//337 for no 2001 delay - 338
 	//338 for 1 ppu cycle delay - 339
 	//339 for 2 ppu cycle delay - 340
-	if (scanline == 261 && dot == 340 && odd_frame && (bg_pipeline_enabled || spr_pipeline_enabled)) { //(bg_pipeline_enabled || spr_pipeline_enabled)  (bg_output_enabled || spr_output_enabled)
+	if (scanline == 261 && dot == 338 && odd_frame && (bg_output_enabled || spr_output_enabled)) { //(bg_pipeline_enabled || spr_pipeline_enabled)  (bg_output_enabled || spr_output_enabled)
 		skip_dot=true;
 		sprite_sl0_early_shift_pending = sl0_stale_s0_loaded;
 	}
@@ -1415,8 +1418,8 @@ void ppu2c0x_device::tick(int x) {
 		dot=0;
 		++scanline;
 		if(scanline == 240 && dot == 0) {
-			//ppu_addr_bus = v & 0x3FFF;
-			ppu_bus_address_drive(v);
+			ppu_addr_bus = v & 0x3FFF;
+			//ppu_bus_address_drive(v);
 		}
 		if(scanline > 261) {
 			scanline = 0;
@@ -1543,7 +1546,7 @@ void ppu2c0x_device::run_bg_fetch_dot()
 			// same address as before.
 			m_bgfetch_v_nt = v & 0x7FFF;
 			m_bgfetch_nt_addr = (0x2000 | (m_bgfetch_v_nt & 0x0FFF)) & 0x3FFF;
-			ppu_bus_address_drive(m_bgfetch_nt_addr);
+			ppu_addr_bus = m_bgfetch_nt_addr;
 			break;
 		}
 
@@ -1568,7 +1571,7 @@ void ppu2c0x_device::run_bg_fetch_dot()
 				| ((m_bgfetch_v_at >> 2) & 0x07);
 
 			m_bgfetch_at_addr &= 0x3FFF;
-			ppu_bus_address_drive(m_bgfetch_at_addr);
+			ppu_addr_bus = m_bgfetch_at_addr;
 			break;
 		}
 
@@ -1594,7 +1597,7 @@ void ppu2c0x_device::run_bg_fetch_dot()
 			if (ppu2007_ale_read_addr_latch_poison)
 				addr = (addr & 0x3F00) | ppu2007_ale_read_low_latch;
 
-			ppu_bus_address_drive(addr);
+			ppu_addr_bus = addr & 0x3FFF;
 			break;
 		}
 
@@ -1607,7 +1610,8 @@ void ppu2c0x_device::run_bg_fetch_dot()
 		break;
 
 		case 6:
-			ppu_bus_address_drive(m_bgfetch_pat_pt + (16 * nt_byte) + (m_bgfetch_v_pt >> 12) + 8);
+			ppu_addr_bus = m_bgfetch_pat_pt + (16 * nt_byte) + (m_bgfetch_v_pt >> 12) + 8;
+			ppu_addr_bus &= 0x3FFF;
 		break;
 
 		case 7:
@@ -1683,15 +1687,15 @@ void ppu2c0x_device::run_visible_scanline_dot() {
 }
 
 void ppu2c0x_device::run_render_pipeline_dot() {
-	/*if (dot == 0) {
+	if (dot == 0) {
 		if (bg_pipeline_enabled || spr_pipeline_enabled) {
-			//ppu_addr_bus = (bg_pat_addr + (16 * nt_byte) + (v >> 12)) & 0x3FFF;
-			ppu_bus_address_drive(bg_pat_addr + (16 * nt_byte) + (v >> 12));
+			ppu_addr_bus = (bg_pat_addr + (16 * nt_byte) + (v >> 12)) & 0x3FFF;
+			//ppu_bus_address_drive(bg_pat_addr + (16 * nt_byte) + (v >> 12));
 		} else {
-			//ppu_addr_bus = v & 0x3FFF;
-			ppu_bus_address_drive(v);
+			ppu_addr_bus = v & 0x3FFF;
+			//ppu_bus_address_drive(v);
 		}
-	}*/
+	}
 	
 	const bool pipe_render   = (bg_pipeline_enabled || spr_pipeline_enabled);
 
@@ -1699,6 +1703,8 @@ void ppu2c0x_device::run_render_pipeline_dot() {
         
         case 1 ... 256:
         case 321 ... 336:
+			//if (dot == 321)
+			//	sprite_fetch_active_this_line = false;
 			if (pipe_render) {
 				run_bg_fetch_dot();
 
@@ -1719,6 +1725,8 @@ void ppu2c0x_device::run_render_pipeline_dot() {
             break;
 		case 257:
 		{
+			//sprite_fetch_active_this_line = pipe_render;
+
 			if (pipe_render) {
 				// Latch OLD v before horizontal reload
 				sprite_nt_fetch_v = v & 0x7FFF;
@@ -1726,22 +1734,18 @@ void ppu2c0x_device::run_render_pipeline_dot() {
 				// Precompute what v will become after copy_horiz()
 				sprite_nt_fetch_v_new = (v & ~0x041F) | (t & 0x041F);
 				sprite_nt_fetch_v_new &= 0x7FFF;
-			}
-			
-			if (pipe_render) {
+
 				oam_addr = 0;
 				sec_oam_addr = 0;
 				copy_horiz();
-			}
 
-			if (pipe_render) { //immediate_render
 				do_sprite_loading();
 			}
 			break;
 		}
-  
+
 		case 258 ... 320:
-			if (pipe_render) { //immediate_render
+			if (pipe_render) {
 				do_sprite_loading();
 			}
 			break;
@@ -1749,7 +1753,7 @@ void ppu2c0x_device::run_render_pipeline_dot() {
         // --- Dummy Nametable Fetches (Dots 337 & 339) ---
         case 337: 
 			if (pipe_render) 
-				ppu_bus_address_drive(0x2000 | (v & 0x0FFF));
+				ppu_addr_bus = 0x2000 | (v & 0x0FFF);
 			break;
 		case 338:
 			if (pipe_render) {
@@ -1774,7 +1778,7 @@ void ppu2c0x_device::run_render_pipeline_dot() {
 			}
 
 			if (pipe_render)
-				ppu_bus_address_drive(0x2000 | (v & 0x0FFF));
+				ppu_addr_bus = 0x2000 | (v & 0x0FFF);
 
 			break;
 		case 340:
@@ -2465,33 +2469,46 @@ void ppu2c0x_device::do_sprite_evaluation()
 // Returns 'true' if the sprite is in range
 bool ppu2c0x_device::calc_sprite_tile_addr(uint8_t y, uint8_t index, uint8_t attrib, bool is_high)
 {
-    unsigned const diff = (scanline & 0xFF) - y;
+	unsigned const diff = (scanline & 0xFF) - y;
 
-    if (sprite_size == EIGHT_BY_EIGHT)
-    {
-        if (diff >= 8) {
-			ppu_bus_address_drive(sprite_pat_addr + (16 * index) + (8 * is_high));
-            return false;
-        }
+	if (sprite_size == EIGHT_BY_EIGHT)
+	{
+		if (diff >= 8)
+		{
+			ppu_addr_bus = sprite_pat_addr + (16 * index) + (8 * is_high);
+			ppu_addr_bus &= 0x3FFF;
+			return false;
+		}
 
-        unsigned const row = (attrib & 0x80) ? (7 - diff) : diff;
+		unsigned const row = (attrib & 0x80) ? (7 - diff) : diff;
 
-		ppu_bus_address_drive(sprite_pat_addr + (16 * index) + (8 * is_high) + row);
-        return true;
-    }
-    else
-    {
-        if (diff >= 16) {
-			ppu_bus_address_drive(0x1000 * (index & 1) + (16 * (index & 0xFE)) + (8 * is_high));
-            return false;
-        }
+		ppu_addr_bus = sprite_pat_addr + (16 * index) + (8 * is_high) + row;
+		ppu_addr_bus &= 0x3FFF;
+		return true;
+	}
 
-        unsigned const row = (attrib & 0x80) ? (15 - diff) : diff;
+	if (diff >= 16)
+	{
+		ppu_addr_bus =
+			0x1000 * (index & 1) +
+			(16 * (index & 0xFE)) +
+			(8 * is_high);
 
-		ppu_bus_address_drive(0x1000 * (index & 1) + (16 * (index & 0xFE)) + ((row & 8) << 1) + (8 * is_high) + (row & 7));
+		ppu_addr_bus &= 0x3FFF;
+		return false;
+	}
 
-        return true;
-    }
+	unsigned const row = (attrib & 0x80) ? (15 - diff) : diff;
+
+	ppu_addr_bus =
+		0x1000 * (index & 1) +
+		(16 * (index & 0xFE)) +
+		((row & 8) << 1) +
+		(8 * is_high) +
+		(row & 7);
+
+	ppu_addr_bus &= 0x3FFF;
+	return true;
 }
 
 // Initializes the sprite output units with the sprites that were copied into
@@ -2545,11 +2562,12 @@ void ppu2c0x_device::do_sprite_loading()
 				const uint16_t old_nt_addr = (0x2000 | (sprite_nt_fetch_v     & 0x0FFF)) & 0x3FFF;
 				const uint16_t new_nt_addr = (0x2000 | (sprite_nt_fetch_v_new & 0x0FFF)) & 0x3FFF;
 
-				ppu_bus_address_drive((new_nt_addr & 0x3F00) | (old_nt_addr & 0x00FF));
+				ppu_addr_bus = (new_nt_addr & 0x3F00) | (old_nt_addr & 0x00FF);
+ppu_addr_bus &= 0x3FFF;
 			}
 			else
 			{
-				ppu_bus_address_drive((0x2000 | (sprite_nt_fetch_v_new & 0x0FFF)) & 0x3FFF);
+				ppu_addr_bus = (0x2000 | (sprite_nt_fetch_v_new & 0x0FFF)) & 0x3FFF;
 			}
 
 			// Render-unit load timing preserved from the old working path.
@@ -2577,7 +2595,7 @@ void ppu2c0x_device::do_sprite_loading()
 		// This uses the normal upcoming-scanline NT address, not old v.
 		case 2:
 		{
-			ppu_bus_address_drive((0x2000 | (sprite_nt_fetch_v_new & 0x0FFF)) & 0x3FFF);
+			ppu_addr_bus = (0x2000 | (sprite_nt_fetch_v_new & 0x0FFF)) & 0x3FFF;
 			// Render-unit load timing preserved from the old working path.
 			sprite_attribs[sprite_n] = sec_oam[(base + 2) & 0x1F];
 			break;
@@ -2601,6 +2619,8 @@ void ppu2c0x_device::do_sprite_loading()
 		// Set up sprite pattern low fetch.
 		case 4:
 		{
+			//if (!sprite_fetch_active_this_line)
+			//	break;
 			sprite_in_range = calc_sprite_tile_addr(
 				sprite_y,
 				sprite_index,
@@ -2613,6 +2633,8 @@ void ppu2c0x_device::do_sprite_loading()
 		// Read sprite pattern low fetch.
 		case 5:
 		{
+			//if (!sprite_fetch_active_this_line)
+			//	break;
 			ppu_bus_read_can_fill_2007 = true;
 			uint8_t const pat = ppu_bus_read(ppu_addr_bus, ppu_fetch_phase::SPR_PTL);
 			ppu_bus_read_can_fill_2007 = false;
@@ -2629,11 +2651,14 @@ void ppu2c0x_device::do_sprite_loading()
 		// Set up sprite pattern high fetch.
 		case 6:
 		{
+			//if (!sprite_fetch_active_this_line)
+			//	break;
 			sprite_in_range = calc_sprite_tile_addr(
 				sprite_y,
 				sprite_index,
 				sprite_attribs[sprite_n],
 				true);
+
 			break;
 		}
 
@@ -2641,6 +2666,8 @@ void ppu2c0x_device::do_sprite_loading()
 		// Read sprite pattern high fetch.
 		case 7:
 		{
+			//if (!sprite_fetch_active_this_line)
+			//	break;
 			ppu_bus_read_can_fill_2007 = true;
 			uint8_t const pat = ppu_bus_read(ppu_addr_bus, ppu_fetch_phase::SPR_PTH);
 			ppu_bus_read_can_fill_2007 = false;
@@ -2834,28 +2861,43 @@ void ppu2c0x_device::bump_horiz() {
 
 //If rendering is enabled, fine Y is incremented at dot 256 of each scanline, overflowing to coarse Y, and finally adjusted to wrap among the nametables vertically
 //Bits 12-14 are fine Y. Bits 5-9 are coarse Y. Bit 11 selects the vertical nametable.
-void ppu2c0x_device::bump_vert() {
+//If rendering is enabled, fine Y is incremented at dot 256 of each scanline, overflowing to coarse Y, and finally adjusted to wrap among the nametables vertically
+//Bits 12-14 are fine Y. Bits 5-9 are coarse Y. Bit 11 selects the vertical nametable.
+void ppu2c0x_device::bump_vert()
+{
 	// Fine y equal to 7?
-    if ((v & 0x7000) == 0x7000) {
-        // Check coarse y
-        switch (v & 0x03E0) {
+	if ((v & 0x7000) == 0x7000)
+	{
+		// Check coarse y
+		switch (v & 0x03E0)
+		{
 			// Coarse y equal to 29. Switch vertical nametable (XOR by 0x0800) and
 			// clear fine y and coarse y in the same operation (possible since we
 			// know their value).
-			case 29 << 5: v ^= 0x7800 | (29 << 5); break;
+			case 29 << 5:
+				v ^= 0x7800 | (29 << 5);
+				break;
 
 			// Coarse y equal to 31. Clear fine y and coarse y without switching
 			// vertical nametable (this occurs for vertical scroll values > 240).
-			case 31 << 5: v &= ~0x73E0; break;
+			case 31 << 5:
+				v &= ~0x73E0;
+				break;
 
 			// Clear fine y and increment coarse y
-			default: v = (v & ~0x7000) + 0x0020;
-			}
-	} else {
-        // Bump fine y
-        v += 0x1000;
+			default:
+				v = (v & ~0x7000) + 0x0020;
+				break;
+		}
 	}
+	else
+	{
+		// Bump fine y
+		v += 0x1000;
+	}
+
 	v &= 0x7FFF; // <<< REQUIRED
+
 }
 
 // Restores the horizontal bits in v from t at the end of each scanline during
@@ -3146,7 +3188,7 @@ void ppu2c0x_device::apply_delayed_2001(uint8_t val)
 	// skipped once, so the shifters keep shifting and the serial input becomes visible.
 	// --------------------------------------------------
 	if (!prev_pipe && new_pipe)
-	{
+	{	
 		const bool render_line = (scanline <= 239) || (scanline == 261);
 		const bool in_fetch_region = ((dot >= 2 && dot <= 257) || (dot >= 322 && dot <= 337));
 
@@ -3252,7 +3294,7 @@ void ppu2c0x_device::write(offs_t offset, uint8_t val)
 		
 		case PPU_CONTROL1:
 		{
-			//uint8_t old_ppumask = m_regs[PPU_CONTROL1];
+			uint8_t old_ppumask = m_regs[PPU_CONTROL1];
 
 			bg_output_enabled  = (val & 0x08) != 0;
 			spr_output_enabled = (val & 0x10) != 0;
@@ -3276,7 +3318,7 @@ void ppu2c0x_device::write(offs_t offset, uint8_t val)
 			sprite_clip_comp = !spr_output_enabled ? 256 : show_sprites_left_8 ? 0 : 8;
 
 			// Retroactive color/render correction.
-			/*if (scanline <= 239 && dot >= 2 && dot <= 257)
+			if (scanline <= 239 && dot >= 2 && dot <= 257)
 			{
 				uint8_t diff = old_ppumask ^ val;
 				const int late_delta = dot - prev_pixel_x;
@@ -3293,7 +3335,7 @@ void ppu2c0x_device::write(offs_t offset, uint8_t val)
 
 				if ((diff & 0x18) && odd_frame && late_prev_pixel)
 					retro_ppumask_render = true;
-			}*/
+			}
 
 			break;
 		}

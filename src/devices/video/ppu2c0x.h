@@ -403,6 +403,10 @@ protected:
 	unsigned sec_oam_addr;
 	uint8_t oam_data;
 	uint8_t oam_eval_addr;
+	bool oam_resume_from_oam1_pending;
+	uint8_t sprite_load_y[8];
+	uint8_t sprite_load_index[8];
+	//bool sprite_fetch_active_this_line = false; // testing it for steins gate bounce fix
 
 	uint8_t sprite_addr_h;
 	uint8_t sprite_addr_l;

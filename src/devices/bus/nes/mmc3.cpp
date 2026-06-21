@@ -72,9 +72,7 @@ nes_txrom_device::nes_txrom_device(const machine_config &mconfig, device_type ty
 	  m_scanline(0),
 	  m_dot(0),
 	  m_mmc3_clocks_since_c001(0xff),
-	  m_mmc3_seen_c001_recent(false),
-	  m_a12_low_seen(false),
-	  m_c001_pathology_pending(false)
+	  m_mmc3_seen_c001_recent(false)
 {
 	std::fill(std::begin(m_mmc_prg_bank), std::end(m_mmc_prg_bank), 0);
 	std::fill(std::begin(m_mmc_vrom_bank), std::end(m_mmc_vrom_bank), 0);
@@ -184,9 +182,6 @@ void nes_txrom_device::mmc3_common_initialize( int prg_mask, int chr_mask, int n
 	m_mmc3_clocks_since_c001 = 0xff;
 	m_mmc3_seen_c001_recent = false;
 	
-	m_a12_low_seen = false;
-	m_c001_pathology_pending = false;
-	
 	// 0 = Sharp/new behavior, nonzero = NEC/old behavior.
 	rev_b_behavior = !nec_irq_behavior;
 	
@@ -270,11 +265,10 @@ void nes_txrom_device::observe_ppu_a12(uint16_t ppu_addr, uint64_t cpu_cycles)
 	{
 		const uint64_t low_time = cpu_cycles - m_last_a12_low_cpu;
 
-		if (m_a12_low_seen && low_time >= 4)
-		{
+		if (m_a12_low_seen && low_time >= 4) {
 			mmc3_irq_clock();
 		}
-
+		
 		m_a12_low_seen = false;
 	}
 
@@ -337,28 +331,16 @@ void nes_txrom_device::mmc3_irq_clock()
 		// if counter == 0 or reload requested -> reload latch
 		// else decrement
 		// then IRQ if counter == 0 and enabled
-        if (m_irq_count == 0 || m_irq_reload)
-        {
+        if (m_irq_count == 0 || m_irq_reload) {
             m_irq_count = m_irq_count_latch;
             m_irq_reload = false;
         }
-        else
-        {
+        else {
             --m_irq_count;
         }
 
         if (m_irq_enable && m_irq_count == 0) {
-			//logerror("ppu_tick_in_cpu_cycle: %d, m_scanline:%d, m_dot: %d \n", m_ppu_tick, m_scanline, m_dot);
-			if(m_ppu_tick == 1) {
-				delay_irq = 3;
-			}
-			if(m_ppu_tick == 2) {
-				delay_irq = 2;
-			}
-			if(m_ppu_tick == 3) {
-				delay_irq = 1;
-			}
-			//m_maincpu6502->queue_delayed_mapper_irq(2);
+            delay_irq = 2;
 		}
     }
     else
@@ -367,36 +349,21 @@ void nes_txrom_device::mmc3_irq_clock()
 		// same reload/decrement structure, but IRQ on 1->0 transition
 		// plus IRQ when reloading to 0 due to an explicit reload request ($C001 clear/reload),
 		// but NOT when reloading to 0 only because the counter had already naturally reached 0
-        if (m_irq_count == 0 || m_irq_reload)
-        {
+        if (m_irq_count == 0 || m_irq_reload) {
             m_irq_count = m_irq_count_latch;
             m_irq_reload = false;
         }
-        else
-        {
+        else {
             --m_irq_count;
         }
 
         if (m_irq_enable)
         {
-            const bool dec_1_to_0 =
-                (!had_reload_request && old_count == 1 && m_irq_count == 0);
-
-            const bool reload_request_to_0 =
-                (had_reload_request && m_irq_count == 0);
+            const bool dec_1_to_0 = (!had_reload_request && old_count == 1 && m_irq_count == 0);
+            const bool reload_request_to_0 = (had_reload_request && m_irq_count == 0);
 
             if (dec_1_to_0 || reload_request_to_0) {
-				//logerror("ppu_tick_in_cpu_cycle: %d, m_scanline:%d, m_dot: %d \n", m_ppu_tick, m_scanline, m_dot);
-                if(m_ppu_tick == 1) {
-					delay_irq = 3;
-				}
-				if(m_ppu_tick == 2) {
-					delay_irq = 2;
-				}
-				if(m_ppu_tick == 3) {
-					delay_irq = 1;
-				}
-				//m_maincpu6502->queue_delayed_mapper_irq(2);
+                delay_irq = 2;
 			}
         }
     }
@@ -404,15 +371,15 @@ void nes_txrom_device::mmc3_irq_clock()
 
 void nes_txrom_device::ppu_to_mapper(int scanline, unsigned dot, int ppu_tick)
 {
-	m_ppu_tick = ppu_tick;
 	m_scanline = scanline;
 	m_dot = dot;
-	if (delay_irq > 0)
-	{
+
+	if (delay_irq > 0) {
 		--delay_irq;
 
-		if (delay_irq == 0)
+		if (delay_irq == 0) {
 			m_maincpu6502->queue_delayed_mapper_irq(2);
+		}
 	}
 }
 
@@ -504,47 +471,105 @@ void nes_txrom_device::txrom_write(offs_t offset, uint8_t data)
 			break;
 
 		case 0x4000:	//IRQ latch ($C000-$DFFE, even)
-			m_irq_count_latch = data;
-			break;
+	if ((m_maincpu6502->total_cycles() >= 84711250  && m_maincpu6502->total_cycles() <= 84712100) ||
+		(m_maincpu6502->total_cycles() >= 84741020  && m_maincpu6502->total_cycles() <= 84742050))
+	{
+		logerror("[MMC3 C000] cpu=%llu sl=%d dot=%u data=%02X "
+				 "count=%02X old_latch=%02X enable=%d\n",
+			(unsigned long long)m_maincpu6502->total_cycles(),
+			m_scanline,
+			m_dot,
+			data,
+			m_irq_count,
+			m_irq_count_latch,
+			m_irq_enable ? 1 : 0);
+	}
+
+	m_irq_count_latch = data;
+	break;
 
 		case 0x4001:    // IRQ reload ($C001-$DFFF, odd)
-		{
-			if (m_mmc3_seen_c001_recent && m_mmc3_clocks_since_c001 == 1)
-			{
-				/*m_c001_pathology_pending = true;
+{
+	if ((m_maincpu6502->total_cycles() >= 84711250  && m_maincpu6502->total_cycles() <= 84712100) ||
+		(m_maincpu6502->total_cycles() >= 84741020  && m_maincpu6502->total_cycles() <= 84742050))
+	{
+		logerror("[MMC3 C001] cpu=%llu sl=%d dot=%u "
+				 "count=%02X latch=%02X reload=%d enable=%d clocks=%02X recent=%d\n",
+			(unsigned long long)m_maincpu6502->total_cycles(),
+			m_scanline,
+			m_dot,
+			m_irq_count,
+			m_irq_count_latch,
+			m_irq_reload ? 1 : 0,
+			m_irq_enable ? 1 : 0,
+			m_mmc3_clocks_since_c001,
+			m_mmc3_seen_c001_recent ? 1 : 0);
+	}
 
-				logerror("[MMC3 PATHOLOGY ARMED] cpu=%lld sl=%d dot=%u "
-						 "count=%02X latch=%02X reload=%d enable=%d rev_b=%d\n",
-					(long long)m_maincpu6502->total_cycles(),
-					m_scanline,
-					m_dot,
-					m_irq_count,
-					m_irq_count_latch,
-					m_irq_reload ? 1 : 0,
-					m_irq_enable ? 1 : 0,
-					rev_b_behavior ? 1 : 0);
-				*/
-			}
+	if (m_mmc3_seen_c001_recent && m_mmc3_clocks_since_c001 == 1)
+	{
+		m_c001_pathology_pending = true;
 
-			m_mmc3_seen_c001_recent = true;
-			m_mmc3_clocks_since_c001 = 0;
+		logerror("[MMC3 PATHOLOGY ARMED] cpu=%lld sl=%d dot=%u "
+				 "count=%02X latch=%02X reload=%d enable=%d rev_b=%d\n",
+			(long long)m_maincpu6502->total_cycles(),
+			m_scanline,
+			m_dot,
+			m_irq_count,
+			m_irq_count_latch,
+			m_irq_reload ? 1 : 0,
+			m_irq_enable ? 1 : 0,
+			rev_b_behavior ? 1 : 0);
+	}
 
-			m_irq_count = 0;
-			m_irq_reload = true;
-			break;
-		}
+	m_mmc3_seen_c001_recent = true;
+	m_mmc3_clocks_since_c001 = 0;
+
+	m_irq_count = 0;
+	m_irq_reload = true;
+	break;
+}
 
 		case 0x6000:	//IRQ disable ($E000-$FFFE, even)
-			m_irq_enable = 0;
-			set_irq_line(CLEAR_LINE);
-			if(delay_irq > 0)
-				m_maincpu6502->cancel_delayed_mapper_irq();
-			delay_irq = 0;
-			break;
+	if ((m_maincpu6502->total_cycles() >= 84711250  && m_maincpu6502->total_cycles() <= 84712100) ||
+		(m_maincpu6502->total_cycles() >= 84741020  && m_maincpu6502->total_cycles() <= 84742050))
+	{
+		logerror("[MMC3 E000] cpu=%llu sl=%d dot=%u "
+				 "count=%02X latch=%02X reload=%d delay=%d\n",
+			(unsigned long long)m_maincpu6502->total_cycles(),
+			m_scanline,
+			m_dot,
+			m_irq_count,
+			m_irq_count_latch,
+			m_irq_reload ? 1 : 0,
+			delay_irq);
+	}
+
+	m_irq_enable = 0;
+	set_irq_line(CLEAR_LINE);
+
+	if (delay_irq > 0)
+		m_maincpu6502->cancel_delayed_mapper_irq();
+
+	delay_irq = 0;
+	break;
 
 		case 0x6001:	// IRQ enable ($E001-$FFFF, odd)
-			m_irq_enable = 1;
-			break;
+	if ((m_maincpu6502->total_cycles() >= 84711250  && m_maincpu6502->total_cycles() <= 84712100) ||
+		(m_maincpu6502->total_cycles() >= 84741020  && m_maincpu6502->total_cycles() <= 84742050))
+	{
+		logerror("[MMC3 E001] cpu=%llu sl=%d dot=%u "
+				 "count=%02X latch=%02X reload=%d\n",
+			(unsigned long long)m_maincpu6502->total_cycles(),
+			m_scanline,
+			m_dot,
+			m_irq_count,
+			m_irq_count_latch,
+			m_irq_reload ? 1 : 0);
+	}
+
+	m_irq_enable = 1;
+	break;
 
 		default:
 			LOGMASKED(LOG_UNHANDLED, "txrom_write uncaught: %04x value: %02x\n", offset + 0x8000, data);
