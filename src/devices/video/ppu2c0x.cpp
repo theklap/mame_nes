@@ -860,11 +860,8 @@ void ppu2c0x_device::ppu_bus_address_drive(uint16_t addr)
 	ppu_addr_bus = addr;
 	ppu_ext_low_latch = addr & 0xFF;
 
-	// Mapper-specific observers of the raw PPU address bus/access.
 	if (m_has_mmc3_a12 && m_mmc3)
-		m_mmc3->observe_ppu_a12(
-			(ppu_addr_bus >= 0x3F00) ? (ppu_addr_bus & 0x2FFF) : ppu_addr_bus,
-			m_cpu->total_cycles());
+		m_mmc3->observe_ppu_a12(addr, m_cpu->total_cycles());
 }
 
 uint8_t ppu2c0x_device::ppu_bus_read(uint16_t addr, ppu_fetch_phase phase)
@@ -1088,13 +1085,14 @@ void ppu2c0x_device::resolve_mapper_ppu_devices()
 	m_has_chr_latch = !m_latch.isnull();
 }
 
-void ppu2c0x_device::ppu_bus_a12_observe(uint16_t addr)
+/*void ppu2c0x_device::ppu_bus_a12_observe(uint16_t addr)
 {
 	addr &= 0x3FFF;
 
 	if (m_has_mmc3_a12 && m_mmc3)
-		m_mmc3->observe_ppu_a12((addr >= 0x3F00) ? (addr & 0x2FFF) : addr, m_cpu->total_cycles());
-}
+		//m_mmc3->observe_ppu_a12((addr >= 0x3F00) ? (addr & 0x2FFF) : addr, m_cpu->total_cycles());
+	m_mmc3->observe_ppu_a12(addr, m_cpu->total_cycles());
+}*/
 
 void ppu2c0x_device::tick(int x) {
 	ppu_tick_in_cpu_cycle = x;
@@ -1285,7 +1283,7 @@ void ppu2c0x_device::tick(int x) {
 				t = ppuaddr_reload;
 				copy_horiz();
 				copy_vert();
-				ppu_bus_a12_observe(ppuaddr_reload);
+				//ppu_bus_a12_observe(ppuaddr_reload);
 			}
 			else
 			{

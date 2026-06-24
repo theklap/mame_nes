@@ -179,8 +179,10 @@ void nes_txrom_device::mmc3_common_initialize( int prg_mask, int chr_mask, int n
 	m_irq_reload = false;
 	m_last_a12_low_cpu = 0;
 	m_prev_ppu_addr = 0;
+	m_a12_low_seen = false;
 	m_mmc3_clocks_since_c001 = 0xff;
 	m_mmc3_seen_c001_recent = false;
+	m_c001_pathology_pending = false;
 	
 	// 0 = Sharp/new behavior, nonzero = NEC/old behavior.
 	rev_b_behavior = !nec_irq_behavior;
@@ -242,10 +244,24 @@ void nes_zz_device::pcb_reset()
 
 void nes_txrom_device::observe_ppu_a12(uint16_t ppu_addr, uint64_t cpu_cycles)
 {
-	ppu_addr &= 0x3FFF;
+	ppu_addr &= 0x3fff;
 
 	const bool prev_a12 = BIT(m_prev_ppu_addr, 12);
 	const bool a12 = BIT(ppu_addr, 12);
+
+	// CPU palette accesses can expose $3Fxx on the PPU address bus, so keep
+	// MMC3's remembered A12 state high.  However, do not count the $3Fxx
+	// palette access itself as an IRQ-counter clock.  The old global
+	// $3Fxx->$2Fxx mask fixed Steins;Gate only by suppressing this clock,
+	// but it also lied about A12 being low and broke MMC3 scanline tests.
+	if ((ppu_addr & 0x3f00) == 0x3f00)
+	{
+		if (!prev_a12 && a12)
+			m_a12_low_seen = false;
+
+		m_prev_ppu_addr = ppu_addr;
+		return;
+	}
 
 	if (!a12)
 	{
@@ -265,10 +281,11 @@ void nes_txrom_device::observe_ppu_a12(uint16_t ppu_addr, uint64_t cpu_cycles)
 	{
 		const uint64_t low_time = cpu_cycles - m_last_a12_low_cpu;
 
-		if (m_a12_low_seen && low_time >= 4) {
+		if (m_a12_low_seen && low_time >= 4)
+		{
 			mmc3_irq_clock();
 		}
-		
+
 		m_a12_low_seen = false;
 	}
 
