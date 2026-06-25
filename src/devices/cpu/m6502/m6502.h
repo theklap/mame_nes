@@ -85,6 +85,8 @@ public:
 	void cancel_delayed_mapper_irq();							//used in MMC3
 	void queue_delayed_apu_irq(int cycles);						//used in APU
 	void cancel_delayed_apu_irq();								//used in APU
+	bool get_is_pal() { return is_pal; }						//used in APU
+	void set_is_pal(bool x) { is_pal = x; }						//used in APU
 	
 	//MMC5 Mapper
 	void set_m_exram_control(int x);							//used in mmc5.cpp
@@ -233,6 +235,7 @@ protected:
 	static constexpr int MAX_OPEN_BUS_RANGES = 16;		//OpenBus nes_slot.cpp
     uint32_t m_open_bus_ranges[MAX_OPEN_BUS_RANGES];	//OpenBus nes_slot.cpp
     int m_ob_count;										//OpenBus nes_slot.cpp
+	bool is_pal;
 		
 	std::unique_ptr<memory_interface> mintf;
 	

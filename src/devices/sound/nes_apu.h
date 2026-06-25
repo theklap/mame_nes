@@ -27,6 +27,8 @@ public:
 	auto mem_read() { return m_mem_read_cb.bind(); }
 
 	virtual void device_reset() override;
+	virtual void device_clock_changed() override;
+	void calculate_rates();
 
 	void do_oam_dma(address_space &space, u8 page);
 
@@ -56,10 +58,16 @@ protected:
 		std::vector<write_stream_view> &outputs) override;
 
 private:
-	
+	/* GLOBAL CONSTANTS */
+	static constexpr unsigned  SYNCS_MAX1     = 0x20;
+	static constexpr unsigned  SYNCS_MAX2     = 0x80;
+	static constexpr u32       NTSC_APU_CLOCK = 21477272 / 12;
+	static constexpr u32       PAL_APU_CLOCK  = 26601712 / 16;
 	//============================================================
 	//  Types
 	//============================================================
+
+	int pal_cpu_ppu = 0;
 
 	enum Frame_counter_mode : u8
 	{

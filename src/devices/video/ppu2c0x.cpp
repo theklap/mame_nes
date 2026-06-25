@@ -6,6 +6,8 @@
 
     Written by Ernesto Corvi.
     This code is heavily based on Brad Oliver's MESS implementation.
+	
+	Total rewrite by Matthew Sutton for Accuracy on the NTSC
 
     2009-04: Changed NES PPU to be a device (Nathan Woods)
     2009-07: Changed NES PPU to use a device memory map (Robert Bohms)
@@ -150,12 +152,20 @@ ppu2c04_device::ppu2c04_device(const machine_config& mconfig, const char* tag, d
 // PAL NES
 ppu2c07_device::ppu2c07_device(const machine_config& mconfig, const char* tag, device_t* owner, uint32_t clock) :
 	ppu2c0x_device(mconfig, PPU_2C07, tag, owner, clock)
-{}
+{
+		m_scanlines_per_frame = PAL_SCANLINES_PER_FRAME;
+		m_vblank_first_scanline = VBLANK_FIRST_SCANLINE;
+		m_prerender_line = PAL_SCANLINES_PER_FRAME - 1;
+}
 
 // PAL clones
 ppupalc_device::ppupalc_device(const machine_config& mconfig, const char* tag, device_t* owner, uint32_t clock) :
 	ppu2c0x_device(mconfig, PPU_PALC, tag, owner, clock)
-{}
+{
+	m_scanlines_per_frame = PAL_SCANLINES_PER_FRAME;
+	m_vblank_first_scanline = VBLANK_FIRST_SCANLINE_PALC;
+	m_prerender_line = PAL_SCANLINES_PER_FRAME - 1;
+}
 
 // The PPU_2C05 variants have different protection value, set at device start, but otherwise are all the same...
 // Vs. Unisystem (Ninja Jajamaru Kun)
@@ -390,7 +400,7 @@ void ppu2c0x_device::init_startup_only_state()
 
 	m_security_value = 0;
 	m_tile_page = 0;
-	m_prerender_line = 0;
+	//m_prerender_line = 0;
 	m_planebuf[0] = 0;
 	m_planebuf[1] = 0;
 
@@ -997,9 +1007,7 @@ void ppu2c0x_device::schedule_2007_write(uint16_t addr, uint8_t data, int delay)
 
 void ppu2c0x_device::schedule_2007_post_access_bump()
 {
-    const bool rendering_now =
-        (bg_pipeline_enabled || spr_pipeline_enabled) &&
-        ((scanline < 240) || (scanline == m_prerender_line));
+    const bool rendering_now = (bg_pipeline_enabled || spr_pipeline_enabled) && is_render_scanline();
 
     if (rendering_now)
     {
@@ -1114,8 +1122,22 @@ void ppu2c0x_device::tick(int x) {
 		}
 		else
 		{
-			ppu_bus_address_drive(m_2007_write.addr);
-			writebyte(ppu_addr_bus, m_2007_write.data);
+			const uint16_t bus_addr = m_2007_write.addr & 0x3FFF;
+
+			// Delayed rendering $2007 write becomes effective now.
+			// Palette space is internal; keep the bus shadow/latch but do not
+			// expose this as a cartridge/MMC3 A12 clock.
+			if ((bus_addr & 0x3F00) == 0x3F00)
+			{
+				ppu_addr_bus = bus_addr;
+				ppu_ext_low_latch = bus_addr & 0xFF;
+			}
+			else
+			{
+				ppu_bus_address_drive(bus_addr);
+			}
+
+			writebyte(bus_addr, m_2007_write.data);
 
 			// The delayed rendering write has now become effective.  Only now arm
 			// the post-access bump, so the increment is delayed relative to the
@@ -1127,7 +1149,7 @@ void ppu2c0x_device::tick(int x) {
 		}
 	}
 
-	// --------------------------------------------------
+		// --------------------------------------------------
 	// Delayed $2007 read/refill
 	//
 	// CPU $2007 reads return immediately from either:
@@ -1160,8 +1182,7 @@ void ppu2c0x_device::tick(int x) {
 				m_2007_read.waiting_for_refill_bus_read = true;
 				ppu2007_buffer_fill_arm_pending = true;
 
-				const bool render_line =
-					(scanline <= 239) || (scanline == 261);
+				const bool render_line = is_render_scanline();
 
 				const bool bg_fetch_dot =
 					render_line &&
@@ -1178,44 +1199,42 @@ void ppu2c0x_device::tick(int x) {
 				// phase.
 				ppu2007_ale_read_addr_latch_poison = false;
 
-			if (bg_fetch_dot && bg_phase == 4)
-			{
-				// ALE+Read collision on BG pattern-low address setup.
-				//
-				// General rule:
-				//   high address bits come from the current pattern address generator
-				//   low  address bits come from the external AD-bus latch
-				//
-				// But only force it if the feedback loop is stable.  If the read from the
-				// poisoned address would return a different value than the latch, that is
-				// the unstable $2007-stress case.  Do not collapse that into a deterministic
-				// address here.
-				const uint16_t normal_addr =
-					(bg_pat_addr + (16 * nt_byte) + (v >> 12)) & 0x3FFF;
-
-				const uint16_t poisoned_addr =
-					(normal_addr & 0x3F00) | ppu_ext_low_latch;
-
-				const uint8_t feedback_data = readbyte(poisoned_addr);
-
-				if (feedback_data == ppu_ext_low_latch)
+				if (bg_fetch_dot && bg_phase == 4)
 				{
-					ppu2007_ale_read_addr_latch_poison = true;
-					ppu2007_ale_read_low_latch = ppu_ext_low_latch;
+					// ALE+Read collision on BG pattern-low address setup.
+					//
+					// General rule:
+					//   high address bits come from the current pattern address generator
+					//   low  address bits come from the external AD-bus latch
+					//
+					// But only force it if the feedback loop is stable.  If the read from the
+					// poisoned address would return a different value than the latch, that is
+					// the unstable $2007-stress case.  Do not collapse that into a deterministic
+					// address here.
+					const uint16_t normal_addr =
+						(bg_pat_addr + (16 * nt_byte) + (v >> 12)) & 0x3FFF;
+
+					const uint16_t poisoned_addr =
+						(normal_addr & 0x3F00) | ppu_ext_low_latch;
+
+					const uint8_t feedback_data = readbyte(poisoned_addr);
+
+					if (feedback_data == ppu_ext_low_latch)
+					{
+						ppu2007_ale_read_addr_latch_poison = true;
+						ppu2007_ale_read_low_latch = ppu_ext_low_latch;
+					}
 				}
-			}
 
 				schedule_2007_post_access_bump();
 			}
 			else
 			{
 				// Non-rendering $2007 read:
-				// Delayed direct refill from the accessed address.
-				ppu_bus_address_drive(read_addr);
+				// The mapper sees the original $2007 access address.
+				// The read buffer data may come from the palette mirror.
+				ppu_bus_address_drive(delayed_bus_addr);
 				ppu_data_reg = readbyte(read_addr);
-
-				// Restore the visible bus address to current v after the refill.
-				ppu_bus_address_drive(v);
 
 				m_2007_read.pending = false;
 			}
@@ -1276,7 +1295,7 @@ void ppu2c0x_device::tick(int x) {
 
 			const bool rendering_now =
 				(bg_pipeline_enabled || spr_pipeline_enabled) &&
-				((scanline < 240) || (scanline == m_prerender_line));
+				is_render_scanline();
 
 			if (rendering_now)
 			{
@@ -1289,8 +1308,17 @@ void ppu2c0x_device::tick(int x) {
 			{
 				v = ppuaddr_reload;
 
-				// Outside rendering, your old behavior really did expose v on the bus.
-				ppu_bus_address_drive(v);
+				// Palette space is internal to the PPU. Keep the PPU bus shadow/latch,
+				// but do not expose this as a cartridge/MMC3 A12 clock.
+				if ((v & 0x3F00) == 0x3F00)
+				{
+					ppu_addr_bus = v & 0x3FFF;
+					ppu_ext_low_latch = v & 0xFF;
+				}
+				else
+				{
+					ppu_bus_address_drive(v);
+				}
 			}
 
 			pending_2006.has_pending = false;
@@ -1328,14 +1356,14 @@ void ppu2c0x_device::tick(int x) {
 	//
 	// This is separate from render-disable OAM corruption. If render-disable
 	// corruption is pending, that operation takes priority on this PPU cycle.
-	if (scanline == 261 && dot == 0 && (bg_pipeline_enabled || spr_pipeline_enabled) && !oam_corrupt_pending && (oam_addr & 0xF8)) {
+	if (is_prerender_scanline() && dot == 0 && (bg_pipeline_enabled || spr_pipeline_enabled) && !oam_corrupt_pending && (oam_addr & 0xF8)) {
 		memcpy(&oam[0], &oam[oam_addr & 0xF8], 8);
 	}
 
 	// Apply OAM corruption exactly once:
 	// on the first PPU cycle that occurs with rendering enabled on a visible/pre-render line.
 	if (oam_corrupt_pending && (bg_pipeline_enabled || spr_pipeline_enabled)) {
-		if (scanline <= 239 || scanline == 261) {
+		if (is_render_scanline()) {
 
 			uint8_t row = oam_corrupt_seed & 0x1F;
 
@@ -1363,11 +1391,12 @@ void ppu2c0x_device::tick(int x) {
 		screen().reset_origin(scanline, dot);
 	}
 	
-	switch (scanline) {
-		case 0 ... 239     : run_visible_scanline_dot();   	break;
-		case 241           : run_scanline_241_dot();       	break;
-		case 261	   	   : run_prerender_scanline_dot(); 	break;
-	}
+	if (scanline <= BOTTOM_VISIBLE_SCANLINE)
+		run_visible_scanline_dot();
+	else if (scanline == m_vblank_first_scanline)
+		run_scanline_241_dot();
+	else if (scanline == m_prerender_line)
+		run_prerender_scanline_dot();
 	
 	//mmc3/mmc6 needs no variables but still needs the call to countdown IRQ
 	//mmc5 needs scanline, (bg_output_enabled || spr_output_enabled) and dot
@@ -1395,7 +1424,7 @@ void ppu2c0x_device::tick(int x) {
 	//337 for no 2001 delay - 338
 	//338 for 1 ppu cycle delay - 339
 	//339 for 2 ppu cycle delay - 340
-	if (scanline == 261 && dot == 338 && odd_frame && (bg_output_enabled || spr_output_enabled)) { //(bg_pipeline_enabled || spr_pipeline_enabled)  (bg_output_enabled || spr_output_enabled)
+	if (is_ntsc_timing() && scanline == m_prerender_line && dot == 338 && odd_frame && (bg_output_enabled || spr_output_enabled)) {
 		skip_dot=true;
 		sprite_sl0_early_shift_pending = sl0_stale_s0_loaded;
 	}
@@ -1415,11 +1444,11 @@ void ppu2c0x_device::tick(int x) {
 	if (dot > 340) {
 		dot=0;
 		++scanline;
-		if(scanline == 240 && dot == 0) {
+		if (scanline == BOTTOM_VISIBLE_SCANLINE + 1 && dot == 0) {
 			ppu_addr_bus = v & 0x3FFF;
 			//ppu_bus_address_drive(v);
 		}
-		if(scanline > 261) {
+		if (scanline >= m_scanlines_per_frame) {
 			scanline = 0;
 			suppress_vblank_flag = false;
 			odd_frame = !odd_frame;
@@ -1431,7 +1460,7 @@ void ppu2c0x_device::tick(int x) {
 	m_scanline=scanline;
 
 	//Start HBlank
-	if (scanline <= 239 && dot==257) {
+	if (scanline <= BOTTOM_VISIBLE_SCANLINE && dot == 257) {
 		if (!m_hblank_callback_proc.isnull())
 			m_hblank_callback_proc(scanline, in_vblank, (bg_pipeline_enabled || spr_pipeline_enabled) );
 	}
@@ -1771,7 +1800,7 @@ void ppu2c0x_device::run_render_pipeline_dot() {
 			// previous value of sprite_go_next_line alive.  Explicitly record
 			// false so the stale/halted sprite state can survive and draw
 			// immediately when rendering is re-enabled.
-			if (scanline <= 239 || scanline == 261) {
+			if (is_render_scanline()) {
 				sprite_go_next_line = (bg_pipeline_enabled || spr_pipeline_enabled);
 			}
 
@@ -1796,7 +1825,7 @@ void ppu2c0x_device::run_render_pipeline_dot() {
 
 unsigned ppu2c0x_device::get_sprite_pixel(unsigned &spr_pal, bool &spr_behind_bg, bool &spr_is_s0)
 {
-	if (scanline >= 240 || dot < 2 || dot > 257)
+	if (scanline > BOTTOM_VISIBLE_SCANLINE || dot < 2 || dot > 257)
 	{
 		sprite0_pat = 0;
 		return 0;
@@ -1932,7 +1961,7 @@ void ppu2c0x_device::do_pixel_output_and_sprite_zero()
     unsigned pixel = dot - 2;
     unsigned pal_index;
 
-    const bool render_line = (scanline <= 239) || (scanline == 261);
+    const bool render_line = is_render_scanline();
     const bool rendering_disabled = (!bg_output_enabled && !spr_output_enabled);
 
     // If rendering disabled, we still allow sprite unit bookkeeping to run,
@@ -2672,7 +2701,7 @@ ppu_addr_bus &= 0x3FFF;
 
 			sprite_pat_h[sprite_n] = sprite_in_range ? pat : 0;
 
-			if (scanline == 261 && sprite_n == 0 && sprite_in_range)
+			if (is_prerender_scanline() && sprite_n == 0 && sprite_in_range)
 			{
 				sl0_stale_s0_loaded = true;
 				sl0_stale_sprite0_identity = true;
@@ -2799,19 +2828,37 @@ void ppu2c0x_device::run_scanline_241_dot()
     }
 }
 
-void ppu2c0x_device::do_2007_post_access_bump() {
-	if ((bg_pipeline_enabled || spr_pipeline_enabled) && (scanline < 240 || scanline == m_prerender_line)) {
-        // Accessing $2007 during rendering performs this glitch. Used by Young
-        // Indiana Jones Chronicles to shake the screen.
+void ppu2c0x_device::do_2007_post_access_bump()
+{
+	if ((bg_pipeline_enabled || spr_pipeline_enabled) && is_render_scanline())
+	{
+		// Accessing $2007 during rendering performs this glitch. Used by Young
+		// Indiana Jones Chronicles to shake the screen.
 		bump_horiz();
 		bump_vert();
-    }
-    // The incrementation operation can touch the high bit even though it's not
-    // used for addressing (it's the high bit of fine y)
-    else {
-        v = (v + v_inc) & 0x7FFF;
-        // The PPU address bus mirrors v outside of rendering
-       ppu_bus_address_drive(v);
+	}
+	else
+	{
+		// The $2007 access increments v after the access.
+		// MMC3 A12 tests expect this increment to be visible when it changes A12,
+		// e.g. $0FFF -> $1000 after a $2007 read/write.
+		const uint16_t old_v = v & 0x3FFF;
+
+		v = (v + v_inc) & 0x7FFF;
+
+		const uint16_t new_v = v & 0x3FFF;
+
+		// Palette space is internal to the PPU. This is the Steins fix:
+		// do not let $3Fxx palette-space bumps create MMC3 clocks.
+		if ((old_v & 0x3F00) == 0x3F00 || (new_v & 0x3F00) == 0x3F00)
+		{
+			ppu_addr_bus = new_v;
+			ppu_ext_low_latch = new_v & 0xFF;
+		}
+		else
+		{
+			ppu_bus_address_drive(new_v);
+		}
 	}
 }
 
@@ -2832,7 +2879,7 @@ void ppu2c0x_device::write_oam_data_reg(uint8_t val)
     // OAMADDR increment. For this test/model, bump the sprite index by one:
     // +4, then force byte index to 0 with & $FC.
     const bool rendering_on = (bg_pipeline_enabled || spr_pipeline_enabled);
-    const bool render_line  = (scanline < 240) || (scanline == 261);
+    const bool render_line = is_render_scanline();
 
     if (render_line && rendering_on) {
 		oam_2004_latch = val;
@@ -2980,12 +3027,12 @@ uint8_t ppu2c0x_device::read(offs_t offset)
 			// Scheduler convention: dot is the next PPU dot to execute.
 			// dot == 1 here means hardware dot 0 has completed, but dot 1 has not run yet.
 			// This models the $2002 read-on-241,0 case that suppresses the upcoming vblank set.
-			if (scanline == 241 && dot == 1) {
+			if (is_vblank_start_scanline() && dot == 1) {
 				vblank_read = false;
 				suppress_vblank_flag = true;
 			}
 			// Readback quirk: at prerender clear edge, sprite flags read as cleared here
-			if (scanline == 261 && dot == 1) {
+			if (is_prerender_scanline() && dot == 1) {
 				spr0_read = false;
 				ovf_read = false;
 			}
@@ -3013,7 +3060,7 @@ uint8_t ppu2c0x_device::read(offs_t offset)
 
 		case PPU_SPRITE_DATA: /* $2004 */
 		{
-			const bool render_line = (scanline < 240) || (scanline == 261);
+			const bool render_line = is_render_scanline();
 			const bool rendering_enabled = (bg_pipeline_enabled || spr_pipeline_enabled);//(bg_output_enabled || spr_output_enabled);
 			
 			uint8_t ret = 0;
@@ -3055,7 +3102,8 @@ uint8_t ppu2c0x_device::read(offs_t offset)
 		{
 			const uint16_t bus_addr = v & 0x3FFF;
 
-			// CPU access places the current VRAM address on the PPU address bus.
+			// $2007 read is a real PPU address-bus event.
+			// mmc3_test_2/3-A12_clocking expects this to clock when A12 rises.
 			ppu_bus_address_drive(bus_addr);
 
 			uint8_t ret;
@@ -3080,7 +3128,7 @@ uint8_t ppu2c0x_device::read(offs_t offset)
 
 			const bool rendering_for_access =
 				(bg_pipeline_enabled || spr_pipeline_enabled) &&
-				((scanline < 240) || (scanline == m_prerender_line));
+				is_render_scanline();
 
 			if (!rendering_for_access)
 			{
@@ -3101,7 +3149,7 @@ uint8_t ppu2c0x_device::read(offs_t offset)
 				schedule_2007_read(bus_addr, 4, true);
 			}
 
-			ppu_bus_address_drive(v);
+			//ppu_bus_address_drive(v);
 
 			return ppu_open_bus_peek();
 		}
@@ -3143,7 +3191,7 @@ void ppu2c0x_device::apply_delayed_2001(uint8_t val)
 	// stale lane 0.
 	if (!prev_pipe &&
 		(new_bg_on || new_spr_on) &&
-		(scanline <= 239 || scanline == 261) &&
+		is_render_scanline() &&
 		dot >= 257 && dot <= 320 &&
 		sprite_oam_source[0] != 0xFF &&
 		(sprite_pat_l[0] != 0 || sprite_pat_h[0] != 0))
@@ -3187,7 +3235,7 @@ void ppu2c0x_device::apply_delayed_2001(uint8_t val)
 	// --------------------------------------------------
 	if (!prev_pipe && new_pipe)
 	{	
-		const bool render_line = (scanline <= 239) || (scanline == 261);
+		const bool render_line = is_render_scanline();
 		const bool in_fetch_region = ((dot >= 2 && dot <= 257) || (dot >= 322 && dot <= 337));
 
 		if (render_line && in_fetch_region)
@@ -3202,7 +3250,7 @@ void ppu2c0x_device::apply_delayed_2001(uint8_t val)
 		
 		inhibit_bg_shift_one_dot = false;
 
-		const bool render_line = (scanline <= 239) || (scanline == 261);
+		const bool render_line = is_render_scanline();
 		const bool early_window = (dot >= 1 && dot <= 64);
 		const bool late_window  = (dot >= 257 && dot <= 320);
 
@@ -3264,7 +3312,7 @@ void ppu2c0x_device::write(offs_t offset, uint8_t val)
 			// so a write on the exact pre-render clear tick can still see in_vblank = true
 			// even though hardware would already be past the enable window.
 			bool vblank_seen_for_enable = in_vblank;
-			if (scanline == 261 && dot == 1) { //needed for nmi "on" timing
+			if (is_prerender_scanline() && dot == 1) { //needed for nmi "on" timing
 				vblank_seen_for_enable = false;
 			}
 
@@ -3278,7 +3326,7 @@ void ppu2c0x_device::write(offs_t offset, uint8_t val)
 			// Disabling NMI near the VBL-set edge suppresses the pending NMI for one more
 			// scheduler tick than the raw hardware dot because writes are processed before
 			// the PPU edge in this core.
-			if (!new_nmi_on_vblank && nmi_on_vblank && scanline == 241 && dot >= 1 && dot <= 3) {
+			if (!new_nmi_on_vblank && nmi_on_vblank && is_vblank_start_scanline() && dot >= 1 && dot <= 3) {
 				set_nmi(false);
 			}
 
@@ -3316,7 +3364,7 @@ void ppu2c0x_device::write(offs_t offset, uint8_t val)
 			sprite_clip_comp = !spr_output_enabled ? 256 : show_sprites_left_8 ? 0 : 8;
 
 			// Retroactive color/render correction.
-			if (scanline <= 239 && dot >= 2 && dot <= 257)
+			if (scanline <= BOTTOM_VISIBLE_SCANLINE && dot >= 2 && dot <= 257)
 			{
 				uint8_t diff = old_ppumask ^ val;
 				const int late_delta = dot - prev_pixel_x;
@@ -3345,7 +3393,7 @@ void ppu2c0x_device::write(offs_t offset, uint8_t val)
 			m_regs[PPU_SPRITE_ADDRESS] = val;
 			oam_addr = val;
 
-			const bool render_line = (scanline < 240) || (scanline == 261);
+			const bool render_line = is_render_scanline();
 			const bool rendering_enabled = (bg_pipeline_enabled || spr_pipeline_enabled);
 
 			if (render_line && rendering_enabled && sprite_eval_initialized && dot >= 65 && dot <= 256)
@@ -3409,11 +3457,20 @@ void ppu2c0x_device::write(offs_t offset, uint8_t val)
 			uint16_t bus_addr = v & 0x3FFF;
 
 			// Bus sees the access address now.
-			ppu_bus_address_drive(bus_addr);
+			// Palette space is internal; don't clock cartridge/MMC3 A12 from it.
+			if ((bus_addr & 0x3F00) == 0x3F00)
+			{
+				ppu_addr_bus = bus_addr & 0x3FFF;
+				ppu_ext_low_latch = bus_addr & 0xFF;
+			}
+			else
+			{
+				ppu_bus_address_drive(bus_addr);
+			}
 
 			const bool rendering_for_access =
 				(bg_pipeline_enabled || spr_pipeline_enabled) &&
-				((scanline < 240) || (scanline == m_prerender_line));
+				is_render_scanline();
 
 			if (!rendering_for_access)
 			{
@@ -3428,8 +3485,17 @@ void ppu2c0x_device::write(offs_t offset, uint8_t val)
 				ppu2007_post_bump_pending = true;
 				ppu2007_post_bump_delay = 1;
 
-				// Keep the bus at the access address until the delayed bump runs.
-				ppu_bus_address_drive(bus_addr);
+				// Keep the bus shadow at the access address until the delayed bump runs.
+				// Palette space is internal; don't clock cartridge/MMC3 A12 from it.
+				if ((bus_addr & 0x3F00) == 0x3F00)
+				{
+					ppu_addr_bus = bus_addr & 0x3FFF;
+					ppu_ext_low_latch = bus_addr & 0xFF;
+				}
+				else
+				{
+					ppu_bus_address_drive(bus_addr);
+				}
 			}
 			else
 			{
@@ -3440,8 +3506,17 @@ void ppu2c0x_device::write(offs_t offset, uint8_t val)
 				// relative to the CPU register write.
 				schedule_2007_write(bus_addr & 0x3FFF, val, 5);
 
-				// Keep the bus at the access address for now.
-				ppu_bus_address_drive(bus_addr);
+				// Keep the bus shadow at the access address for now.
+				// Palette space is internal; don't clock cartridge/MMC3 A12 from it.
+				if ((bus_addr & 0x3F00) == 0x3F00)
+				{
+					ppu_addr_bus = bus_addr & 0x3FFF;
+					ppu_ext_low_latch = bus_addr & 0xFF;
+				}
+				else
+				{
+					ppu_bus_address_drive(bus_addr);
+				}
 			}
 			break;
 		}

@@ -54,15 +54,10 @@ void nes_state::nes(machine_config &config)
 	SPEAKER(config, "mono").front_center();
 	maincpu.add_route(ALL_OUTPUTS, "mono", 0.90);
 	
-
 	SCREEN(config, m_screen, SCREEN_TYPE_RASTER);
 	// NES NTSC composite timing
 	const double master_clock = 21'477'272.0;
 	const double ppu_pixel_clock = master_clock / 4.0;
-
-	// NTSC composite frame rate w/ odd-frame skip
-	//const double composite_frame_rate =
-	//	ppu_pixel_clock / 89341.5; // = 60.098813 Hz
 
 	m_screen->set_raw(
 		ppu_pixel_clock,
@@ -70,25 +65,6 @@ void nes_state::nes(machine_config &config)
 		262, 0, 240   // vtotal=262 lines, visible y=0..239
 	);
 
-	//m_screen->set_refresh_hz(composite_frame_rate);
-	
-	//SCREEN(config, m_screen, SCREEN_TYPE_LCD);
-	//m_screen->set_raw(21.477272_MHz_XTAL/4, 341, 0, 257, ((89341.5/341)), 0, 240);
-	
-//	m_screen->set_refresh_hz(60.0988);
-	//m_screen->set_refresh_hz(60098800);
-	// This isn't used so much to calulate the vblank duration (the PPU code tracks that manually) but to determine
-	// the number of cycles in each scanline for the PPU scanline timer. Since the PPU has 20 vblank scanlines + 2
-	// non-rendering scanlines, we compensate. This ends up being 2500 cycles for the non-rendering portion, 2273
-	// cycles for the actual vblank period.
-//	m_screen->set_vblank_time(ATTOSECONDS_IN_USEC((113.66/(NTSC_APU_CLOCK.dvalue()/1000000)) *
-//							 (ppu2c0x_device::VBLANK_LAST_SCANLINE_NTSC-ppu2c0x_device::VBLANK_FIRST_SCANLINE+1+2)));
-	//m_screen->set_vblank_time(0);
-	//m_screen->set_size(341, 262);
-	//m_screen->set_size(32*8, 262);
-//	m_screen->set_size(340, 261);
-//	m_screen->set_visarea((0*8), (32*8-1), (0*8), (30*8-1));
-	//m_screen->set_visarea(0, 255, 0, 239);
 	m_screen->set_screen_update(FUNC(nes_state::screen_update_nes));
 	m_screen->screen_vblank().set(FUNC(nes_state::screen_vblank_nes));
 
@@ -123,14 +99,15 @@ void nes_state::nespal(machine_config &config)
 
 	m_cartslot->set_clock(PAL_APU_CLOCK);
 
-	// video hardware
-	m_screen->set_refresh_hz(50.0070);
-	m_screen->set_vblank_time(ATTOSECONDS_IN_USEC((106.53/(PAL_APU_CLOCK.dvalue()/1000000)) *
-							 (ppu2c0x_device::VBLANK_LAST_SCANLINE_PAL-ppu2c0x_device::VBLANK_FIRST_SCANLINE+1+2)));
-	//m_screen->set_size(32*8, 312);
-	//m_screen->set_visarea(0*8, 32*8-1, 0*8, 30*8-1);
-	m_screen->set_size(256, 240);
-	m_screen->set_visarea(8, 247, 8, 231);
+	// PAL NES / 2C07 composite timing
+	const double master_clock = 26'601'712.0;
+	const double ppu_pixel_clock = master_clock / 5.0;
+
+	m_screen->set_raw(
+		ppu_pixel_clock,
+		341, 8, 248,   // htotal=341 dots, visible x=8..247
+		312, 8, 232    // vtotal=312 lines, visible y=8..231
+	);
 }
 
 void nes_state::famicom(machine_config &config)

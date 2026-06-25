@@ -76,13 +76,45 @@ void nesapu_device::device_stop()
 //-------------------------------------------------
 //  device_start - device-specific startup
 //-------------------------------------------------
+void nesapu_device::device_clock_changed()
+{
+	calculate_rates();
+
+	if (m_apu_timer != nullptr)
+		m_apu_timer->adjust(clocks_to_attotime(1));
+}
+
+void nesapu_device::calculate_rates()
+{
+	m_is_pal = clock() == PAL_APU_CLOCK;
+
+	if (m_is_pal)
+	{
+		dmc_periods = pal_dmc_periods;
+		noise_periods = pal_noise_periods;
+		m_maincpu6502->set_is_pal(true);
+	}
+	else
+	{
+		dmc_periods = ntsc_dmc_periods;
+		noise_periods = ntsc_noise_periods;
+		m_maincpu6502->set_is_pal(false);
+	}
+
+	if (m_stream != nullptr)
+	{
+		m_resample_step = uint64_t(double(clock()) * 4294967296.0 / double(m_stream->sample_rate()));
+		assert(m_resample_step > 0);
+	}
+}
+
 void nesapu_device::device_start()
 {
 	m_maincpu_dev = machine().root_device().subdevice<cpu_device>("maincpu");
 	m_maincpu6502 = machine().root_device().subdevice<m6502_device>("maincpu");
 	m_ppu_dev = machine().root_device().subdevice<ppu2c0x_device>("ppu");
 	m_mmc5 = machine().root_device().subdevice<nes_exrom_device>("nes_slot:exrom");
-
+	pal_cpu_ppu = 0;
 	// --------------------------------------------------
 	// Deterministic startup initialization.
 	//
@@ -211,7 +243,10 @@ void nesapu_device::device_start()
 	dmc_bits_remaining = 8;
 
 	dmc_periods = nullptr;
+	noise_periods = nullptr;
 
+	calculate_rates();
+	
 	tri_output_level = 0;
 	tri_enabled = false;
 
@@ -242,28 +277,7 @@ void nesapu_device::device_start()
 	noise_env_vol = 0;
 	noise_env_div_cnt = 0;
 
-	noise_periods = nullptr;
-
 	dma_engine_reset();
-
-	// --------------------------------------------------
-	// Region-dependent period tables.
-	//
-	// These must be selected before setting power-up dmc_period/noise_period.
-	// device_reset() preserves those register latch values, so they need a
-	// deterministic power-up value here.
-	// --------------------------------------------------
-
-	if (m_is_pal)
-	{
-		dmc_periods = pal_dmc_periods;
-		noise_periods = pal_noise_periods;
-	}
-	else
-	{
-		dmc_periods = ntsc_dmc_periods;
-		noise_periods = ntsc_noise_periods;
-	}
 
 	// --------------------------------------------------
 	// Power-up/default register latch values that reset preserves.
@@ -407,7 +421,7 @@ void nesapu_device::device_start()
 	{
 		m_stream = stream_alloc(0, 1, rate);
 	}
-
+	calculate_rates();
 	m_apu_timer = timer_alloc(FUNC(nesapu_device::apu_tick), this);
 	m_apu_timer->adjust(attotime::zero);
 
@@ -596,10 +610,7 @@ void nesapu_device::device_start()
 
 	m_output_accum = 0.0;
 	m_resample_phase = 0;
-	m_resample_step = uint64_t(double(clock()) * 4294967296.0 / double(m_stream->sample_rate()));
-	
-	assert(m_resample_step > 0);
-
+	calculate_rates();
 	m_output_accum = 0.0;
 
 	m_cached_output = 0.0;
@@ -632,7 +643,7 @@ void nesapu_device::device_reset()
 	//
 	// RESET does not preserve an in-flight emulator DMA/timing transaction.
 	// These are emulator/runtime bookkeeping fields, not APU register latches.
-
+	pal_cpu_ppu = 0;
 	cpu_cycle = 0;
 	apu_clk1_is_high = false;
 	cpu_reading = false;
@@ -1072,9 +1083,24 @@ void nesapu_device::tick() {
 	}
 	else
 	{
-		m_ppu_dev->tick(1);
-		m_ppu_dev->tick(2);
-		m_ppu_dev->tick(3);
+		if(!m_is_pal) {
+			m_ppu_dev->tick(1);
+			m_ppu_dev->tick(2);
+			m_ppu_dev->tick(3);
+		} else {
+			if(pal_cpu_ppu == 4) {
+				m_ppu_dev->tick(1);
+				m_ppu_dev->tick(2);
+				m_ppu_dev->tick(3);
+				m_ppu_dev->tick(4);
+				pal_cpu_ppu = 0;
+			} else {
+				m_ppu_dev->tick(1);
+				m_ppu_dev->tick(2);
+				m_ppu_dev->tick(3);
+				pal_cpu_ppu++;
+			}
+		}
 	}
 }
 
@@ -2085,19 +2111,33 @@ void nesapu_device::arm_frame_unit_clock_block()
 
 void nesapu_device::clock_frame_counter()
 {
+	const int q1 = m_is_pal ?  8313 :  7457;
+	const int h2 = m_is_pal ? 16627 : 14913;
+	const int q3 = m_is_pal ? 24939 : 22371;
+	const int h4 = m_is_pal ? 33253 : 29829;
+
+	const int irq0 = m_is_pal ? 33252 : 29828;
+	const int irq1 = m_is_pal ? 33253 : 29829;
+	const int irq2 = m_is_pal ? 33254 : 29830;
+
+	const int wrap4 = m_is_pal ? 33254 : 29830;
+
+	const int h5 = m_is_pal ? 41565 : 37281;
+	const int wrap5 = m_is_pal ? 41566 : 37282;
+
 	switch (frame_counter_mode)
 	{
 	case FOUR_STEP:
 		++frame_counter_clock;
-		
-		if (frame_counter_clock == 7457 || frame_counter_clock == 22371) {
+
+		if (frame_counter_clock == q1 || frame_counter_clock == q3) {
 			if (frame_unit_clock_allowed()) {
 				clock_env_and_tri_lin();
 				arm_frame_unit_clock_block();
 			}
 		}
 
-		if (frame_counter_clock == 14913 || frame_counter_clock == 29829) {
+		if (frame_counter_clock == h2 || frame_counter_clock == h4) {
 			if (frame_unit_clock_allowed()) {
 				clock_len_and_sweep();
 				clock_env_and_tri_lin();
@@ -2105,16 +2145,16 @@ void nesapu_device::clock_frame_counter()
 			}
 		}
 
-		if (frame_counter_clock == 29828 ||
-			frame_counter_clock == 29829 ||
-			frame_counter_clock == 29830)
+		if (frame_counter_clock == irq0 ||
+			frame_counter_clock == irq1 ||
+			frame_counter_clock == irq2)
 		{
 			if (inhibit_frame_irq) {
 				set_frame_irq_flag_only();
 
-				if (frame_counter_clock == 29828)
+				if (frame_counter_clock == irq0)
 					frame_irq_suppress_clear_cycle = 3;
-				else if (frame_counter_clock == 29829)
+				else if (frame_counter_clock == irq1)
 					frame_irq_suppress_clear_cycle = 2;
 				else
 					frame_irq_suppress_clear_cycle = 1;
@@ -2122,16 +2162,16 @@ void nesapu_device::clock_frame_counter()
 				check_frame_irq();
 			}
 		}
-	
-		if (frame_counter_clock == 29830)
+
+		if (frame_counter_clock == wrap4)
 			frame_counter_clock = 0;
-		
+
 		break;
 
 	case FIVE_STEP:
 		++frame_counter_clock;
 
-		if (frame_counter_clock == 14913 || frame_counter_clock == 37281) {
+		if (frame_counter_clock == h2 || frame_counter_clock == h5) {
 			if (frame_unit_clock_allowed()) {
 				clock_len_and_sweep();
 				clock_env_and_tri_lin();
@@ -2139,14 +2179,14 @@ void nesapu_device::clock_frame_counter()
 			}
 		}
 
-		if (frame_counter_clock == 7457 || frame_counter_clock == 22371) {
+		if (frame_counter_clock == q1 || frame_counter_clock == q3) {
 			if (frame_unit_clock_allowed()) {
 				clock_env_and_tri_lin();
 				arm_frame_unit_clock_block();
 			}
 		}
 
-		if (frame_counter_clock == 37282)
+		if (frame_counter_clock == wrap5)
 			frame_counter_clock = 0;
 
 		break;

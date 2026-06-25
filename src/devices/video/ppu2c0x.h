@@ -192,7 +192,13 @@ public:
 	void set_mapper(int mapper_number);
 	void reset();
 	void tick(int x);
-
+	
+	bool is_visible_scanline() const { return scanline <= BOTTOM_VISIBLE_SCANLINE; }
+	bool is_prerender_scanline() const { return scanline == m_prerender_line; }
+	bool is_render_scanline() const { return is_visible_scanline() || is_prerender_scanline(); }
+	bool is_vblank_start_scanline() const { return scanline == m_vblank_first_scanline; }
+	bool is_ntsc_timing() const { return m_scanlines_per_frame == NTSC_SCANLINES_PER_FRAME; }
+	
 	void retro_fix_previous_pixel_after_ppumask_write();
 
 	template <typename... T>
@@ -403,11 +409,7 @@ protected:
 	unsigned sec_oam_addr;
 	uint8_t oam_data;
 	uint8_t oam_eval_addr;
-	bool oam_resume_from_oam1_pending;
-	uint8_t sprite_load_y[8];
-	uint8_t sprite_load_index[8];
-	//bool sprite_fetch_active_this_line = false; // testing it for steins gate bounce fix
-
+	
 	uint8_t sprite_addr_h;
 	uint8_t sprite_addr_l;
 	bool oam_copy_done;
@@ -493,8 +495,6 @@ protected:
 	bool sec_oam_full;
 	uint8_t oam_2004_latch;
 	uint8_t sec_oam_last_write;
-	bool oam_data_from_oam1;
-	bool sprite_resume_uses_oam_buffer;
 
 	bool s_after_wrap;
 	bool sl0_stale_s0_loaded;
@@ -529,7 +529,6 @@ protected:
 	// Primary-OAM row that supplied each secondary-OAM/render-unit slot.
 	uint8_t sec_oam_source[8];
 	uint8_t sprite_oam_source[8];
-	bool oam_resume_uses_oam1_buffer;
 
 	// ---------------------------------------------------------------------
 	// Previous visible pixel state for retroactive $2001 edge behavior.

@@ -632,6 +632,7 @@ void m6502_device::execute_run()
 		if (inst_state < 0xff00) {
 			PPC = NPC;
 			inst_state = IR | inst_state_base;
+			
 			if (machine().debug_flags & DEBUG_FLAG_ENABLED)
 				debugger_instruction_hook(pc_to_external(NPC));
 		}
@@ -1400,25 +1401,32 @@ void m6502_device::do_halt() {
 	if (!dmc_halt && !oam_halt)
 		return;
 	if(dmc_halt) {
-		if(dmc_dma_reload) {
-			if(!apu_clk1_is_high && write_cycles_since_dma_halt_request == 0 ) {
-				suspend(SUSPEND_REASON_HALT,1);
-				return;
-			}
-			if (write_cycles_since_dma_halt_request > 0) {
-				suspend(SUSPEND_REASON_HALT,1);
-				return;
+		if(!get_is_pal()) {
+			if(dmc_dma_reload) {
+				if(!apu_clk1_is_high && write_cycles_since_dma_halt_request == 0 ) {
+					suspend(SUSPEND_REASON_HALT,1);
+					return;
+				}
+				if (write_cycles_since_dma_halt_request > 0) {
+					suspend(SUSPEND_REASON_HALT,1);
+					return;
+				}
+			} else {
+				if (apu_clk1_is_high && write_cycles_since_dma_halt_request == 0) {
+					suspend(SUSPEND_REASON_HALT,1);
+					return;
+				}
+				if (write_cycles_since_dma_halt_request > 0) {
+					suspend(SUSPEND_REASON_HALT,1);
+					return;
+				}
 			}
 		} else {
-			if (apu_clk1_is_high && write_cycles_since_dma_halt_request == 0) {
+			if (sync) {
 				suspend(SUSPEND_REASON_HALT,1);
 				return;
-			}
-			if (write_cycles_since_dma_halt_request > 0) {
-				suspend(SUSPEND_REASON_HALT,1);
-				return;
-			}
-		}
+			}			
+		} 
 	}
 	if(oam_halt) {
 		suspend(SUSPEND_REASON_HALT,1);
