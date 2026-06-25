@@ -194,7 +194,7 @@ public:
 	void tick(int x);
 	
 	bool is_visible_scanline() const { return scanline <= BOTTOM_VISIBLE_SCANLINE; }
-	bool is_prerender_scanline() const { return scanline == m_prerender_line; }
+	bool is_prerender_scanline() const { return scanline == (m_scanlines_per_frame - 1); }
 	bool is_render_scanline() const { return is_visible_scanline() || is_prerender_scanline(); }
 	bool is_vblank_start_scanline() const { return scanline == m_vblank_first_scanline; }
 	bool is_ntsc_timing() const { return m_scanlines_per_frame == NTSC_SCANLINES_PER_FRAME; }

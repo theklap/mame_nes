@@ -153,9 +153,8 @@ ppu2c04_device::ppu2c04_device(const machine_config& mconfig, const char* tag, d
 ppu2c07_device::ppu2c07_device(const machine_config& mconfig, const char* tag, device_t* owner, uint32_t clock) :
 	ppu2c0x_device(mconfig, PPU_2C07, tag, owner, clock)
 {
-		m_scanlines_per_frame = PAL_SCANLINES_PER_FRAME;
-		m_vblank_first_scanline = VBLANK_FIRST_SCANLINE;
-		m_prerender_line = PAL_SCANLINES_PER_FRAME - 1;
+	m_scanlines_per_frame = PAL_SCANLINES_PER_FRAME;
+	m_vblank_first_scanline = VBLANK_FIRST_SCANLINE;
 }
 
 // PAL clones
@@ -164,7 +163,6 @@ ppupalc_device::ppupalc_device(const machine_config& mconfig, const char* tag, d
 {
 	m_scanlines_per_frame = PAL_SCANLINES_PER_FRAME;
 	m_vblank_first_scanline = VBLANK_FIRST_SCANLINE_PALC;
-	m_prerender_line = PAL_SCANLINES_PER_FRAME - 1;
 }
 
 // The PPU_2C05 variants have different protection value, set at device start, but otherwise are all the same...
@@ -400,7 +398,7 @@ void ppu2c0x_device::init_startup_only_state()
 
 	m_security_value = 0;
 	m_tile_page = 0;
-	//m_prerender_line = 0;
+	m_prerender_line = 0;
 	m_planebuf[0] = 0;
 	m_planebuf[1] = 0;
 
@@ -1007,7 +1005,8 @@ void ppu2c0x_device::schedule_2007_write(uint16_t addr, uint8_t data, int delay)
 
 void ppu2c0x_device::schedule_2007_post_access_bump()
 {
-    const bool rendering_now = (bg_pipeline_enabled || spr_pipeline_enabled) && is_render_scanline();
+    //const bool rendering_now = (bg_pipeline_enabled || spr_pipeline_enabled) && ((scanline < 240) || (scanline == m_prerender_line));
+	const bool rendering_now = (bg_pipeline_enabled || spr_pipeline_enabled) && is_visible_scanline();
 
     if (rendering_now)
     {
@@ -1182,7 +1181,7 @@ void ppu2c0x_device::tick(int x) {
 				m_2007_read.waiting_for_refill_bus_read = true;
 				ppu2007_buffer_fill_arm_pending = true;
 
-				const bool render_line = is_render_scanline();
+				const bool render_line = is_render_scanline(); //(scanline <= 239) || (scanline == 261);
 
 				const bool bg_fetch_dot =
 					render_line &&
@@ -1293,9 +1292,8 @@ void ppu2c0x_device::tick(int x) {
 		{
 			const uint16_t ppuaddr_reload = pending_2006.value16 & 0x7FFF;
 
-			const bool rendering_now =
-				(bg_pipeline_enabled || spr_pipeline_enabled) &&
-				is_render_scanline();
+			//const bool rendering_now = (bg_pipeline_enabled || spr_pipeline_enabled) && ((scanline < 240) || (scanline == m_prerender_line));
+			const bool rendering_now = (bg_pipeline_enabled || spr_pipeline_enabled) && is_visible_scanline();
 
 			if (rendering_now)
 			{
@@ -1391,11 +1389,16 @@ void ppu2c0x_device::tick(int x) {
 		screen().reset_origin(scanline, dot);
 	}
 	
-	if (scanline <= BOTTOM_VISIBLE_SCANLINE)
+	/*switch (scanline) {
+		case 0 ... 239     : run_visible_scanline_dot();   	break;
+		case 241           : run_scanline_241_dot();       	break;
+		case 261	   	   : run_prerender_scanline_dot(); 	break;
+	}*/
+	if (is_visible_scanline())
 		run_visible_scanline_dot();
-	else if (scanline == m_vblank_first_scanline)
+	else if (is_vblank_start_scanline())
 		run_scanline_241_dot();
-	else if (scanline == m_prerender_line)
+	else if (is_prerender_scanline())
 		run_prerender_scanline_dot();
 	
 	//mmc3/mmc6 needs no variables but still needs the call to countdown IRQ
@@ -1424,7 +1427,11 @@ void ppu2c0x_device::tick(int x) {
 	//337 for no 2001 delay - 338
 	//338 for 1 ppu cycle delay - 339
 	//339 for 2 ppu cycle delay - 340
-	if (is_ntsc_timing() && scanline == m_prerender_line && dot == 338 && odd_frame && (bg_output_enabled || spr_output_enabled)) {
+	/*if (scanline == 261 && dot == 338 && odd_frame && (bg_output_enabled || spr_output_enabled)) { //(bg_pipeline_enabled || spr_pipeline_enabled)  (bg_output_enabled || spr_output_enabled)
+		skip_dot=true;
+		sprite_sl0_early_shift_pending = sl0_stale_s0_loaded;
+	}*/
+	if (is_ntsc_timing() && is_prerender_scanline() && dot == 338 && odd_frame && (bg_output_enabled || spr_output_enabled)) {
 		skip_dot=true;
 		sprite_sl0_early_shift_pending = sl0_stale_s0_loaded;
 	}
@@ -1444,7 +1451,7 @@ void ppu2c0x_device::tick(int x) {
 	if (dot > 340) {
 		dot=0;
 		++scanline;
-		if (scanline == BOTTOM_VISIBLE_SCANLINE + 1 && dot == 0) {
+		if(scanline == 240 && dot == 0) {
 			ppu_addr_bus = v & 0x3FFF;
 			//ppu_bus_address_drive(v);
 		}
@@ -1460,7 +1467,7 @@ void ppu2c0x_device::tick(int x) {
 	m_scanline=scanline;
 
 	//Start HBlank
-	if (scanline <= BOTTOM_VISIBLE_SCANLINE && dot == 257) {
+	if (scanline <= 239 && dot==257) {
 		if (!m_hblank_callback_proc.isnull())
 			m_hblank_callback_proc(scanline, in_vblank, (bg_pipeline_enabled || spr_pipeline_enabled) );
 	}
@@ -1825,7 +1832,7 @@ void ppu2c0x_device::run_render_pipeline_dot() {
 
 unsigned ppu2c0x_device::get_sprite_pixel(unsigned &spr_pal, bool &spr_behind_bg, bool &spr_is_s0)
 {
-	if (scanline > BOTTOM_VISIBLE_SCANLINE || dot < 2 || dot > 257)
+	if (scanline >= 240 || dot < 2 || dot > 257)
 	{
 		sprite0_pat = 0;
 		return 0;
@@ -1854,53 +1861,23 @@ unsigned ppu2c0x_device::get_sprite_pixel(unsigned &spr_pal, bool &spr_behind_bg
 		}
 
 		uint8_t slot0_pat = 0;
-		uint8_t first_pat = 0;
-		unsigned first_index = 8;
 
-		for (unsigned i = 0; i < 8; ++i)
+		if (sprite_shift_count[0] < 8)
 		{
-			uint8_t pat = 0;
-
-			if (sprite_shift_count[i] < 8)
-			{
-				// Sample current MSB regardless of X counter.
-				// This is the "free" early pixel.
-				const unsigned p1 = (sprite_pat_h[i] & 0x80) ? 1 : 0;
-				const unsigned p0 = (sprite_pat_l[i] & 0x80) ? 1 : 0;
-				pat = uint8_t((p1 << 1) | p0);
-
-				// Clock once because /VIS is asserted.
-				sprite_pat_h[i] <<= 1;
-				sprite_pat_l[i] <<= 1;
-				sprite_shift_count[i]++;
-
-				// Offset the subsequent countdown by +1 so the remaining 7 pixels line up.
-				if (sprite_x_cnt[i] > 0)
-					sprite_x_cnt[i] = uint8_t(sprite_x_cnt[i] + 1);
-			}
-
-			// Sprite0-hit uses slot0's pixel, even if another sprite wins output.
-			if (i == 0)
-				slot0_pat = pat;
-
-			// Keep first non-transparent sprite by priority, but do not return yet.
-			// All sprite shifters/counters above must still be serviced.
-			if (pat && first_index == 8)
-			{
-				first_pat = pat;
-				first_index = i;
-			}
+			const unsigned p1 = (sprite_pat_h[0] & 0x80) ? 1 : 0;
+			const unsigned p0 = (sprite_pat_l[0] & 0x80) ? 1 : 0;
+			slot0_pat = uint8_t((p1 << 1) | p0);
 		}
 
 		sprite0_pat = (s0_on_cur_scanline && output_allowed) ? slot0_pat : 0;
-
-		if (!output_allowed || first_index == 8)
+		
+		if (!output_allowed || !slot0_pat)
 			return 0;
 
-		spr_pal       = sprite_attribs[first_index] & 3;
-		spr_behind_bg = sprite_attribs[first_index] & 0x20;
-		spr_is_s0     = (first_index == 0);
-		return first_pat;
+		spr_pal       = sprite_attribs[0] & 3;
+		spr_behind_bg = sprite_attribs[0] & 0x20;
+		spr_is_s0     = true;
+		return slot0_pat;
 	}
 
 	uint8_t slot0_pat = 0;
@@ -1916,7 +1893,6 @@ unsigned ppu2c0x_device::get_sprite_pixel(unsigned &spr_pal, bool &spr_behind_bg
 			// X counter counts down even if rendering disabled once started.
 			if (sprite_x_cnt[i] > 0 && sprite_go_this_line)
 			{
-
 				sprite_x_cnt[i]--;
 			}
 			else if (vis)
@@ -1961,7 +1937,7 @@ void ppu2c0x_device::do_pixel_output_and_sprite_zero()
     unsigned pixel = dot - 2;
     unsigned pal_index;
 
-    const bool render_line = is_render_scanline();
+    const bool render_line = is_render_scanline(); //scanline <= 239) || (scanline == 261);
     const bool rendering_disabled = (!bg_output_enabled && !spr_output_enabled);
 
     // If rendering disabled, we still allow sprite unit bookkeeping to run,
@@ -2701,10 +2677,12 @@ ppu_addr_bus &= 0x3FFF;
 
 			sprite_pat_h[sprite_n] = sprite_in_range ? pat : 0;
 
-			if (is_prerender_scanline() && sprite_n == 0 && sprite_in_range)
+			if (is_prerender_scanline() && sprite_in_range)
 			{
 				sl0_stale_s0_loaded = true;
-				sl0_stale_sprite0_identity = true;
+
+				if (sprite_n == 0)
+					sl0_stale_sprite0_identity = true;
 			}
 
 			if (sprite_in_range && (sprite_attribs[sprite_n] & 0x40))
@@ -2830,7 +2808,8 @@ void ppu2c0x_device::run_scanline_241_dot()
 
 void ppu2c0x_device::do_2007_post_access_bump()
 {
-	if ((bg_pipeline_enabled || spr_pipeline_enabled) && is_render_scanline())
+	//if ((bg_pipeline_enabled || spr_pipeline_enabled) && (scanline < 240 || scanline == m_prerender_line))
+	if ((bg_pipeline_enabled || spr_pipeline_enabled) && is_visible_scanline())
 	{
 		// Accessing $2007 during rendering performs this glitch. Used by Young
 		// Indiana Jones Chronicles to shake the screen.
@@ -2879,7 +2858,7 @@ void ppu2c0x_device::write_oam_data_reg(uint8_t val)
     // OAMADDR increment. For this test/model, bump the sprite index by one:
     // +4, then force byte index to 0 with & $FC.
     const bool rendering_on = (bg_pipeline_enabled || spr_pipeline_enabled);
-    const bool render_line = is_render_scanline();
+    const bool render_line  = is_render_scanline(); //(scanline < 240) || (scanline == 261);
 
     if (render_line && rendering_on) {
 		oam_2004_latch = val;
@@ -3060,7 +3039,7 @@ uint8_t ppu2c0x_device::read(offs_t offset)
 
 		case PPU_SPRITE_DATA: /* $2004 */
 		{
-			const bool render_line = is_render_scanline();
+			const bool render_line = is_render_scanline(); //(scanline < 240) || (scanline == 261);
 			const bool rendering_enabled = (bg_pipeline_enabled || spr_pipeline_enabled);//(bg_output_enabled || spr_output_enabled);
 			
 			uint8_t ret = 0;
@@ -3126,9 +3105,8 @@ uint8_t ppu2c0x_device::read(offs_t offset)
 				ppu_open_bus_drive(ret);
 			}
 
-			const bool rendering_for_access =
-				(bg_pipeline_enabled || spr_pipeline_enabled) &&
-				is_render_scanline();
+			//const bool rendering_for_access = (bg_pipeline_enabled || spr_pipeline_enabled) && ((scanline < 240) || (scanline == m_prerender_line));
+			const bool rendering_for_access = (bg_pipeline_enabled || spr_pipeline_enabled) && is_visible_scanline();
 
 			if (!rendering_for_access)
 			{
@@ -3235,7 +3213,7 @@ void ppu2c0x_device::apply_delayed_2001(uint8_t val)
 	// --------------------------------------------------
 	if (!prev_pipe && new_pipe)
 	{	
-		const bool render_line = is_render_scanline();
+		const bool render_line = is_render_scanline(); //(scanline <= 239) || (scanline == 261);
 		const bool in_fetch_region = ((dot >= 2 && dot <= 257) || (dot >= 322 && dot <= 337));
 
 		if (render_line && in_fetch_region)
@@ -3250,7 +3228,7 @@ void ppu2c0x_device::apply_delayed_2001(uint8_t val)
 		
 		inhibit_bg_shift_one_dot = false;
 
-		const bool render_line = is_render_scanline();
+		const bool render_line = is_render_scanline(); //(scanline <= 239) || (scanline == 261);
 		const bool early_window = (dot >= 1 && dot <= 64);
 		const bool late_window  = (dot >= 257 && dot <= 320);
 
@@ -3364,7 +3342,7 @@ void ppu2c0x_device::write(offs_t offset, uint8_t val)
 			sprite_clip_comp = !spr_output_enabled ? 256 : show_sprites_left_8 ? 0 : 8;
 
 			// Retroactive color/render correction.
-			if (scanline <= BOTTOM_VISIBLE_SCANLINE && dot >= 2 && dot <= 257)
+			if (scanline <= 239 && dot >= 2 && dot <= 257)
 			{
 				uint8_t diff = old_ppumask ^ val;
 				const int late_delta = dot - prev_pixel_x;
@@ -3393,7 +3371,7 @@ void ppu2c0x_device::write(offs_t offset, uint8_t val)
 			m_regs[PPU_SPRITE_ADDRESS] = val;
 			oam_addr = val;
 
-			const bool render_line = is_render_scanline();
+			const bool render_line = is_render_scanline(); //(scanline < 240) || (scanline == 261);
 			const bool rendering_enabled = (bg_pipeline_enabled || spr_pipeline_enabled);
 
 			if (render_line && rendering_enabled && sprite_eval_initialized && dot >= 65 && dot <= 256)
@@ -3468,9 +3446,8 @@ void ppu2c0x_device::write(offs_t offset, uint8_t val)
 				ppu_bus_address_drive(bus_addr);
 			}
 
-			const bool rendering_for_access =
-				(bg_pipeline_enabled || spr_pipeline_enabled) &&
-				is_render_scanline();
+			//const bool rendering_for_access = (bg_pipeline_enabled || spr_pipeline_enabled) && ((scanline < 240) || (scanline == m_prerender_line));
+			const bool rendering_for_access = (bg_pipeline_enabled || spr_pipeline_enabled) && is_visible_scanline();
 
 			if (!rendering_for_access)
 			{
