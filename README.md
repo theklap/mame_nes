@@ -12,6 +12,9 @@ The current implementation passes **100% of the Accuracy Coin NES test suite**.
 ```text
 Accuracy Coin: 100% passing
 ```
+Added PAL support and pass APU and DMC DMA test for PAL.
+StarTropics sprite corruption is emulated on room change
+PacMan Tengen scanline 0 sprites is emulated
 
 ## Major Areas Reworked
 
