@@ -7,7 +7,7 @@ Nintendo 2C0x PPU emulation.
 Written by Ernesto Corvi.
 This code is heavily based on Brad Oliver's MESS implementation.
 
-Total rewrite by Matthew Sutton for Accuracy on the NTSC
+Total rewrite by Matthew Sutton for Accuracy NTSC and PAL
 
 2009-04: Changed NES PPU to be a device (Nathan Woods)
 2009-07: Changed NES PPU to use a device memory map (Robert Bohms)
@@ -155,24 +155,38 @@ ppupalc_device::ppupalc_device(const machine_config& mconfig, const char* tag, d
 // The PPU_2C05 variants have different protection value, set at device start, but otherwise are all the same...
 // Vs. Unisystem (Ninja Jajamaru Kun)
 ppu2c05_01_device::ppu2c05_01_device(const machine_config& mconfig, const char* tag, device_t* owner, uint32_t clock) :
-	ppu2c0x_rgb_device(mconfig, PPU_2C05_01, tag, owner, clock) {}
+	ppu2c0x_rgb_device(mconfig, PPU_2C05_01, tag, owner, clock) {
+		m_security_value = 0x1b;    // game (jajamaru) doesn't seem to ever actually check it
+	}
 
 // Vs. Unisystem (Mighty Bomb Jack)
 ppu2c05_02_device::ppu2c05_02_device(const machine_config& mconfig, const char* tag, device_t* owner, uint32_t clock) :
-	ppu2c0x_rgb_device(mconfig, PPU_2C05_02, tag, owner, clock) {}
+	ppu2c0x_rgb_device(mconfig, PPU_2C05_02, tag, owner, clock) {
+		m_security_value = 0x3d;
+	}
 
 // Vs. Unisystem (Gumshoe)
 ppu2c05_03_device::ppu2c05_03_device(const machine_config& mconfig, const char* tag, device_t* owner, uint32_t clock) :
-	ppu2c0x_rgb_device(mconfig, PPU_2C05_03, tag, owner, clock) {}
+	ppu2c0x_rgb_device(mconfig, PPU_2C05_03, tag, owner, clock) {
+		m_security_value = 0x1c;
+	}
 
 // Vs. Unisystem (Top Gun)
 ppu2c05_04_device::ppu2c05_04_device(const machine_config& mconfig, const char* tag, device_t* owner, uint32_t clock) :
-	ppu2c0x_rgb_device(mconfig, PPU_2C05_04, tag, owner, clock) {}
+	ppu2c0x_rgb_device(mconfig, PPU_2C05_04, tag, owner, clock) {
+		m_security_value = 0x1b;
+	}
 
 // Vs. Unisystem (Super Mario Bros. bootlegs)
 ppu2c04_clone_device::ppu2c04_clone_device(const machine_config& mconfig, const char* tag, device_t* owner, uint32_t clock) :
 	ppu2c0x_device(mconfig, PPU_2C04C, tag, owner, clock),
-	m_palette_data(*this, "palette") {}
+	m_palette_data(*this, "palette") {
+		m_scanlines_per_frame = VS_CLONE_SCANLINES_PER_FRAME;
+		m_vblank_first_scanline = VBLANK_FIRST_SCANLINE_VS_CLONE;
+
+		// background and sprites are always enabled; monochrome and color emphasis aren't supported
+		m_regs[PPU_CONTROL1] = u8(~(PPU_CONTROL1_COLOR_EMPHASIS | PPU_CONTROL1_DISPLAY_MONO));
+	}
 
 //-------------------------------------------------
 //  device_start - device-specific startup
@@ -1047,21 +1061,14 @@ void ppu2c0x_device::tick(int x) {
 		} else {
 			const uint16_t bus_addr = m_2007_write.addr & 0x3FFF;
 
-			// Delayed rendering $2007 write becomes effective now.
-			// Palette space is internal; keep the bus shadow/latch but do not
-			// expose this as a cartridge/MMC3 A12 clock.
 			if ((bus_addr & 0x3F00) == 0x3F00) {
 				ppu_addr_bus = bus_addr;
-				ppu_ext_low_latch = bus_addr & 0xFF;
+				m_palette_ram[bus_addr & 0x1F] = m_2007_write.data & 0x3F;
 			} else {
 				ppu_bus_address_drive(bus_addr);
+				writebyte(bus_addr, m_2007_write.data);
 			}
 
-			writebyte(bus_addr, m_2007_write.data);
-
-			// The delayed rendering write has now become effective.  Only now arm
-			// the post-access bump, so the increment is delayed relative to the
-			// actual PPU bus write rather than the original CPU register write.
 			ppu2007_post_bump_pending = true;
 			ppu2007_post_bump_delay = 1;
 
@@ -1084,6 +1091,7 @@ void ppu2c0x_device::tick(int x) {
 		if (m_2007_read.delay > 0) {
 			--m_2007_read.delay;
 		} else {
+			
 			const uint16_t delayed_bus_addr = m_2007_read.addr & 0x3FFF;
 
 			// Palette reads return palette data immediately, but the internal buffer
@@ -1114,30 +1122,23 @@ void ppu2c0x_device::tick(int x) {
 					// phase.
 					ppu2007_ale_read_addr_latch_poison = false;
 
-					if (bg_fetch_dot && bg_phase == 4) {
-					// ALE+Read collision on BG pattern-low address setup.
-					//
-					// General rule:
-						//   high address bits come from the current pattern address generator
-						//   low  address bits come from the external AD-bus latch
-						//
-						// But only force it if the feedback loop is stable.  If the read from the
-						// poisoned address would return a different value than the latch, that is
-						// the unstable $2007-stress case.  Do not collapse that into a deterministic
-						// address here.
+					if (bg_fetch_dot && (bg_phase == 4 || bg_phase == 6)) {
 						const uint16_t normal_addr =
-						(bg_pat_addr + (16 * nt_byte) + (v >> 12)) & 0x3FFF;
+							(bg_pat_addr + (16 * nt_byte) + (v >> 12) + ((bg_phase == 6) ? 8 : 0)) & 0x3FFF;
 
 						const uint16_t poisoned_addr =
-						(normal_addr & 0x3F00) | ppu_ext_low_latch;
-
+							(normal_addr & 0x3F00) | ppu_ext_low_latch;
+						
+						// Approximation of ALE+Read feedback stability.
+						// Hardware does not perform this compare; this prevents unstable
+						// feedback cases from becoming deterministic in the emulator.
 						const uint8_t feedback_data = readbyte(poisoned_addr);
 
 						if (feedback_data == ppu_ext_low_latch) {
-						ppu2007_ale_read_addr_latch_poison = true;
-						ppu2007_ale_read_low_latch = ppu_ext_low_latch;
+							ppu2007_ale_read_addr_latch_poison = true;
+							ppu2007_ale_read_low_latch = ppu_ext_low_latch;
+						}
 					}
-				}
 
 				schedule_2007_post_access_bump();
 			} else {
@@ -1201,9 +1202,17 @@ void ppu2c0x_device::tick(int x) {
 			const bool rendering_now = (bg_pipeline_enabled || spr_pipeline_enabled) && is_visible_scanline();
 
 			if (rendering_now) {
+				const uint8_t old_low = ppu_addr_bus & 0xFF;
+
 				t = ppuaddr_reload;
 				copy_horiz();
 				copy_vert();
+
+				// $2006/v update during rendering can corrupt an in-flight fetch address:
+				// high bits come from the newly updated v, low bits remain from the
+				// previously prepared external address latch.
+				if (dot >= 1 && dot <= 256)
+					ppu_addr_bus = ((0x2000 | (v & 0x0FFF)) & 0x3F00) | old_low;
 			} else {
 				v = ppuaddr_reload;
 
@@ -1507,6 +1516,9 @@ void ppu2c0x_device::run_bg_fetch_dot() {
 	case 6:
 		ppu_addr_bus = m_bgfetch_pat_pt + (16 * nt_byte) + (m_bgfetch_v_pt >> 12) + 8;
 		ppu_addr_bus &= 0x3FFF;
+
+		if (ppu2007_ale_read_addr_latch_poison)
+			ppu_addr_bus = (ppu_addr_bus & 0x3F00) | ppu2007_ale_read_low_latch;
 		break;
 
 	case 7:
@@ -2769,17 +2781,23 @@ uint8_t ppu2c0x_device::read(offs_t offset) {
 
 			const uint8_t old_bus = ppu_open_bus_peek();
 
-			const uint8_t ret =
-			(vblank_read ? 0x80 : 0x00) |
-			(spr0_read   ? 0x40 : 0x00) |
-			(ovf_read    ? 0x20 : 0x00) |
-			(old_bus & 0x1f);
+			const uint8_t ret = m_security_value
+			? uint8_t((vblank_read ? 0x80 : 0x00) |
+					  (spr0_read   ? 0x40 : 0x00) |
+					  m_security_value)
+			: uint8_t((vblank_read ? 0x80 : 0x00) |
+					  (spr0_read   ? 0x40 : 0x00) |
+					  (ovf_read    ? 0x20 : 0x00) |
+					  (old_bus & 0x1f));
 
 			in_vblank = false;
 			set_nmi(false);
 
 			// $2002 read drives only status bits 7-5.
 			// Low bits 4-0 are open bus and must keep their existing decay timers.
+			if (m_security_value)
+			ppu_open_bus_drive(ret);
+			else
 			ppu_open_bus_drive_masked(ret, 0xe0);
 
 			return ret;
@@ -3000,6 +3018,10 @@ void ppu2c0x_device::apply_delayed_2001(uint8_t val) {
 	*************************************/
 	void ppu2c0x_device::write(offs_t offset, uint8_t val) {
 	ppu_open_bus_drive(val);
+	
+	/* on the RC2C05, PPU_CONTROL0 and PPU_CONTROL1 are swapped (protection) */
+	if (m_security_value && !(offset & 6))
+	offset ^= 1;
 
 	switch (offset & 7) {
 	case PPU_CONTROL0: /* 0 */ {
@@ -3151,7 +3173,7 @@ void ppu2c0x_device::apply_delayed_2001(uint8_t val) {
 			// Palette space is internal; don't clock cartridge/MMC3 A12 from it.
 			if ((bus_addr & 0x3F00) == 0x3F00) {
 				ppu_addr_bus = bus_addr & 0x3FFF;
-				ppu_ext_low_latch = bus_addr & 0xFF;
+				//ppu_ext_low_latch = bus_addr & 0xFF;
 			} else {
 				ppu_bus_address_drive(bus_addr);
 			}
@@ -3174,7 +3196,7 @@ void ppu2c0x_device::apply_delayed_2001(uint8_t val) {
 					// Palette space is internal; don't clock cartridge/MMC3 A12 from it.
 					if ((bus_addr & 0x3F00) == 0x3F00) {
 					ppu_addr_bus = bus_addr & 0x3FFF;
-					ppu_ext_low_latch = bus_addr & 0xFF;
+					//ppu_ext_low_latch = bus_addr & 0xFF;
 				} else {
 					ppu_bus_address_drive(bus_addr);
 				}
@@ -3190,7 +3212,7 @@ void ppu2c0x_device::apply_delayed_2001(uint8_t val) {
 					// Palette space is internal; don't clock cartridge/MMC3 A12 from it.
 					if ((bus_addr & 0x3F00) == 0x3F00) {
 					ppu_addr_bus = bus_addr & 0x3FFF;
-					ppu_ext_low_latch = bus_addr & 0xFF;
+					//ppu_ext_low_latch = bus_addr & 0xFF;
 				} else {
 					ppu_bus_address_drive(bus_addr);
 				}
