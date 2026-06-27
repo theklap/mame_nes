@@ -294,7 +294,7 @@ protected:
 
 	PPUDelayedLatch pending_2000;
 	PPUDelayedLatch pending_2001;
-	PPUDelayedLatch pending_2004;
+	//PPUDelayedLatch pending_2004;
 	PPUDelayedLatch pending_2006;
 
 	void apply_delayed_2000(uint8_t val);
@@ -377,53 +377,48 @@ protected:
 	unsigned t;
 	unsigned v;
 	uint8_t fine_x;
-	unsigned v_inc;                 // $2000 bit 2.
-	uint16_t sprite_pat_addr;       // $2000 bit 3.
-	uint16_t bg_pat_addr;           // $2000 bit 4.
-	Sprite_size sprite_size;        // $2000 bit 5.
-	bool nmi_on_vblank;             // $2000 bit 7.
-	bool m_nmi;
+	unsigned ppuctrl_vram_increment;                 // $2000 bit 2.
+	uint16_t ppuctrl_sprite_pattern_base;       // $2000 bit 3.
+	uint16_t ppuctrl_bg_pattern_base;           // $2000 bit 4.
+	Sprite_size ppuctrl_sprite_size;        // $2000 bit 5.
+	bool ppuctrl_nmi_enable;             // $2000 bit 7.
 	bool nmi_pending;
 	int nmi_delay;
 	bool suppress_vblank_flag;
 
 	// $2001 decoded state.
-	uint8_t grayscale_color_mask;   // 0x30 if grayscale is enabled, otherwise 0x3f.
-	bool show_bg_left_8;
-	bool show_sprites_left_8;
-	uint16_t tint_bits;
-	unsigned bg_clip_comp;
-	unsigned sprite_clip_comp;
+	uint8_t ppumask_grayscale_mask;   // 0x30 if grayscale is enabled, otherwise 0x3f.
+	bool ppumask_show_bg_left;
+	bool ppumask_show_spr_left;
+	uint16_t ppumask_emphasis_bits;
+	unsigned bg_left_clip;
+	unsigned spr_left_clip;
 
 	// $2002 decoded state.
-	bool sprite_overflow;
-	bool sprite_zero_hit;
-	bool in_vblank;
+	bool ppustatus_sprite_overflow;
+	bool ppustatus_sprite0_hit;
+	bool ppustatus_vblank;
 
 	// $2003/$2004/OAM register state.
-	uint8_t oam[0x100];
-	uint8_t sec_oam[0x20];
-	bool m_sec_is_sprite0[8];
+	uint8_t primary_oam[0x100];
+	uint8_t secondary_oam[0x20];
 
-	uint8_t oam_addr;
-	unsigned sec_oam_addr;
-	uint8_t oam_data;
+	uint8_t oamaddr;
+	unsigned oam2addr;
+	uint8_t oamdata_read_buffer;
 	uint8_t oam_eval_addr;
 	
-	uint8_t sprite_addr_h;
-	uint8_t sprite_addr_l;
+	uint8_t spr_pt_addr_h;
+	uint8_t spr_pt_addr_l;
 	bool oam_copy_done;
-	bool oam_addr_overflow;
-	bool sec_oam_addr_overflow;
-	bool overflow_detection;
 	int overflow_bug_counter;
 	bool sprite_eval_in_range;
 
 	// $2005/$2006 write toggle.
-	bool write_flip_flop;
+	bool w;
 
 	// $2007 read buffer.
-	uint8_t ppu_data_reg;
+	uint8_t ppudata_read_buffer;
 
 	// ---------------------------------------------------------------------
 	// PPU timing counters.
@@ -436,65 +431,64 @@ protected:
 	int ppu_tick_in_cpu_cycle;
 
 	// Current PPU address bus value.
-	unsigned ppu_addr_bus;
-	uint8_t ppu_ext_low_latch = 0;
+	unsigned ppu_address_bus;
+	uint8_t ppu_ad_latch = 0;
 	bool ppu2007_ale_read_addr_latch_poison = false;
 	uint8_t ppu2007_ale_read_low_latch = 0;
 
 	// ---------------------------------------------------------------------
 	// Background fetch pipeline.
 	// ---------------------------------------------------------------------
-	uint8_t nt_byte;
-	uint8_t at_byte;
-	uint8_t bg_byte_l;
-	uint8_t bg_byte_h;
+	uint8_t bg_nt_latch;
+	uint8_t bg_at_latch;
+	uint8_t bg_pt_l_latch;
+	uint8_t bg_pt_h_latch;
 
-	uint16_t bg_shift_l;
-	uint16_t bg_shift_h;
-	uint16_t at_shift_l;
-	uint16_t at_shift_h;
+	uint16_t bg_pt_l_shift;
+	uint16_t bg_pt_h_shift;
+	uint16_t bg_at_l_shift;
+	uint16_t bg_at_h_shift;
 
-	uint8_t at_latch_l;
-	uint8_t at_latch_h;
+	uint8_t bg_at_latch_l;
+	uint8_t bg_at_latch_h;
 
-	bool inhibit_bg_shift_one_dot;
+	bool skip_bg_reload_once;
 
-	uint16_t m_bgfetch_v_nt = 0;
-	uint16_t m_bgfetch_v_at = 0;
-	uint16_t m_bgfetch_v_pt = 0;
-	uint16_t m_bgfetch_pat_pt = 0;
-	uint16_t m_bgfetch_nt_addr;
-	uint16_t m_bgfetch_at_addr;
+	uint16_t bg_fetch_v_nt = 0;
+	uint16_t bg_fetch_v_at = 0;
+	uint16_t bg_fetch_v_pt = 0;
+	uint16_t bg_fetch_pt_base = 0;
+	uint16_t bg_fetch_nt_addr;
+	uint16_t bg_fetch_at_addr;
 
 	// ---------------------------------------------------------------------
 	// Sprite evaluation / sprite output pipeline.
 	// ---------------------------------------------------------------------
-	uint8_t sprite_attribs[8];
-	uint8_t sprite_x[8];
-	uint8_t sprite_x_cnt[8];
-	uint8_t sprite_pat_l[8];
-	uint8_t sprite_pat_h[8];
-	uint8_t sprite_shift_count[8];
+	uint8_t spr_attr_latch[8];
+	uint8_t spr_x_latch[8];
+	uint8_t spr_x_counter[8];
+	uint8_t spr_pt_l_shift[8];
+	uint8_t spr_pt_h_shift[8];
+	uint8_t spr_shift_count[8];
 
-	bool s0_on_next_scanline;
-	bool s0_on_cur_scanline;
+	bool sprite0_in_oam2_next;
+	bool sprite0_in_oam2_current;
 
-	uint8_t sprite_y;
-	uint8_t sprite_index;
-	bool sprite_in_range;
+	uint8_t eval_sprite_y;
+	uint8_t eval_sprite_tile;
+	bool eval_candidate_in_range;
 
 	uint8_t sprite0_eval_addr;
 	uint8_t sprite0_pat;
 
 	bool sprite_go_this_line;
 	bool sprite_go_next_line;
-	bool sprite_force_immediate_applied;
 	bool sprite_sl0_early_shift_pending;
 
 	uint8_t oam_latch_addr = 0;
-	bool sec_oam_full;
-	uint8_t oam_2004_latch;
-	uint8_t sec_oam_last_write;
+	bool oam2_full;
+	uint8_t oamdata_latch;
+	uint8_t oam2_last_write;
 
 	bool s_after_wrap;
 	bool sl0_stale_s0_loaded;
@@ -587,8 +581,8 @@ protected:
 	bool ppu2007_post_bump_pending;
 	int ppu2007_post_bump_delay;
 
-	uint16_t sprite_nt_fetch_v;
-	uint16_t sprite_nt_fetch_v_new;
+	uint16_t spr_fetch_v_old;
+	uint16_t spr_fetch_v_new;
 
 	void schedule_2007_write(uint16_t addr, uint8_t data, int delay);
 	void schedule_2007_read(uint16_t addr, int delay, bool use_next_ppu_read_for_refill);
@@ -600,14 +594,6 @@ protected:
 	uint8_t pending_fine_x;
 	bool pending_fine_x_valid;
 	int pending_fine_x_delay;
-
-	bool scroll_inc_h_pending = false;
-	bool scroll_inc_v_pending = false;
-	bool scroll_copy_h_pending = false;
-	bool scroll_copy_v_pending = false;
-	bool scroll_copy_conflict_pending = false;
-	bool scroll_copy_conflict_h_pending = false;
-	bool scroll_copy_conflict_v_pending = false;
 
 	// ---------------------------------------------------------------------
 	// Mapper hooks / cached mapper capability flags.

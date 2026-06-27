@@ -191,133 +191,104 @@ ppu2c04_clone_device::ppu2c04_clone_device(const machine_config& mconfig, const 
 //-------------------------------------------------
 //  device_start - device-specific startup
 //-------------------------------------------------
-
 void ppu2c0x_device::init_runtime_reset_state() {
-	fine_x = t = v = 0;
+	// --------------------------------------------------
+	// VRAM address / scroll registers
+	// --------------------------------------------------
+	fine_x = 0;
+	t = 0;
+	v = 0;
+	w = false;
 
-	memset(oam, 0x00, sizeof(oam));
-	memset(sec_oam, 0x00, sizeof(sec_oam));
+	pending_fine_x = 0;
+	pending_fine_x_valid = false;
+	pending_fine_x_delay = 0;
 
-	// $2000
-	v_inc           = 1;
-	sprite_pat_addr = bg_pat_addr = 0x0000;
-	sprite_size     = EIGHT_BY_EIGHT;
-	nmi_on_vblank   = false;
-	suppress_vblank_flag  = false;
-	// $2001
-	grayscale_color_mask = 0x3F; // Grayscale off
-	show_bg_left_8       = show_sprites_left_8 = false;
-	tint_bits            = 0;
-	bg_clip_comp         = sprite_clip_comp = 256;
+	// --------------------------------------------------
+	// $2000 / PPUCTRL decoded state
+	// --------------------------------------------------
+	ppuctrl_vram_increment = 1;
+	ppuctrl_sprite_pattern_base = 0x0000;
+	ppuctrl_bg_pattern_base = 0x0000;
+	ppuctrl_sprite_size = EIGHT_BY_EIGHT;
+	ppuctrl_nmi_enable = false;
 
-	// $2002
-	sprite_overflow = false;
-	sprite_zero_hit = false;
-	in_vblank = false;
+	// --------------------------------------------------
+	// $2001 / PPUMASK decoded state
+	// --------------------------------------------------
+	ppumask_grayscale_mask = 0x3F; // Grayscale off
+	ppumask_show_bg_left = false;
+	ppumask_show_spr_left = false;
+	ppumask_emphasis_bits = 0;
+	bg_left_clip = 256;
+	spr_left_clip = 256;
 
-	// OAM regs
-	oam_eval_addr = 0;
-	oam_addr = 0;
-	sec_oam_addr = 0;
-	oam_data = 0;
-
-	// Misc regs/helpers
-	write_flip_flop = false;
-	ppu_data_reg = 0;
-	s0_on_next_scanline = false;
-	s0_on_cur_scanline = false;
-	ppu_addr_bus = 0;
-	dot = 0;
-	scanline = 0;
-	m_scanline = 0;
-
-	// Render pipeline buffers / shift registers
-	nt_byte = 0;
-	at_byte = 0;
-	bg_byte_l = 0;
-	bg_byte_h = 0;
-	bg_shift_l = 0;
-	bg_shift_h = 0;
-	at_shift_l = 0;
-	at_shift_h = 0;
-	at_latch_l = 0;
-	at_latch_h = 0;
-
-	// Sprite units
-	sprite_y = 0;
-	sprite_index = 0;
-	sprite_in_range = false;
-	sprite_eval_in_range = false;
-	sprite0_eval_addr = 0;
-	sprite0_pat = 0;
-	sprite_go_this_line = true;
-	sprite_go_next_line = true;
-	sprite_force_immediate_applied = false;
-	sprite_sl0_early_shift_pending = false;
-	sl0_stale_s0_loaded = false;
-	sl0_stale_sprite0_identity = false;
-
-	memset(sprite_attribs, 0x00, sizeof(sprite_attribs));
-	memset(sprite_x, 0x00, sizeof(sprite_x));
-	memset(sprite_pat_l, 0x00, sizeof(sprite_pat_l));
-	memset(sprite_pat_h, 0x00, sizeof(sprite_pat_h));
-	memset(sec_oam_source, 0xFF, sizeof(sec_oam_source));
-	memset(sprite_oam_source, 0xFF, sizeof(sprite_oam_source));
-
-	corrupt_resume_high_pending = false;
-	corrupt_resume_high_lane = 0;
-	corrupt_resume_high_value = 0;
-
-	sec_oam_full = false;
-	oam_2004_latch = 0xFF;
-	sec_oam_last_write = 0xFF;
-	sprite_eval_initialized = false;
-
-	oam_copy_done = false;
-	oam_addr_overflow = false;
-	sec_oam_addr_overflow = false;
-	overflow_detection = false;
-	overflow_bug_counter = 0;
-
-	// NMI / PPUCTRL state
-	nmi_delay = 0;
-	nmi_on_vblank = false;
-	suppress_vblank_flag = false;
-	nmi_pending = false;
-
-	// Decoded/render state
 	bg_output_enabled = 0;
 	spr_output_enabled = 0;
 	bg_pipeline_enabled = 0;
 	spr_pipeline_enabled = 0;
+
 	retro_ppumask_color = false;
 	retro_ppumask_render = false;
 
-	// Fetch helpers
-	inhibit_bg_shift_one_dot = false;
+	// --------------------------------------------------
+	// $2002 / PPUSTATUS state
+	// --------------------------------------------------
+	ppustatus_sprite_overflow = false;
+	ppustatus_sprite0_hit = false;
+	ppustatus_vblank = false;
+	suppress_vblank_flag = false;
 
-	bg_pat_addr_tile = 0;
-	sprite_nt_fetch_v = 0;
-	sprite_nt_fetch_v_new = 0;
-	sprite_addr_h = 0;
-	sprite_addr_l = 0;
-	m_bgfetch_nt_addr = 0;
-	m_bgfetch_at_addr = 0;
+	// --------------------------------------------------
+	// NMI state
+	// --------------------------------------------------
+	nmi_delay = 0;
+	nmi_pending = false;
 
-	// Previous pixel latch state
-	prev_pixel_valid = false;
-	prev_pixel_scanline = 0;
-	prev_pixel_x = 0;
-	prev_bg_pixel_pat = 0;
-	prev_attr_bits = 0;
-	prev_spr_pat = 0;
-	prev_spr_pal = 0;
-	prev_spr_behind_bg = false;
-	prev_spr_is_s0 = false;
-	prev_sprite0_pat = 0;
-	prev_backdrop_pal_index = 0;
+	// --------------------------------------------------
+	// PPU timing / scan position
+	// --------------------------------------------------
+	dot = 0;
+	scanline = 0;
+	m_scanline = 0;
 
-	// Pending delayed effects for $2000, $2001, $2004, and $2006.
+	// --------------------------------------------------
+	// PPU external bus / open bus / $2007 buffer
+	// --------------------------------------------------
+	ppu_address_bus = 0;
+	ppu_ad_latch = 0;
+	ppudata_read_buffer = 0;
+
+	ppu2007_buffer_fill_armed = false;
+	ppu2007_buffer_fill_arm_pending = false;
+	ppu_bus_read_can_fill_2007 = false;
+
+	ppu2007_post_bump_pending = false;
+	ppu2007_post_bump_delay = 0;
+
+	ppu2007_ale_read_addr_latch_poison = false;
+	ppu2007_ale_read_low_latch = 0;
+
+	// --------------------------------------------------
+	// Delayed $2007 write state
+	// --------------------------------------------------
+	m_2007_write.pending = false;
+	m_2007_write.delay = 0;
+	m_2007_write.addr = 0;
+	m_2007_write.data = 0;
+
+	// --------------------------------------------------
+	// Delayed $2007 read state
+	// --------------------------------------------------
+	m_2007_read.pending = false;
+	m_2007_read.delay = 0;
+	m_2007_read.addr = 0;
+	m_2007_read.use_next_ppu_read_for_refill = false;
+	m_2007_read.waiting_for_refill_bus_read = false;
+
+	// --------------------------------------------------
+	// Pending delayed CPU register effects
+	// --------------------------------------------------
 	pending_2000.has_pending = false;
 	pending_2000.value = 0;
 	pending_2000.value16 = 0;
@@ -332,13 +303,6 @@ void ppu2c0x_device::init_runtime_reset_state() {
 	pending_2001.apply_scanline = 0;
 	pending_2001.apply_ppu = 0;
 
-	pending_2004.has_pending = false;
-	pending_2004.value = 0;
-	pending_2004.value16 = 0;
-	pending_2004.apply_dot = 0;
-	pending_2004.apply_scanline = 0;
-	pending_2004.apply_ppu = 0;
-
 	pending_2006.has_pending = false;
 	pending_2006.value = 0;
 	pending_2006.value16 = 0;
@@ -346,65 +310,156 @@ void ppu2c0x_device::init_runtime_reset_state() {
 	pending_2006.apply_scanline = 0;
 	pending_2006.apply_ppu = 0;
 
-	// OAM corruption
+	// --------------------------------------------------
+	// OAM memory / OAMDATA state
+	// --------------------------------------------------
+	memset(primary_oam, 0x00, sizeof(primary_oam));
+	memset(secondary_oam, 0x00, sizeof(secondary_oam));
+
+	oamaddr = 0;
+	oam2addr = 0;
+	oam_eval_addr = 0;
+	oam_latch_addr = 0;
+
+	oamdata_read_buffer = 0;
+	oamdata_latch = 0xFF;
+	oam2_last_write = 0xFF;
+	oam2_full = false;
+
+	// --------------------------------------------------
+	// Sprite evaluation state
+	// --------------------------------------------------
+	eval_sprite_y = 0;
+	eval_sprite_tile = 0;
+	eval_candidate_in_range = false;
+	sprite_eval_in_range = false;
+	sprite_eval_initialized = false;
+
+	oam_copy_done = false;
+	overflow_bug_counter = 0;
+	overflow_eval_phase = 0;
+	overflow_finish_bytes = 0;
+
+	m_eval_wrap_byte = 0;
+	m_eval_prev_oam_latch_addr = 0xFF;
+	m_oam_eval_realigned = false;
+
+	// --------------------------------------------------
+	// Sprite zero / stale sprite state
+	// --------------------------------------------------
+	sprite0_in_oam2_next = false;
+	sprite0_in_oam2_current = false;
+	sprite0_eval_addr = 0;
+	sprite0_pat = 0;
+
+	sprite_go_this_line = true;
+	sprite_go_next_line = true;
+	sprite_sl0_early_shift_pending = false;
+	sl0_stale_s0_loaded = false;
+	sl0_stale_sprite0_identity = false;
+
+	// --------------------------------------------------
+	// Sprite output units
+	// --------------------------------------------------
+	memset(spr_attr_latch, 0x00, sizeof(spr_attr_latch));
+	memset(spr_x_latch, 0x00, sizeof(spr_x_latch));
+	memset(spr_x_counter, 0, sizeof(spr_x_counter));
+	memset(spr_pt_l_shift, 0x00, sizeof(spr_pt_l_shift));
+	memset(spr_pt_h_shift, 0x00, sizeof(spr_pt_h_shift));
+	memset(spr_shift_count, 0, sizeof(spr_shift_count));
+
+	memset(sec_oam_source, 0xFF, sizeof(sec_oam_source));
+	memset(sprite_oam_source, 0xFF, sizeof(sprite_oam_source));
+
+	// --------------------------------------------------
+	// Sprite/OAM corruption state
+	// --------------------------------------------------
 	oam_corrupt_pending = false;
 	oam_corrupt_seed = 0;
 
-	// $2007 read/write state
-	ppu2007_buffer_fill_armed = false;
-	ppu2007_buffer_fill_arm_pending = false;
-	ppu_bus_read_can_fill_2007 = false;
+	corrupt_resume_high_pending = false;
+	corrupt_resume_high_lane = 0;
+	corrupt_resume_high_value = 0;
 
-	ppu2007_post_bump_pending = false;
-	ppu2007_post_bump_delay = 0;
+	// --------------------------------------------------
+	// Background fetch latches / shift registers
+	// --------------------------------------------------
+	bg_nt_latch = 0;
+	bg_at_latch = 0;
+	bg_pt_l_latch = 0;
+	bg_pt_h_latch = 0;
 
-	m_2007_write.pending = false;
-	m_2007_write.delay = 0;
-	m_2007_write.addr = 0;
-	m_2007_write.data = 0;
+	bg_pt_l_shift = 0;
+	bg_pt_h_shift = 0;
+	bg_at_l_shift = 0;
+	bg_at_h_shift = 0;
 
-	m_2007_read.pending = false;
-	m_2007_read.delay = 0;
-	m_2007_read.addr = 0;
-	m_2007_read.use_next_ppu_read_for_refill = false;
-	m_2007_read.waiting_for_refill_bus_read = false;
+	bg_at_latch_l = 0;
+	bg_at_latch_h = 0;
 
-	scroll_inc_h_pending = false;
-	scroll_inc_v_pending = false;
-	scroll_copy_h_pending = false;
-	scroll_copy_v_pending = false;
-	scroll_copy_conflict_pending = false;
-	scroll_copy_conflict_h_pending = false;
-	scroll_copy_conflict_v_pending = false;
+	// --------------------------------------------------
+	// Background/sprite fetch helper state
+	// --------------------------------------------------
+	skip_bg_reload_once = false;
+
+	spr_fetch_v_old = 0;
+	spr_fetch_v_new = 0;
+	spr_pt_addr_h = 0;
+	spr_pt_addr_l = 0;
+
+	bg_fetch_nt_addr = 0;
+	bg_fetch_at_addr = 0;
+	bg_fetch_v_nt = 0;
+	bg_fetch_v_at = 0;
+	bg_fetch_v_pt = 0;
+	bg_fetch_pt_base = 0;
+
+	// --------------------------------------------------
+	// Previous-pixel latch for retroactive PPUMASK behavior
+	// --------------------------------------------------
+	prev_pixel_valid = false;
+	prev_pixel_scanline = 0;
+	prev_pixel_x = 0;
+	prev_bg_pixel_pat = 0;
+	prev_attr_bits = 0;
+	prev_spr_pat = 0;
+	prev_spr_pal = 0;
+	prev_spr_behind_bg = false;
+	prev_spr_is_s0 = false;
+	prev_sprite0_pat = 0;
+	prev_backdrop_pal_index = 0;
 }
 
 void ppu2c0x_device::init_startup_only_state() {
-	// One-time / startup-only state
+	// --------------------------------------------------
+	// Mapper / cartridge-side device pointers
+	// --------------------------------------------------
 	m_mapper_number = -1;
 	m_mmc5 = nullptr;
 	m_mmc3 = nullptr;
 	m_mmc1_sxrom = nullptr;
 
+	// --------------------------------------------------
+	// Mapper feature flags
+	// --------------------------------------------------
 	m_has_mmc3_a12 = false;
 	m_has_mmc5_ppu = false;
 	m_has_mmc1_phase = false;
 	m_has_chr_latch = false;
 
+	// --------------------------------------------------
+	// PPU model / board configuration
+	// --------------------------------------------------
 	m_security_value = 0;
-	m_tile_page = 0;
 	m_prerender_line = 0;
-	m_planebuf[0] = 0;
-	m_planebuf[1] = 0;
 
+	// --------------------------------------------------
+	// Frame / timing startup state
+	// --------------------------------------------------
 	frame = 0;
 	skip_dot = false;
 	s_after_wrap = false;
 	odd_frame = false;
-	m_nmi = false;
-
-	memset(m_sec_is_sprite0, 0, sizeof(m_sec_is_sprite0));
-	memset(sprite_x_cnt, 0, sizeof(sprite_x_cnt));
-	memset(sprite_shift_count, 0, sizeof(sprite_shift_count));
 }
 
 void ppu2c0x_device::reset() {
@@ -412,11 +467,16 @@ void ppu2c0x_device::reset() {
 }
 
 void ppu2c0x_device::start_nopalram() {
+	// --------------------------------------------------
+	// Video allocation / palette initialization
+	// --------------------------------------------------
 	/* allocate a screen bitmap, videomem and spriteram, a dirtychar array and the monochromatic colortable */
 	m_bitmap = std::make_unique<bitmap_rgb32>(VISIBLE_SCREEN_WIDTH, VISIBLE_SCREEN_HEIGHT);
 	init_palette_tables();
 
-	// register for state saving
+	// --------------------------------------------------
+	// Base MAME save state
+	// --------------------------------------------------
 	save_item(NAME(m_scanline));
 	save_item(NAME(m_refresh_data));
 	save_item(NAME(m_x_fine));
@@ -428,14 +488,25 @@ void ppu2c0x_device::start_nopalram() {
 	save_item(NAME(m_regs));
 	save_item(NAME(*m_bitmap));
 
+	// --------------------------------------------------
+	// Initial PPU state
+	// --------------------------------------------------
 	init_startup_only_state();
 	init_runtime_reset_state();
 }
 
 void ppu2c0x_device::device_start() {
 	start_nopalram();
+
+	// --------------------------------------------------
+	// Device pointers
+	// --------------------------------------------------
 	m_maincpu6502 = machine().root_device().subdevice<m6502_device>("maincpu");
 	m_mmc5 = machine().root_device().subdevice<nes_exrom_device>("nes_slot:exrom");
+
+	// --------------------------------------------------
+	// Power-up palette RAM
+	// --------------------------------------------------
 	// pass blargg_ppu_tests/power_up_palette.nes
 	m_palette_ram = {
 		0x09, 0x01, 0x00, 0x01, 0x00, 0x02, 0x02, 0x0D,
@@ -444,15 +515,18 @@ void ppu2c0x_device::device_start() {
 		0x08, 0x3A, 0x00, 0x02, 0x00, 0x20, 0x2C, 0x08
 	};
 
+	// --------------------------------------------------
+	// Save callbacks
+	// --------------------------------------------------
 	save_item(NAME(m_palette_ram));
 	machine().save().register_presave(save_prepost_delegate(FUNC(ppu2c0x_device::presave), this));
 	machine().save().register_postload(save_prepost_delegate(FUNC(ppu2c0x_device::postload), this));
-	// --- core PPU state ---
+
+	// --------------------------------------------------
+	// Core PPU / mapper state
+	// --------------------------------------------------
 	save_item(NAME(m_mapper_number));
 	save_item(NAME(m_security_value));
-	save_item(NAME(m_tile_page));
-	save_item(NAME(bg_pat_addr_tile));
-	save_item(NAME(m_planebuf));
 	save_item(NAME(m_prerender_line));
 	save_item(NAME(frame));
 	save_item(NAME(m_has_mmc3_a12));
@@ -460,79 +534,123 @@ void ppu2c0x_device::device_start() {
 	save_item(NAME(m_has_mmc1_phase));
 	save_item(NAME(m_has_chr_latch));
 
-	save_item(NAME(oam));
-	save_item(NAME(sec_oam));
-	save_item(NAME(m_sec_is_sprite0));
+	// --------------------------------------------------
+	// OAM memory
+	// --------------------------------------------------
+	save_item(NAME(primary_oam));
+	save_item(NAME(secondary_oam));
 
+	// --------------------------------------------------
+	// VRAM address / scroll state
+	// --------------------------------------------------
 	save_item(NAME(t));
 	save_item(NAME(v));
 	save_item(NAME(fine_x));
-	save_item(NAME(v_inc));
-	save_item(NAME(sprite_pat_addr));
-	save_item(NAME(bg_pat_addr));
+	save_item(NAME(w));
+
+	// --------------------------------------------------
+	// $2000 / PPUCTRL state
+	// --------------------------------------------------
+	save_item(NAME(ppuctrl_vram_increment));
+	save_item(NAME(ppuctrl_sprite_pattern_base));
+	save_item(NAME(ppuctrl_bg_pattern_base));
 	save_item(NAME(m_save_sprite_size));
-	save_item(NAME(nmi_on_vblank));
-	save_item(NAME(m_nmi));
+	save_item(NAME(ppuctrl_nmi_enable));
+
+	// --------------------------------------------------
+	// $2001 / PPUMASK state
+	// --------------------------------------------------
+	save_item(NAME(ppumask_grayscale_mask));
+	save_item(NAME(ppumask_show_bg_left));
+	save_item(NAME(ppumask_show_spr_left));
+	save_item(NAME(ppumask_emphasis_bits));
+	save_item(NAME(bg_left_clip));
+	save_item(NAME(spr_left_clip));
+
+	// --------------------------------------------------
+	// $2002 / PPUSTATUS state
+	// --------------------------------------------------
+	save_item(NAME(ppustatus_sprite_overflow));
+	save_item(NAME(ppustatus_sprite0_hit));
+	save_item(NAME(ppustatus_vblank));
+
+	// --------------------------------------------------
+	// NMI / vblank suppression state
+	// --------------------------------------------------
 	save_item(NAME(nmi_pending));
-
-	save_item(NAME(grayscale_color_mask));
-	save_item(NAME(show_bg_left_8));
-	save_item(NAME(show_sprites_left_8));
-	save_item(NAME(tint_bits));
-	save_item(NAME(bg_clip_comp));
-	save_item(NAME(sprite_clip_comp));
-
-	save_item(NAME(sprite_overflow));
-	save_item(NAME(sprite_zero_hit));
-	save_item(NAME(in_vblank));
-
-	save_item(NAME(oam_addr));
-	save_item(NAME(sec_oam_addr));
-	save_item(NAME(oam_data));
-	save_item(NAME(sprite_addr_h));
-	save_item(NAME(sprite_addr_l));
-	save_item(NAME(oam_copy_done));
-	save_item(NAME(overflow_bug_counter));
-	save_item(NAME(sprite_eval_in_range));
-	save_item(NAME(oam_addr_overflow));
-	save_item(NAME(sec_oam_addr_overflow));
-	save_item(NAME(overflow_detection));
-
-	save_item(NAME(write_flip_flop));
-	save_item(NAME(ppu_data_reg));
-	save_item(NAME(odd_frame));
-	save_item(NAME(scanline));
-	save_item(NAME(dot));
-
-	save_item(NAME(nt_byte));
-	save_item(NAME(at_byte));
-	save_item(NAME(bg_byte_l));
-	save_item(NAME(bg_byte_h));
-	save_item(NAME(bg_shift_l));
-	save_item(NAME(bg_shift_h));
-	save_item(NAME(at_shift_l));
-	save_item(NAME(at_shift_h));
-	save_item(NAME(at_latch_l));
-	save_item(NAME(at_latch_h));
-
-	save_item(NAME(sprite_attribs));
-	save_item(NAME(sprite_x));
-	save_item(NAME(sprite_x_cnt));
-	save_item(NAME(sprite_pat_l));
-	save_item(NAME(sprite_pat_h));
-	save_item(NAME(sprite_shift_count));
-
-	save_item(NAME(s0_on_next_scanline));
-	save_item(NAME(s0_on_cur_scanline));
-	save_item(NAME(sprite_y));
-	save_item(NAME(sprite_index));
-	save_item(NAME(sprite_in_range));
-
-	save_item(NAME(ppu_addr_bus));
 	save_item(NAME(nmi_delay));
 	save_item(NAME(suppress_vblank_flag));
 
-	// --- delayed register writes / reads ---
+	// --------------------------------------------------
+	// OAM registers / sprite evaluation state
+	// --------------------------------------------------
+	save_item(NAME(oamaddr));
+	save_item(NAME(oam2addr));
+	save_item(NAME(oamdata_read_buffer));
+	save_item(NAME(oam_eval_addr));
+	save_item(NAME(oam_copy_done));
+	save_item(NAME(overflow_bug_counter));
+	save_item(NAME(sprite_eval_in_range));
+
+	save_item(NAME(eval_sprite_y));
+	save_item(NAME(eval_sprite_tile));
+	save_item(NAME(eval_candidate_in_range));
+
+	// --------------------------------------------------
+	// PPU timing state
+	// --------------------------------------------------
+	save_item(NAME(odd_frame));
+	save_item(NAME(scanline));
+	save_item(NAME(dot));
+	save_item(NAME(skip_dot));
+	save_item(NAME(s_after_wrap));
+
+	// --------------------------------------------------
+	// PPU data/bus state
+	// --------------------------------------------------
+	save_item(NAME(ppudata_read_buffer));
+	save_item(NAME(ppu_address_bus));
+
+	// --------------------------------------------------
+	// Background render pipeline
+	// --------------------------------------------------
+	save_item(NAME(bg_nt_latch));
+	save_item(NAME(bg_at_latch));
+	save_item(NAME(bg_pt_l_latch));
+	save_item(NAME(bg_pt_h_latch));
+	save_item(NAME(bg_pt_l_shift));
+	save_item(NAME(bg_pt_h_shift));
+	save_item(NAME(bg_at_l_shift));
+	save_item(NAME(bg_at_h_shift));
+	save_item(NAME(bg_at_latch_l));
+	save_item(NAME(bg_at_latch_h));
+
+	// --------------------------------------------------
+	// Sprite output units
+	// --------------------------------------------------
+	save_item(NAME(spr_attr_latch));
+	save_item(NAME(spr_x_latch));
+	save_item(NAME(spr_x_counter));
+	save_item(NAME(spr_pt_l_shift));
+	save_item(NAME(spr_pt_h_shift));
+	save_item(NAME(spr_shift_count));
+
+	// --------------------------------------------------
+	// Sprite zero / stale sprite state
+	// --------------------------------------------------
+	save_item(NAME(sprite0_in_oam2_next));
+	save_item(NAME(sprite0_in_oam2_current));
+	save_item(NAME(sprite0_eval_addr));
+	save_item(NAME(sprite0_pat));
+	save_item(NAME(sprite_go_this_line));
+	save_item(NAME(sprite_go_next_line));
+	save_item(NAME(sprite_sl0_early_shift_pending));
+	save_item(NAME(sl0_stale_s0_loaded));
+	save_item(NAME(sl0_stale_sprite0_identity));
+
+	// --------------------------------------------------
+	// Pending delayed register effects
+	// --------------------------------------------------
 	save_item(NAME(pending_2000.has_pending));
 	save_item(NAME(pending_2000.value));
 	save_item(NAME(pending_2000.value16));
@@ -554,42 +672,30 @@ void ppu2c0x_device::device_start() {
 	save_item(NAME(pending_2006.apply_scanline));
 	save_item(NAME(pending_2006.apply_ppu));
 
-	save_item(NAME(pending_2004.has_pending));
-	save_item(NAME(pending_2004.value));
-	save_item(NAME(pending_2004.value16));
-	save_item(NAME(pending_2004.apply_dot));
-	save_item(NAME(pending_2004.apply_scanline));
-	save_item(NAME(pending_2004.apply_ppu));
-
-	// --- sprite corruption / masking / mapper feed ---
-	save_item(NAME(oam_eval_addr));
-	save_item(NAME(oam_corrupt_pending));
-	save_item(NAME(oam_corrupt_seed));
+	// --------------------------------------------------
+	// Render enable / pipeline decoded state
+	// --------------------------------------------------
 	save_item(NAME(bg_output_enabled));
 	save_item(NAME(spr_output_enabled));
 	save_item(NAME(bg_pipeline_enabled));
 	save_item(NAME(spr_pipeline_enabled));
-	save_item(NAME(inhibit_bg_shift_one_dot));
-	save_item(NAME(skip_dot));
+	save_item(NAME(skip_bg_reload_once));
 
-	save_item(NAME(sprite0_eval_addr));
-	save_item(NAME(sprite0_pat));
-	save_item(NAME(sprite_go_this_line));
-	save_item(NAME(sprite_go_next_line));
-	save_item(NAME(sprite_force_immediate_applied));
-	save_item(NAME(sprite_sl0_early_shift_pending));
-
+	// --------------------------------------------------
+	// OAM corruption / OAM latch state
+	// --------------------------------------------------
+	save_item(NAME(oam_corrupt_pending));
+	save_item(NAME(oam_corrupt_seed));
 	save_item(NAME(oam_latch_addr));
-	save_item(NAME(sec_oam_full));
-	save_item(NAME(oam_2004_latch));
-	save_item(NAME(sec_oam_last_write));
-	save_item(NAME(s_after_wrap));
-	save_item(NAME(sl0_stale_s0_loaded));
-	save_item(NAME(sl0_stale_sprite0_identity));
+	save_item(NAME(oam2_full));
+	save_item(NAME(oamdata_latch));
+	save_item(NAME(oam2_last_write));
 	save_item(NAME(overflow_eval_phase));
 	save_item(NAME(overflow_finish_bytes));
 
-	// --- retroactive PPUMASK previous-pixel state ---
+	// --------------------------------------------------
+	// Retroactive PPUMASK previous-pixel state
+	// --------------------------------------------------
 	save_item(NAME(prev_pixel_valid));
 	save_item(NAME(prev_pixel_scanline));
 	save_item(NAME(prev_pixel_x));
@@ -604,30 +710,27 @@ void ppu2c0x_device::device_start() {
 	save_item(NAME(retro_ppumask_color));
 	save_item(NAME(retro_ppumask_render));
 
-	// --- delayed fine-X and scroll side effects ---
+	// --------------------------------------------------
+	// Delayed fine-X / scroll side effects
+	// --------------------------------------------------
 	save_item(NAME(pending_fine_x));
 	save_item(NAME(pending_fine_x_valid));
 	save_item(NAME(pending_fine_x_delay));
-	save_item(NAME(scroll_inc_h_pending));
-	save_item(NAME(scroll_inc_v_pending));
-	save_item(NAME(scroll_copy_h_pending));
-	save_item(NAME(scroll_copy_v_pending));
-	save_item(NAME(scroll_copy_conflict_pending));
-	save_item(NAME(scroll_copy_conflict_h_pending));
-	save_item(NAME(scroll_copy_conflict_v_pending));
 
-	// --- PPU internal I/O latch/open-bus decay ---
+	// --------------------------------------------------
+	// PPU internal I/O latch / open-bus decay
+	// --------------------------------------------------
 	save_item(NAME(m_ppu_io_db));
 	save_item(NAME(m_ppu_io_db_decay_at));
 
-	// --- $2007 delayed read/write machinery ---
+	// --------------------------------------------------
+	// $2007 delayed read/write machinery
+	// --------------------------------------------------
 	save_item(NAME(ppu2007_buffer_fill_armed));
 	save_item(NAME(ppu2007_buffer_fill_arm_pending));
 	save_item(NAME(ppu_bus_read_can_fill_2007));
 	save_item(NAME(ppu2007_post_bump_pending));
 	save_item(NAME(ppu2007_post_bump_delay));
-	save_item(NAME(sprite_nt_fetch_v));
-	save_item(NAME(sprite_nt_fetch_v_new));
 
 	save_item(NAME(m_2007_write.pending));
 	save_item(NAME(m_2007_write.delay));
@@ -640,24 +743,51 @@ void ppu2c0x_device::device_start() {
 	save_item(NAME(m_2007_read.use_next_ppu_read_for_refill));
 	save_item(NAME(m_2007_read.waiting_for_refill_bus_read));
 
-	// --- replacements for function-local statics ---
+	// --------------------------------------------------
+	// Fetch helper state
+	// --------------------------------------------------
+	save_item(NAME(spr_fetch_v_old));
+	save_item(NAME(spr_fetch_v_new));
+	save_item(NAME(spr_pt_addr_h));
+	save_item(NAME(spr_pt_addr_l));
+	save_item(NAME(bg_fetch_v_nt));
+	save_item(NAME(bg_fetch_v_at));
+	save_item(NAME(bg_fetch_v_pt));
+	save_item(NAME(bg_fetch_pt_base));
+	save_item(NAME(bg_fetch_nt_addr));
+	save_item(NAME(bg_fetch_at_addr));
+
+	// --------------------------------------------------
+	// Replacement state for previous function-local statics
+	// --------------------------------------------------
 	save_item(NAME(m_eval_wrap_byte));
 	save_item(NAME(m_eval_prev_oam_latch_addr));
-	save_item(NAME(m_bgfetch_v_nt));
-	save_item(NAME(m_bgfetch_v_at));
-	save_item(NAME(m_bgfetch_v_pt));
-	save_item(NAME(m_bgfetch_pat_pt));
-	save_item(NAME(m_bgfetch_nt_addr));
-	save_item(NAME(m_bgfetch_at_addr));
 	save_item(NAME(sprite_eval_initialized));
+
+	// --------------------------------------------------
+	// ALE / $2007 address latch state
+	// --------------------------------------------------
+	save_item(NAME(ppu_ad_latch));
+	save_item(NAME(ppu2007_ale_read_addr_latch_poison));
+	save_item(NAME(ppu2007_ale_read_low_latch));
+
+	// --------------------------------------------------
+	// Resume-render OAM corruption state
+	// --------------------------------------------------
+	save_item(NAME(corrupt_resume_high_pending));
+	save_item(NAME(corrupt_resume_high_lane));
+	save_item(NAME(corrupt_resume_high_value));
+	save_item(NAME(sec_oam_source));
+	save_item(NAME(sprite_oam_source));
+	save_item(NAME(m_oam_eval_realigned));
 }
 
 void ppu2c0x_device::presave() {
-	m_save_sprite_size = int(sprite_size);
+	m_save_sprite_size = int(ppuctrl_sprite_size);
 }
 
 void ppu2c0x_device::postload() {
-	sprite_size = Sprite_size(m_save_sprite_size);
+	ppuctrl_sprite_size = Sprite_size(m_save_sprite_size);
 	resolve_mapper_ppu_devices();
 }
 
@@ -687,7 +817,7 @@ inline void ppu2c0x_device::writebyte(offs_t address, uint8_t data) {
 
 
 inline uint16_t ppu2c0x_device::apply_grayscale_and_emphasis(uint8_t color) {
-	return (color & grayscale_color_mask) | tint_bits;
+	return (color & ppumask_grayscale_mask) | ppumask_emphasis_bits;
 }
 
 /***************************************************************************
@@ -836,8 +966,8 @@ void ppu2c0x_rgb_device::init_palette_tables() {
 void ppu2c0x_device::ppu_bus_address_drive(uint16_t addr) {
 	addr &= 0x3FFF;
 
-	ppu_addr_bus = addr;
-	ppu_ext_low_latch = addr & 0xFF;
+	ppu_address_bus = addr;
+	ppu_ad_latch = addr & 0xFF;
 
 	if (m_has_mmc3_a12 && m_mmc3)
 	m_mmc3->observe_ppu_a12(addr, m_cpu->total_cycles());
@@ -845,6 +975,7 @@ void ppu2c0x_device::ppu_bus_address_drive(uint16_t addr) {
 
 uint8_t ppu2c0x_device::ppu_bus_read(uint16_t addr, ppu_fetch_phase phase) {
 	addr &= 0x3FFF;
+	
 	ppu_bus_address_drive(addr);
 
 	// Classify the current PPU fetch phase once.
@@ -908,7 +1039,7 @@ uint8_t ppu2c0x_device::ppu_bus_read(uint16_t addr, ppu_fetch_phase phase) {
 	// Keep this after the MMC5 observe call because the mapper may need to see
 	// the bus address/phase before data is returned.
 	const uint8_t data = readbyte(addr);
-	ppu_ext_low_latch = data;
+	ppu_ad_latch = data;
 	if (addr < 0x2000) {
 		// MMC2/MMC4 latch boards react to CHR pattern address fetches.
 		// If you know your dummy CHR fetches should not clock MMC2/MMC4, keep
@@ -932,7 +1063,7 @@ uint8_t ppu2c0x_device::ppu_bus_read(uint16_t addr, ppu_fetch_phase phase) {
 	// ppu_bus_read_can_fill_2007 is still the external gate that decides which
 	// bus reads are allowed to satisfy the delayed refill.
 	if (ppu2007_buffer_fill_armed && ppu_bus_read_can_fill_2007) {
-		ppu_data_reg = data;
+		ppudata_read_buffer = data;
 		ppu2007_buffer_fill_armed = false;
 
 		// A rendering $2007 read matures first, then the next allowed real PPU
@@ -1062,7 +1193,7 @@ void ppu2c0x_device::tick(int x) {
 			const uint16_t bus_addr = m_2007_write.addr & 0x3FFF;
 
 			if ((bus_addr & 0x3F00) == 0x3F00) {
-				ppu_addr_bus = bus_addr;
+				ppu_address_bus = bus_addr;
 				m_palette_ram[bus_addr & 0x1F] = m_2007_write.data & 0x3F;
 			} else {
 				ppu_bus_address_drive(bus_addr);
@@ -1080,7 +1211,7 @@ void ppu2c0x_device::tick(int x) {
 	// Delayed $2007 read/refill
 	//
 	// CPU $2007 reads return immediately from either:
-		//   - ppu_data_reg for normal VRAM reads, or
+		//   - ppudata_read_buffer for normal VRAM reads, or
 		//   - palette RAM for palette reads.
 		//
 		// The internal read buffer refill happens later:
@@ -1124,19 +1255,19 @@ void ppu2c0x_device::tick(int x) {
 
 					if (bg_fetch_dot && (bg_phase == 4 || bg_phase == 6)) {
 						const uint16_t normal_addr =
-							(bg_pat_addr + (16 * nt_byte) + (v >> 12) + ((bg_phase == 6) ? 8 : 0)) & 0x3FFF;
+							(ppuctrl_bg_pattern_base + (16 * bg_nt_latch) + (v >> 12) + ((bg_phase == 6) ? 8 : 0)) & 0x3FFF;
 
 						const uint16_t poisoned_addr =
-							(normal_addr & 0x3F00) | ppu_ext_low_latch;
+							(normal_addr & 0x3F00) | ppu_ad_latch;
 						
 						// Approximation of ALE+Read feedback stability.
 						// Hardware does not perform this compare; this prevents unstable
 						// feedback cases from becoming deterministic in the emulator.
 						const uint8_t feedback_data = readbyte(poisoned_addr);
 
-						if (feedback_data == ppu_ext_low_latch) {
+						if (feedback_data == ppu_ad_latch) {
 							ppu2007_ale_read_addr_latch_poison = true;
-							ppu2007_ale_read_low_latch = ppu_ext_low_latch;
+							ppu2007_ale_read_low_latch = ppu_ad_latch;
 						}
 					}
 
@@ -1146,7 +1277,7 @@ void ppu2c0x_device::tick(int x) {
 					// The mapper sees the original $2007 access address.
 					// The read buffer data may come from the palette mirror.
 					ppu_bus_address_drive(delayed_bus_addr);
-					ppu_data_reg = readbyte(read_addr);
+					ppudata_read_buffer = readbyte(read_addr);
 
 					m_2007_read.pending = false;
 			}
@@ -1175,7 +1306,7 @@ void ppu2c0x_device::tick(int x) {
 		// This is only armed by prerender sprite loading.
 		if (scanline == 0) {
 			if (sl0_stale_sprite0_identity)
-			s0_on_cur_scanline = true;
+			sprite0_in_oam2_current = true;
 
 			sl0_stale_sprite0_identity = false;
 			sl0_stale_s0_loaded = false;
@@ -1202,7 +1333,7 @@ void ppu2c0x_device::tick(int x) {
 			const bool rendering_now = (bg_pipeline_enabled || spr_pipeline_enabled) && is_visible_scanline();
 
 			if (rendering_now) {
-				const uint8_t old_low = ppu_addr_bus & 0xFF;
+				const uint8_t old_low = ppu_address_bus & 0xFF;
 
 				t = ppuaddr_reload;
 				copy_horiz();
@@ -1211,16 +1342,20 @@ void ppu2c0x_device::tick(int x) {
 				// $2006/v update during rendering can corrupt an in-flight fetch address:
 				// high bits come from the newly updated v, low bits remain from the
 				// previously prepared external address latch.
-				if (dot >= 1 && dot <= 256)
-					ppu_addr_bus = ((0x2000 | (v & 0x0FFF)) & 0x3F00) | old_low;
+				// Steins Gate "dust" pixel and also if incorrectly gated will create artifacts in mig29sf
+				// This is intentionally limited to phase 1 of the 8-dot BG fetch.
+				// Applying it across all visible dots causes false corruption in
+				// games that write $2006 mid-scanline.
+				if (dot >= 1 && dot <= 256 && ((dot - 1) & 7) == 1)
+					ppu_address_bus = ((0x2000 | (v & 0x0FFF)) & 0x3F00) | old_low;
 			} else {
 				v = ppuaddr_reload;
 
 				// Palette space is internal to the PPU. Keep the PPU bus shadow/latch,
 				// but do not expose this as a cartridge/MMC3 A12 clock.
 				if ((v & 0x3F00) == 0x3F00) {
-					ppu_addr_bus = v & 0x3FFF;
-					ppu_ext_low_latch = v & 0xFF;
+					ppu_address_bus = v & 0x3FFF;
+					ppu_ad_latch = v & 0xFF;
 				} else {
 					ppu_bus_address_drive(v);
 				}
@@ -1257,8 +1392,8 @@ void ppu2c0x_device::tick(int x) {
 	//
 	// This is separate from render-disable OAM corruption. If render-disable
 	// corruption is pending, that operation takes priority on this PPU cycle.
-	if (is_prerender_scanline() && dot == 0 && (bg_pipeline_enabled || spr_pipeline_enabled) && !oam_corrupt_pending && (oam_addr & 0xF8)) {
-		memcpy(&oam[0], &oam[oam_addr & 0xF8], 8);
+	if (is_prerender_scanline() && dot == 0 && (bg_pipeline_enabled || spr_pipeline_enabled) && !oam_corrupt_pending && (oamaddr & 0xF8)) {
+		memcpy(&primary_oam[0], &primary_oam[oamaddr & 0xF8], 8);
 	}
 
 	// Apply OAM corruption exactly once:
@@ -1269,11 +1404,11 @@ void ppu2c0x_device::tick(int x) {
 			uint8_t row = oam_corrupt_seed & 0x1F;
 
 			if (row != 0) {
-				memcpy(oam + row * 8, oam, 8);   // copy row 0 -> row 'row'
+				memcpy(primary_oam + row * 8, primary_oam, 8);   // copy row 0 -> row 'row'
 			}
 
 			// Secondary OAM side effect mentioned by the test
-			sec_oam[row] = sec_oam[0];
+			secondary_oam[row] = secondary_oam[0];
 
 			oam_corrupt_pending = false;
 		}
@@ -1341,7 +1476,7 @@ void ppu2c0x_device::tick(int x) {
 		dot=0;
 		++scanline;
 		if (scanline == 240 && dot == 0) {
-			ppu_addr_bus = v & 0x3FFF;
+			ppu_address_bus = v & 0x3FFF;
 		}
 		if (scanline >= m_scanlines_per_frame) {
 			scanline = 0;
@@ -1357,7 +1492,7 @@ void ppu2c0x_device::tick(int x) {
 	//Start HBlank
 	if (scanline <= 239 && dot==257) {
 		if (!m_hblank_callback_proc.isnull())
-		m_hblank_callback_proc(scanline, in_vblank, (bg_pipeline_enabled || spr_pipeline_enabled) );
+		m_hblank_callback_proc(scanline, ppustatus_vblank, (bg_pipeline_enabled || spr_pipeline_enabled) );
 	}
 }
 
@@ -1377,14 +1512,14 @@ void ppu2c0x_device::retro_fix_previous_pixel_after_ppumask_write() {
 	const unsigned pixel = prev_pixel_x;
 	unsigned pal_index = 0;
 	// Use the current visible PPUMASK state after the write.
-	const bool bg_visible =	bg_output_enabled && (show_bg_left_8 || pixel >= 8);
-	const bool spr_visible = spr_output_enabled && (show_sprites_left_8 || pixel >= 8);
+	const bool bg_visible =	bg_output_enabled && (ppumask_show_bg_left || pixel >= 8);
+	const bool spr_visible = spr_output_enabled && (ppumask_show_spr_left || pixel >= 8);
 	const bool rendering_disabled = (!bg_output_enabled && !spr_output_enabled);
 	// Internal BG path for sprite-zero hit.
-	// Do NOT include inhibit_bg_shift_one_dot here.
+	// Do NOT include skip_bg_reload_once here.
 	const unsigned bg_pat_internal = bg_visible ? prev_bg_pixel_pat : 0;
 	// Display BG path. This is allowed to suppress the enable-edge stale pixel.
-	const bool bg_display_visible = bg_visible && !inhibit_bg_shift_one_dot;
+	const bool bg_display_visible = bg_visible && !skip_bg_reload_once;
 	const unsigned bg_pat_display = bg_display_visible ? prev_bg_pixel_pat : 0;
 	// IMPORTANT:
 		// prev_spr_pat must be the raw sprite pixel from get_sprite_pixel(),
@@ -1394,13 +1529,13 @@ void ppu2c0x_device::retro_fix_previous_pixel_after_ppumask_write() {
 		// Use internal BG, not display-suppressed BG.
 		const bool right_edge_ok = (pixel != 255);
 
-		if (s0_on_cur_scanline &&
+		if (sprite0_in_oam2_current &&
 			prev_sprite0_pat &&
 			bg_pat_internal &&
 			bg_visible &&
 			spr_visible &&
 			right_edge_ok) {
-		sprite_zero_hit = true;
+		ppustatus_sprite0_hit = true;
 	}
 
 	if (rendering_disabled) {
@@ -1452,15 +1587,15 @@ void ppu2c0x_device::run_bg_fetch_dot() {
 				//
 				// In the normal case where v does not change, this collapses to the
 				// same address as before.
-				m_bgfetch_v_nt = v & 0x7FFF;
-				m_bgfetch_nt_addr = (0x2000 | (m_bgfetch_v_nt & 0x0FFF)) & 0x3FFF;
-				ppu_addr_bus = m_bgfetch_nt_addr;
+				bg_fetch_v_nt = v & 0x7FFF;
+				bg_fetch_nt_addr = (0x2000 | (bg_fetch_v_nt & 0x0FFF)) & 0x3FFF;
+				ppu_address_bus = bg_fetch_nt_addr;
 				break;
 		}
 
 		case 1: {
 			ppu_bus_read_can_fill_2007 = true;
-			nt_byte = ppu_bus_read(ppu_addr_bus, ppu_fetch_phase::NT);
+			bg_nt_latch = ppu_bus_read(ppu_address_bus, ppu_fetch_phase::NT);
 			ppu_bus_read_can_fill_2007 = false;
 			break;
 		}
@@ -1469,61 +1604,61 @@ void ppu2c0x_device::run_bg_fetch_dot() {
 			// First dot of attribute fetch:
 				// Same mixed-address rule as NT fetches. Prepare the old full AT
 				// address now, then use only its low 8 bits on the read dot.
-				m_bgfetch_v_at = v & 0x7FFF;
-				m_bgfetch_at_addr =
+				bg_fetch_v_at = v & 0x7FFF;
+				bg_fetch_at_addr =
 				0x23C0
-				| (m_bgfetch_v_at & 0x0C00)
-				| ((m_bgfetch_v_at >> 4) & 0x38)
-				| ((m_bgfetch_v_at >> 2) & 0x07);
+				| (bg_fetch_v_at & 0x0C00)
+				| ((bg_fetch_v_at >> 4) & 0x38)
+				| ((bg_fetch_v_at >> 2) & 0x07);
 
-				m_bgfetch_at_addr &= 0x3FFF;
-				ppu_addr_bus = m_bgfetch_at_addr;
+				bg_fetch_at_addr &= 0x3FFF;
+				ppu_address_bus = bg_fetch_at_addr;
 				break;
 		}
 
 		case 3: {
 			ppu_bus_read_can_fill_2007 = true;
-			at_byte = ppu_bus_read(ppu_addr_bus, ppu_fetch_phase::AT);
+			bg_at_latch = ppu_bus_read(ppu_address_bus, ppu_fetch_phase::AT);
 			ppu_bus_read_can_fill_2007 = false;
 
 			// Attribute quadrant decode should use the v that started this AT fetch,
 			// not the possibly changed v from the read dot.
-			at_byte = (at_byte >> (((m_bgfetch_v_at >> 4) & 4) | (m_bgfetch_v_at & 2))) & 0x03;
+			bg_at_latch = (bg_at_latch >> (((bg_fetch_v_at >> 4) & 4) | (bg_fetch_v_at & 2))) & 0x03;
 			break;
 		}
 
 	case 4: {
-			m_bgfetch_v_pt = v & 0x7FFF;
-			m_bgfetch_pat_pt = bg_pat_addr;
+			bg_fetch_v_pt = v & 0x7FFF;
+			bg_fetch_pt_base = ppuctrl_bg_pattern_base;
 
-			uint16_t addr =	(m_bgfetch_pat_pt + (16 * nt_byte) + (m_bgfetch_v_pt >> 12)) & 0x3FFF;
+			uint16_t addr =	(bg_fetch_pt_base + (16 * bg_nt_latch) + (bg_fetch_v_pt >> 12)) & 0x3FFF;
 
 			if (ppu2007_ale_read_addr_latch_poison)
 			addr = (addr & 0x3F00) | ppu2007_ale_read_low_latch;
 
-			ppu_addr_bus = addr & 0x3FFF;
+			ppu_address_bus = addr & 0x3FFF;
 			break;
 		}
 
 	case 5:
 		ppu_bus_read_can_fill_2007 = true;
-		bg_byte_l = ppu_bus_read(ppu_addr_bus, ppu_fetch_phase::PTL);
+		bg_pt_l_latch = ppu_bus_read(ppu_address_bus, ppu_fetch_phase::PTL);
 		ppu_bus_read_can_fill_2007 = false;
 
 		ppu2007_ale_read_addr_latch_poison = false;
 		break;
 
 	case 6:
-		ppu_addr_bus = m_bgfetch_pat_pt + (16 * nt_byte) + (m_bgfetch_v_pt >> 12) + 8;
-		ppu_addr_bus &= 0x3FFF;
+		ppu_address_bus = bg_fetch_pt_base + (16 * bg_nt_latch) + (bg_fetch_v_pt >> 12) + 8;
+		ppu_address_bus &= 0x3FFF;
 
 		if (ppu2007_ale_read_addr_latch_poison)
-			ppu_addr_bus = (ppu_addr_bus & 0x3F00) | ppu2007_ale_read_low_latch;
+			ppu_address_bus = (ppu_address_bus & 0x3F00) | ppu2007_ale_read_low_latch;
 		break;
 
 	case 7:
 		ppu_bus_read_can_fill_2007 = true;
-		bg_byte_h = ppu_bus_read(ppu_addr_bus, ppu_fetch_phase::PTH);
+		bg_pt_h_latch = ppu_bus_read(ppu_address_bus, ppu_fetch_phase::PTH);
 		ppu_bus_read_can_fill_2007 = false;
 
 		ppu2007_ale_read_addr_latch_poison = false;
@@ -1546,25 +1681,25 @@ void ppu2c0x_device::run_visible_scanline_dot() {
 		if (bg_pipeline_enabled || spr_pipeline_enabled) {
 		switch (dot) {
 		case 0:
-			sec_oam_addr = 0;
+			oam2addr = 0;
 			break;
 
 		case 1 ... 64:
 			// OAM2 init/clear phase:
 				// $2004 must see $FF through this whole window.
-				oam_2004_latch = 0xFF;
-				sec_oam_last_write = 0xFF;
-				oam_latch_addr = sec_oam_addr & 0x1F;
+				oamdata_latch = 0xFF;
+				oam2_last_write = 0xFF;
+				oam_latch_addr = oam2addr & 0x1F;
 				if (dot & 1) {
-				oam_data = 0xFF;
+				oamdata_read_buffer = 0xFF;
 			} else {
 				// A new four-byte OAM2 slot begins at offsets 0, 4, 8...
-				if ((sec_oam_addr & 3) == 0)
-				sec_oam_source[(sec_oam_addr >> 2) & 7] = 0xFF;
+				if ((oam2addr & 3) == 0)
+				sec_oam_source[(oam2addr >> 2) & 7] = 0xFF;
 
 				// Write the forced $FF into secondary OAM.
-				sec_oam[sec_oam_addr & 0x1F] = 0xFF;
-				sec_oam_addr = (sec_oam_addr + 1) & 0x1F;
+				secondary_oam[oam2addr & 0x1F] = 0xFF;
+				oam2addr = (oam2addr + 1) & 0x1F;
 			}
 			break;
 
@@ -1576,8 +1711,8 @@ void ppu2c0x_device::run_visible_scanline_dot() {
 
 
 	if (dot == 257 && (bg_pipeline_enabled || spr_pipeline_enabled)) {
-		s0_on_cur_scanline = s0_on_next_scanline;
-		s0_on_next_scanline = false;
+		sprite0_in_oam2_current = sprite0_in_oam2_next;
+		sprite0_in_oam2_next = false;
 	}
 
 	if (dot >= 2 && dot <= 257) {
@@ -1596,9 +1731,9 @@ void ppu2c0x_device::run_visible_scanline_dot() {
 void ppu2c0x_device::run_render_pipeline_dot() {
 	if (dot == 0) {
 		if (bg_pipeline_enabled || spr_pipeline_enabled) {
-			ppu_addr_bus = (bg_pat_addr + (16 * nt_byte) + (v >> 12)) & 0x3FFF;
+			ppu_address_bus = (ppuctrl_bg_pattern_base + (16 * bg_nt_latch) + (v >> 12)) & 0x3FFF;
 		} else {
-			ppu_addr_bus = v & 0x3FFF;
+			ppu_address_bus = v & 0x3FFF;
 		}
 	}
 
@@ -1621,7 +1756,7 @@ void ppu2c0x_device::run_render_pipeline_dot() {
 				// Dot 321 signal quirk: OAM2ADDR receives one extra increment.
 				// However, $2004-visible secondary-OAM behavior exposes byte 0 here.
 				if (dot == 321) {
-				sec_oam_addr = (sec_oam_addr + 1) & 0x1F;
+				oam2addr = (oam2addr + 1) & 0x1F;
 			}
 		}
 		break;
@@ -1630,14 +1765,14 @@ void ppu2c0x_device::run_render_pipeline_dot() {
 
 			if (pipe_render) {
 				// Latch OLD v before horizontal reload
-				sprite_nt_fetch_v = v & 0x7FFF;
+				spr_fetch_v_old = v & 0x7FFF;
 
 				// Precompute what v will become after copy_horiz()
-				sprite_nt_fetch_v_new = (v & ~0x041F) | (t & 0x041F);
-				sprite_nt_fetch_v_new &= 0x7FFF;
+				spr_fetch_v_new = (v & ~0x041F) | (t & 0x041F);
+				spr_fetch_v_new &= 0x7FFF;
 
-				oam_addr = 0;
-				sec_oam_addr = 0;
+				oamaddr = 0;
+				oam2addr = 0;
 				copy_horiz();
 
 				do_sprite_loading();
@@ -1654,12 +1789,12 @@ void ppu2c0x_device::run_render_pipeline_dot() {
 		// --- Dummy Nametable Fetches (Dots 337 & 339) ---
 	case 337:
 		if (pipe_render)
-		ppu_addr_bus = 0x2000 | (v & 0x0FFF);
+		ppu_address_bus = 0x2000 | (v & 0x0FFF);
 		break;
 	case 338:
 		if (pipe_render) {
 			ppu_bus_read_can_fill_2007 = true;
-			(void)ppu_bus_read(ppu_addr_bus, ppu_fetch_phase::DUMMY338);
+			(void)ppu_bus_read(ppu_address_bus, ppu_fetch_phase::DUMMY338);
 			ppu_bus_read_can_fill_2007 = false;
 		}
 		break;
@@ -1679,13 +1814,13 @@ void ppu2c0x_device::run_render_pipeline_dot() {
 		}
 
 		if (pipe_render)
-		ppu_addr_bus = 0x2000 | (v & 0x0FFF);
+		ppu_address_bus = 0x2000 | (v & 0x0FFF);
 
 		break;
 	case 340:
 		if (pipe_render) {
 			ppu_bus_read_can_fill_2007 = true;
-			(void)ppu_bus_read(ppu_addr_bus, ppu_fetch_phase::DUMMY340);
+			(void)ppu_bus_read(ppu_address_bus, ppu_fetch_phase::DUMMY340);
 			ppu_bus_read_can_fill_2007 = false;
 		}
 		break;
@@ -1711,7 +1846,7 @@ unsigned ppu2c0x_device::get_sprite_pixel(unsigned &spr_pal, bool &spr_behind_bg
 	const bool vis = (bg_output_enabled || spr_output_enabled);
 
 	// Output is still gated by sprite-enable + left-8 rules (your existing behavior)
-	const bool output_allowed = spr_output_enabled && (show_sprites_left_8 || pixel >= 8);
+	const bool output_allowed = spr_output_enabled && (ppumask_show_spr_left || pixel >= 8);
 
 	// Scanline-0 odd-frame skip glitch:
 		// one early shift/output at X=0, then counting effectively offset by 1.
@@ -1725,19 +1860,19 @@ unsigned ppu2c0x_device::get_sprite_pixel(unsigned &spr_pal, bool &spr_behind_bg
 
 		uint8_t slot0_pat = 0;
 
-		if (sprite_shift_count[0] < 8) {
-			const unsigned p1 = (sprite_pat_h[0] & 0x80) ? 1 : 0;
-			const unsigned p0 = (sprite_pat_l[0] & 0x80) ? 1 : 0;
+		if (spr_shift_count[0] < 8) {
+			const unsigned p1 = (spr_pt_h_shift[0] & 0x80) ? 1 : 0;
+			const unsigned p0 = (spr_pt_l_shift[0] & 0x80) ? 1 : 0;
 			slot0_pat = uint8_t((p1 << 1) | p0);
 		}
 
-		sprite0_pat = (s0_on_cur_scanline && output_allowed) ? slot0_pat : 0;
+		sprite0_pat = (sprite0_in_oam2_current && output_allowed) ? slot0_pat : 0;
 
 		if (!output_allowed || !slot0_pat)
 		return 0;
 
-		spr_pal       = sprite_attribs[0] & 3;
-		spr_behind_bg = sprite_attribs[0] & 0x20;
+		spr_pal       = spr_attr_latch[0] & 3;
+		spr_behind_bg = spr_attr_latch[0] & 0x20;
 		spr_is_s0     = true;
 		return slot0_pat;
 	}
@@ -1749,18 +1884,18 @@ unsigned ppu2c0x_device::get_sprite_pixel(unsigned &spr_pal, bool &spr_behind_bg
 	for (unsigned i = 0; i < 8; ++i) {
 		uint8_t pat = 0;
 
-		if (sprite_shift_count[i] < 8) {
+		if (spr_shift_count[i] < 8) {
 			// X counter counts down even if rendering disabled once started.
-			if (sprite_x_cnt[i] > 0 && sprite_go_this_line) {
-				sprite_x_cnt[i]--;
+			if (spr_x_counter[i] > 0 && sprite_go_this_line) {
+				spr_x_counter[i]--;
 			} else if (vis) {
-				const unsigned p1 = (sprite_pat_h[i] & 0x80) ? 1 : 0;
-				const unsigned p0 = (sprite_pat_l[i] & 0x80) ? 1 : 0;
+				const unsigned p1 = (spr_pt_h_shift[i] & 0x80) ? 1 : 0;
+				const unsigned p0 = (spr_pt_l_shift[i] & 0x80) ? 1 : 0;
 				pat = uint8_t((p1 << 1) | p0);
 
-				sprite_pat_h[i] <<= 1;
-				sprite_pat_l[i] <<= 1;
-				sprite_shift_count[i]++;
+				spr_pt_h_shift[i] <<= 1;
+				spr_pt_l_shift[i] <<= 1;
+				spr_shift_count[i]++;
 			}
 		}
 
@@ -1776,13 +1911,13 @@ unsigned ppu2c0x_device::get_sprite_pixel(unsigned &spr_pal, bool &spr_behind_bg
 		}
 	}
 
-	sprite0_pat = (output_allowed && s0_on_cur_scanline) ? slot0_pat : 0;
+	sprite0_pat = (output_allowed && sprite0_in_oam2_current) ? slot0_pat : 0;
 
 	if (!output_allowed || first_index == 8)
 	return 0;
 
-	spr_pal       = sprite_attribs[first_index] & 3;
-	spr_behind_bg = sprite_attribs[first_index] & 0x20;
+	spr_pal       = spr_attr_latch[first_index] & 3;
+	spr_behind_bg = spr_attr_latch[first_index] & 0x20;
 	spr_is_s0     = (first_index == 0);
 	return first_pat;
 }
@@ -1802,7 +1937,7 @@ void ppu2c0x_device::do_pixel_output_and_sprite_zero() {
 			bool     spr_is_s0 = false;
 			unsigned spr_pal = 0;
 			(void)get_sprite_pixel(spr_pal, spr_behind_bg, spr_is_s0);
-			// Do NOT set sprite_zero_hit here; rendering is disabled.
+			// Do NOT set ppustatus_sprite0_hit here; rendering is disabled.
 		}
 
 		// Apply retroactive PPUMASK fix to the PREVIOUS pixel first
@@ -1838,30 +1973,30 @@ void ppu2c0x_device::do_pixel_output_and_sprite_zero() {
 	unsigned attr_bits = 0;
 
 	// IMPORTANT: BG visibility must use delayed (architectural) enable
-	bool bg_visible = bg_output_enabled && (show_bg_left_8 || pixel >= 8);
+	bool bg_visible = bg_output_enabled && (ppumask_show_bg_left || pixel >= 8);
 
 	unsigned const spr_pat = get_sprite_pixel(spr_pal, spr_behind_bg, spr_is_s0);
 
 	if (bg_visible) {
-		bg_pixel_pat = (NTH_BIT(bg_shift_h, 15 - fine_x) << 1) |
-		NTH_BIT(bg_shift_l, 15 - fine_x);
+		bg_pixel_pat = (NTH_BIT(bg_pt_h_shift, 15 - fine_x) << 1) |
+		NTH_BIT(bg_pt_l_shift, 15 - fine_x);
 
-		attr_bits = (NTH_BIT(at_shift_h, 15 - fine_x) << 1) |
-		NTH_BIT(at_shift_l, 15 - fine_x);
+		attr_bits = (NTH_BIT(bg_at_h_shift, 15 - fine_x) << 1) |
+		NTH_BIT(bg_at_l_shift, 15 - fine_x);
 	}
 
 	// Sprite zero hit conditions
-	bool const left8_ok      = (pixel >= 8) || (show_bg_left_8 && show_sprites_left_8);
+	bool const left8_ok      = (pixel >= 8) || (ppumask_show_bg_left && ppumask_show_spr_left);
 	bool const right_edge_ok = (dot != 257);
 
 	// Use sprite0_pat (slot0 pixel), NOT the "winning" sprite pixel.
-	if (s0_on_cur_scanline &&
+	if (sprite0_in_oam2_current &&
 		sprite0_pat &&
 		bg_pixel_pat &&
 		bg_output_enabled && spr_output_enabled &&
 		left8_ok &&
 		right_edge_ok) {
-		sprite_zero_hit = true;
+		ppustatus_sprite0_hit = true;
 	}
 
 	if (spr_pat && !(spr_behind_bg && bg_pixel_pat)) {
@@ -1900,11 +2035,11 @@ void ppu2c0x_device::do_pixel_output_and_sprite_zero() {
 }
 
 inline void ppu2c0x_device::clock_bg_shifters_only() {
-	bg_shift_l = uint16_t(bg_shift_l << 1); // low plane serial-in is 0
-	bg_shift_h = uint16_t((bg_shift_h << 1) | 1);
+	bg_pt_l_shift = uint16_t(bg_pt_l_shift << 1); // low plane serial-in is 0
+	bg_pt_h_shift = uint16_t((bg_pt_h_shift << 1) | 1);
 
-	at_shift_l = uint16_t((at_shift_l << 1) | at_latch_l);
-	at_shift_h = uint16_t((at_shift_h << 1) | at_latch_h);
+	bg_at_l_shift = uint16_t((bg_at_l_shift << 1) | bg_at_latch_l);
+	bg_at_h_shift = uint16_t((bg_at_h_shift << 1) | bg_at_latch_h);
 }
 
 // only reloads the upper eight bits and
@@ -1918,21 +2053,21 @@ void ppu2c0x_device::reload_bg_shift_registers() {
 	// Using your existing timing: dot % 8 == 1
 	if ((dot & 7) == 1) {
 		// Skip exactly ONE reload when rendering is enabled mid-scanline
-		if (inhibit_bg_shift_one_dot) {
-			inhibit_bg_shift_one_dot = false;
+		if (skip_bg_reload_once) {
+			skip_bg_reload_once = false;
 			return;
 		}
 
 		// ---- Pattern shifter reload (low 8 bits) ----
-		bg_shift_l = (bg_shift_l & 0xFF00) | bg_byte_l;
-		bg_shift_h = (bg_shift_h & 0xFF00) | bg_byte_h;
+		bg_pt_l_shift = (bg_pt_l_shift & 0xFF00) | bg_pt_l_latch;
+		bg_pt_h_shift = (bg_pt_h_shift & 0xFF00) | bg_pt_h_latch;
 
 		// ---- Attribute latch + reload (8 copies) ----
-		at_latch_l = at_byte & 1;
-		at_latch_h = (at_byte >> 1) & 1;
+		bg_at_latch_l = bg_at_latch & 1;
+		bg_at_latch_h = (bg_at_latch >> 1) & 1;
 
-		at_shift_l = (at_shift_l & 0xFF00) | (at_latch_l ? 0xFF : 0x00);
-		at_shift_h = (at_shift_h & 0xFF00) | (at_latch_h ? 0xFF : 0x00);
+		bg_at_l_shift = (bg_at_l_shift & 0xFF00) | (bg_at_latch_l ? 0xFF : 0x00);
+		bg_at_h_shift = (bg_at_h_shift & 0xFF00) | (bg_at_latch_h ? 0xFF : 0x00);
 	}
 }
 
@@ -1945,29 +2080,29 @@ void ppu2c0x_device::do_sprite_evaluation() {
 	// ------------------------------------------------------------------------
 	if (!sprite_eval_initialized) {
 		sprite_eval_initialized = true;
-		s0_on_next_scanline = false;
-		// sprite_overflow is intentionally NOT cleared here.
+		sprite0_in_oam2_next = false;
+		// ppustatus_sprite_overflow is intentionally NOT cleared here.
 		// It is the PPUSTATUS-visible flag and is cleared elsewhere.
 
 		sprite_eval_in_range = false;
-		sec_oam_addr = 0;
+		oam2addr = 0;
 		overflow_bug_counter = 0;
 		oam_copy_done = false;
 
-		oam_eval_addr = oam_addr;
+		oam_eval_addr = oamaddr;
 
-		sprite_addr_h = (oam_eval_addr >> 2) & 0x3F;
-		sprite_addr_l =  oam_eval_addr       & 0x03;
+		spr_pt_addr_h = (oam_eval_addr >> 2) & 0x3F;
+		spr_pt_addr_l =  oam_eval_addr       & 0x03;
 
 		// This is the part that got lost:
 			// If evaluation starts aligned, we are already in byte-0 compare mode.
 			// If it starts misaligned, we stay in the misaligned walk until the
 			// first failed compare realigns us.
-			m_oam_eval_realigned = (sprite_addr_l == 0);
+			m_oam_eval_realigned = (spr_pt_addr_l == 0);
 
-			sprite0_eval_addr = oam_addr;
-			sec_oam_full = false;
-			sec_oam_last_write = 0xFF;
+			sprite0_eval_addr = oamaddr;
+			oam2_full = false;
+			oam2_last_write = 0xFF;
 
 			s_after_wrap = false;
 			m_eval_wrap_byte = 0x00;
@@ -1985,14 +2120,14 @@ void ppu2c0x_device::do_sprite_evaluation() {
 		// ------------------------------------------------------------------------
 		if (dot & 0x01) {
 		oam_latch_addr = (uint8_t)oam_eval_addr;
-		oam_data = oam[oam_eval_addr];
+		oamdata_read_buffer = primary_oam[oam_eval_addr];
 
 		// Primary OAM drives the bus on odd dots.
-		oam_2004_latch = oam_data;
+		oamdata_latch = oamdata_read_buffer;
 
 		// Capture the byte read at $FC so post-wrap behavior can replay it.
 		if (oam_latch_addr == 0xFC)
-		m_eval_wrap_byte = oam_2004_latch;
+		m_eval_wrap_byte = oamdata_latch;
 
 		// Detect internal OAM address wrap from $FC -> $00.
 		if (m_eval_prev_oam_latch_addr == 0xFC && oam_latch_addr == 0x00)
@@ -2009,13 +2144,13 @@ void ppu2c0x_device::do_sprite_evaluation() {
 		// After FC->00 wrap, the even-dot bus/latch is forced to the captured
 		// wrap byte.
 		oam_latch_addr = 0;
-		oam_2004_latch = m_eval_wrap_byte;
-		sec_oam_last_write = oam_2004_latch;
+		oamdata_latch = m_eval_wrap_byte;
+		oam2_last_write = oamdata_latch;
 	}
 
-	uint8_t const orig_oam_data = oam_data;
+	uint8_t const orig_oam_data = oamdata_read_buffer;
 	int const sprite_check_y = scanline & 0xFF;
-	int const spr_h = (sprite_size == EIGHT_BY_EIGHT) ? 8 : 16;
+	int const spr_h = (ppuctrl_sprite_size == EIGHT_BY_EIGHT) ? 8 : 16;
 
 	// Sprite-0 identity comes from the original evaluation start.
 	uint8_t const startH = (sprite0_eval_addr >> 2) & 0x3F;
@@ -2023,8 +2158,8 @@ void ppu2c0x_device::do_sprite_evaluation() {
 	bool const misaligned_start = (startL != 0);
 
 	auto set_eval_addr = [&]() {
-		sprite_addr_h = (oam_eval_addr >> 2) & 0x3F;
-		sprite_addr_l =  oam_eval_addr       & 0x03;
+		spr_pt_addr_h = (oam_eval_addr >> 2) & 0x3F;
+		spr_pt_addr_l =  oam_eval_addr       & 0x03;
 
 		if (oam_eval_addr == 0)
 		oam_copy_done = true;
@@ -2047,14 +2182,14 @@ void ppu2c0x_device::do_sprite_evaluation() {
 		// No comparator result this cycle. Keep the existing diagonal walk
 		// while still in the original misaligned phase; once +4 mode has
 		// realigned evaluation, failed scans compare byte 0 entries.
-		sprite_addr_h = (sprite_addr_h + 1) & 0x3F;
+		spr_pt_addr_h = (spr_pt_addr_h + 1) & 0x3F;
 
 		if (misaligned_start && !m_oam_eval_realigned)
-		sprite_addr_l = (sprite_addr_l + 1) & 0x03;
+		spr_pt_addr_l = (spr_pt_addr_l + 1) & 0x03;
 		else
-		sprite_addr_l = 0;
+		spr_pt_addr_l = 0;
 
-		oam_eval_addr = (sprite_addr_l & 0x03) | ((sprite_addr_h & 0x3F) << 2);
+		oam_eval_addr = (spr_pt_addr_l & 0x03) | ((spr_pt_addr_h & 0x3F) << 2);
 
 		if (oam_eval_addr == 0)
 		oam_copy_done = true;
@@ -2068,22 +2203,22 @@ void ppu2c0x_device::do_sprite_evaluation() {
 	// behavior until HBlank.
 	// ------------------------------------------------------------------------
 	if (oam_copy_done) {
-		if (sec_oam_full) {
+		if (oam2_full) {
 			// Keep the OAM2 side visible on $2004 during the remaining eval cycles.
 			oam_latch_addr = 0x00;
-			oam_2004_latch = sec_oam[0];
-			sec_oam_last_write = oam_2004_latch;
+			oamdata_latch = secondary_oam[0];
+			oam2_last_write = oamdata_latch;
 
 			// Failed-copy phase scans Y bytes only: n++, m=0.
-			sprite_addr_h = (sprite_addr_h + 1) & 0x3F;
-			sprite_addr_l = 0;
+			spr_pt_addr_h = (spr_pt_addr_h + 1) & 0x3F;
+			spr_pt_addr_l = 0;
 
-			oam_eval_addr = (sprite_addr_l & 0x03) | ((sprite_addr_h & 0x3F) << 2);
+			oam_eval_addr = (spr_pt_addr_l & 0x03) | ((spr_pt_addr_h & 0x3F) << 2);
 			return;
 		}
 
-		sprite_addr_h = (sprite_addr_h + 1) & 0x3F;
-		oam_eval_addr = (sprite_addr_l & 0x03) | ((sprite_addr_h & 0x3F) << 2);
+		spr_pt_addr_h = (spr_pt_addr_h + 1) & 0x3F;
+		oam_eval_addr = (spr_pt_addr_l & 0x03) | ((spr_pt_addr_h & 0x3F) << 2);
 		return;
 	}
 
@@ -2093,14 +2228,14 @@ void ppu2c0x_device::do_sprite_evaluation() {
 	// Once OAM2 is full, writes become OAM2 readback and evaluation enters the
 	// sprite-overflow search / tail behavior.
 	// ------------------------------------------------------------------------
-	if (sec_oam_addr >= 0x20) {
-		sec_oam_full = true;
+	if (oam2addr >= 0x20) {
+		oam2_full = true;
 
 		// With OAM2 full, the OAM2 side becomes readback instead of write.
 		// For this logic, keep $2004 seeing OAM2[0]'s Y byte.
 		oam_latch_addr = 0x00;
-		oam_2004_latch = sec_oam[0];
-		sec_oam_last_write = oam_2004_latch;
+		oamdata_latch = secondary_oam[0];
+		oam2_last_write = oamdata_latch;
 
 		switch (overflow_eval_phase) {
 			// ------------------------------------------------------------
@@ -2113,7 +2248,7 @@ void ppu2c0x_device::do_sprite_evaluation() {
 		case 0: {
 				// Attribute byte (byte 2) is compared as readback-visible data.
 				uint8_t compare_data = orig_oam_data;
-				if (sprite_addr_l == 2)
+				if (spr_pt_addr_l == 2)
 				compare_data &= 0xE3;
 
 				bool const nowInRange =
@@ -2121,18 +2256,18 @@ void ppu2c0x_device::do_sprite_evaluation() {
 				(sprite_check_y < (int(compare_data) + spr_h));
 
 				if (nowInRange) {
-					sprite_overflow = true;
+					ppustatus_sprite_overflow = true;
 					overflow_eval_phase = 1;
 					overflow_finish_bytes = 3;
 
 					// Move to the next entry after the one that matched.
-					sprite_addr_l = (sprite_addr_l + 1) & 0x03;
-					if (sprite_addr_l == 0)
-					sprite_addr_h = (sprite_addr_h + 1) & 0x3F;
+					spr_pt_addr_l = (spr_pt_addr_l + 1) & 0x03;
+					if (spr_pt_addr_l == 0)
+					spr_pt_addr_h = (spr_pt_addr_h + 1) & 0x3F;
 				} else {
 					// Hardware bug: increment n and m without carry.
-					sprite_addr_h = (sprite_addr_h + 1) & 0x3F;
-					sprite_addr_l = (sprite_addr_l + 1) & 0x03;
+					spr_pt_addr_h = (spr_pt_addr_h + 1) & 0x3F;
+					spr_pt_addr_l = (spr_pt_addr_l + 1) & 0x03;
 				}
 				break;
 			}
@@ -2144,14 +2279,14 @@ void ppu2c0x_device::do_sprite_evaluation() {
 				if (overflow_finish_bytes > 0)
 				overflow_finish_bytes--;
 
-				sprite_addr_l = (sprite_addr_l + 1) & 0x03;
-				if (sprite_addr_l == 0)
-				sprite_addr_h = (sprite_addr_h + 1) & 0x3F;
+				spr_pt_addr_l = (spr_pt_addr_l + 1) & 0x03;
+				if (spr_pt_addr_l == 0)
+				spr_pt_addr_h = (spr_pt_addr_h + 1) & 0x3F;
 
 				if (overflow_finish_bytes == 0) {
 					// After those 3 entries, switch to failed-copy scan.
 					overflow_eval_phase = 2;
-					sprite_addr_l = 0;
+					spr_pt_addr_l = 0;
 				}
 				break;
 			}
@@ -2163,16 +2298,16 @@ void ppu2c0x_device::do_sprite_evaluation() {
 			// ------------------------------------------------------------
 		case 2:
 		default: {
-				sprite_addr_h = (sprite_addr_h + 1) & 0x3F;
-				sprite_addr_l = 0;
+				spr_pt_addr_h = (spr_pt_addr_h + 1) & 0x3F;
+				spr_pt_addr_l = 0;
 				break;
 			}
 		}
 
-		if (sprite_addr_h == 0)
+		if (spr_pt_addr_h == 0)
 		oam_copy_done = true;
 
-		oam_eval_addr = (sprite_addr_l & 0x03) | ((sprite_addr_h & 0x3F) << 2);
+		oam_eval_addr = (spr_pt_addr_l & 0x03) | ((spr_pt_addr_h & 0x3F) << 2);
 		return;
 	}
 
@@ -2185,12 +2320,12 @@ void ppu2c0x_device::do_sprite_evaluation() {
 
 	if (!sprite_eval_in_range) {
 		bool const is_first_eval_byte =
-		(sprite_addr_h == startH) && (sprite_addr_l == startL);
+		(spr_pt_addr_h == startH) && (spr_pt_addr_l == startL);
 
 		bool const do_compare =
 		is_first_eval_byte ||
-		(m_oam_eval_realigned ? (sprite_addr_l == 0) :
-				(!misaligned_start ? (sprite_addr_l == 0) : (sprite_addr_l == startL)));
+		(m_oam_eval_realigned ? (spr_pt_addr_l == 0) :
+				(!misaligned_start ? (spr_pt_addr_l == 0) : (spr_pt_addr_l == startL)));
 
 			if (do_compare) {
 			eval_compare_done = true;
@@ -2205,7 +2340,7 @@ void ppu2c0x_device::do_sprite_evaluation() {
 
 				// Sprite 0 is identified when the original first eval byte matches.
 				if (is_first_eval_byte)
-				s0_on_next_scanline = true;
+				sprite0_in_oam2_next = true;
 			}
 		}
 	}
@@ -2214,26 +2349,26 @@ void ppu2c0x_device::do_sprite_evaluation() {
 	// In-range sprite: copy 4 bytes into secondary OAM.
 	// ------------------------------------------------------------------------
 	if (sprite_eval_in_range) {
-		if ((sec_oam_addr & 3) == 0)
-		sec_oam_source[(sec_oam_addr >> 2) & 7] = oam_eval_addr & 0xFC;
+		if ((oam2addr & 3) == 0)
+		sec_oam_source[(oam2addr >> 2) & 7] = oam_eval_addr & 0xFC;
 
-		oam_latch_addr = (uint8_t)sec_oam_addr;
+		oam_latch_addr = (uint8_t)oam2addr;
 
-		if (sprite_addr_l == 2) {
+		if (spr_pt_addr_l == 2) {
 			uint8_t const w = orig_oam_data & 0xE3;
-			sec_oam[sec_oam_addr] = w;
-			sec_oam_last_write = w;
-			oam_2004_latch = w;
+			secondary_oam[oam2addr] = w;
+			oam2_last_write = w;
+			oamdata_latch = w;
 		} else {
-			sec_oam[sec_oam_addr] = orig_oam_data;
-			sec_oam_last_write = orig_oam_data;
-			oam_2004_latch = orig_oam_data;
+			secondary_oam[oam2addr] = orig_oam_data;
+			oam2_last_write = orig_oam_data;
+			oamdata_latch = orig_oam_data;
 		}
 
-		sec_oam_addr++;
+		oam2addr++;
 
-		if (!sec_oam_full && sec_oam_addr >= 0x20)
-		sec_oam_full = true;
+		if (!oam2_full && oam2addr >= 0x20)
+		oam2_full = true;
 
 		step_copy_addr();
 
@@ -2255,17 +2390,17 @@ void ppu2c0x_device::do_sprite_evaluation() {
 	} else {
 		// --------------------------------------------------------------------
 		// Not in range: repeatedly overwrite the current OAM2 slot without
-		// incrementing sec_oam_addr.
+		// incrementing oam2addr.
 		// --------------------------------------------------------------------
 		if (!s_after_wrap) {
 			uint8_t w = orig_oam_data;
-			if (sprite_addr_l == 2)
+			if (spr_pt_addr_l == 2)
 			w &= 0xE3;
 
-			oam_latch_addr = (uint8_t)sec_oam_addr;
-			sec_oam[sec_oam_addr] = w;
-			sec_oam_last_write = w;
-			oam_2004_latch = w;
+			oam_latch_addr = (uint8_t)oam2addr;
+			secondary_oam[oam2addr] = w;
+			oam2_last_write = w;
+			oamdata_latch = w;
 		}
 
 		if (eval_compare_done)
@@ -2275,50 +2410,50 @@ void ppu2c0x_device::do_sprite_evaluation() {
 	}
 
 	// Rebuild the flat primary OAM address from n/m.
-	// sprite_addr_h/L are just cached bitfields of the internal eval address:
+	// spr_pt_addr_h/L are just cached bitfields of the internal eval address:
 		//   H = bits 7..2
 		//   L = bits 1..0
-		oam_eval_addr = (sprite_addr_l & 0x03) | ((sprite_addr_h & 0x3F) << 2);
+		oam_eval_addr = (spr_pt_addr_l & 0x03) | ((spr_pt_addr_h & 0x3F) << 2);
 }
 
 	// Returns 'true' if the sprite is in range
 	bool ppu2c0x_device::calc_sprite_tile_addr(uint8_t y, uint8_t index, uint8_t attrib, bool is_high) {
 	unsigned const diff = (scanline & 0xFF) - y;
 
-	if (sprite_size == EIGHT_BY_EIGHT) {
+	if (ppuctrl_sprite_size == EIGHT_BY_EIGHT) {
 		if (diff >= 8) {
-			ppu_addr_bus = sprite_pat_addr + (16 * index) + (8 * is_high);
-			ppu_addr_bus &= 0x3FFF;
+			ppu_address_bus = ppuctrl_sprite_pattern_base + (16 * index) + (8 * is_high);
+			ppu_address_bus &= 0x3FFF;
 			return false;
 		}
 
 		unsigned const row = (attrib & 0x80) ? (7 - diff) : diff;
 
-		ppu_addr_bus = sprite_pat_addr + (16 * index) + (8 * is_high) + row;
-		ppu_addr_bus &= 0x3FFF;
+		ppu_address_bus = ppuctrl_sprite_pattern_base + (16 * index) + (8 * is_high) + row;
+		ppu_address_bus &= 0x3FFF;
 		return true;
 	}
 
 	if (diff >= 16) {
-		ppu_addr_bus =
+		ppu_address_bus =
 		0x1000 * (index & 1) +
 		(16 * (index & 0xFE)) +
 		(8 * is_high);
 
-		ppu_addr_bus &= 0x3FFF;
+		ppu_address_bus &= 0x3FFF;
 		return false;
 	}
 
 	unsigned const row = (attrib & 0x80) ? (15 - diff) : diff;
 
-	ppu_addr_bus =
+	ppu_address_bus =
 	0x1000 * (index & 1) +
 	(16 * (index & 0xFE)) +
 	((row & 8) << 1) +
 	(8 * is_high) +
 	(row & 7);
 
-	ppu_addr_bus &= 0x3FFF;
+	ppu_address_bus &= 0x3FFF;
 	return true;
 }
 
@@ -2341,11 +2476,11 @@ void ppu2c0x_device::do_sprite_loading() {
 		// This models OAM2 read/latch visibility only.
 		// Do NOT use this timing to decide when the sprite render units receive
 		// Y/tile/attr/X, or sprite-0 timing breaks.
-		const uint8_t oam2_read = sec_oam[sec_oam_addr & 0x1F];
+		const uint8_t oam2_read = secondary_oam[oam2addr & 0x1F];
 
-		oam_data       = oam2_read;
-		oam_latch_addr = sec_oam_addr & 0x1F;
-		oam_2004_latch  = oam2_read;
+		oamdata_read_buffer       = oam2_read;
+		oam_latch_addr = oam2addr & 0x1F;
+		oamdata_latch  = oam2_read;
 
 		switch ((dot - 1) & 7) {
 		// dot 257, 265, 273...
@@ -2366,18 +2501,18 @@ void ppu2c0x_device::do_sprite_loading() {
 				// forced $2000 nametable base. Mixing raw v can accidentally put the bus
 				// in $0000-$0FFF pattern space.
 				if (dot == 257) {
-				const uint16_t old_nt_addr = (0x2000 | (sprite_nt_fetch_v     & 0x0FFF)) & 0x3FFF;
-				const uint16_t new_nt_addr = (0x2000 | (sprite_nt_fetch_v_new & 0x0FFF)) & 0x3FFF;
+				const uint16_t old_nt_addr = (0x2000 | (spr_fetch_v_old     & 0x0FFF)) & 0x3FFF;
+				const uint16_t new_nt_addr = (0x2000 | (spr_fetch_v_new & 0x0FFF)) & 0x3FFF;
 
-				ppu_addr_bus = (new_nt_addr & 0x3F00) | (old_nt_addr & 0x00FF);
-				ppu_addr_bus &= 0x3FFF;
+				ppu_address_bus = (new_nt_addr & 0x3F00) | (old_nt_addr & 0x00FF);
+				ppu_address_bus &= 0x3FFF;
 			} else {
-				ppu_addr_bus = (0x2000 | (sprite_nt_fetch_v_new & 0x0FFF)) & 0x3FFF;
+				ppu_address_bus = (0x2000 | (spr_fetch_v_new & 0x0FFF)) & 0x3FFF;
 			}
 
 			// Render-unit load timing preserved from the old working path.
-			// Do not use sec_oam_addr here; it now models OAM2 visibility.
-			sprite_y = sec_oam[(base + 0) & 0x1F];
+			// Do not use oam2addr here; it now models OAM2 visibility.
+			eval_sprite_y = secondary_oam[(base + 0) & 0x1F];
 			break;
 		}
 
@@ -2385,11 +2520,11 @@ void ppu2c0x_device::do_sprite_loading() {
 		// Read garbage NT fetch #1.
 	case 1: {
 			ppu_bus_read_can_fill_2007 = true;
-			(void)ppu_bus_read(ppu_addr_bus, ppu_fetch_phase::SPR_NT);
+			(void)ppu_bus_read(ppu_address_bus, ppu_fetch_phase::SPR_NT);
 			ppu_bus_read_can_fill_2007 = false;
 
 			// Render-unit load timing preserved from the old working path.
-			sprite_index = sec_oam[(base + 1) & 0x1F];
+			eval_sprite_tile = secondary_oam[(base + 1) & 0x1F];
 			break;
 		}
 
@@ -2398,9 +2533,9 @@ void ppu2c0x_device::do_sprite_loading() {
 		//
 		// This uses the normal upcoming-scanline NT address, not old v.
 	case 2: {
-			ppu_addr_bus = (0x2000 | (sprite_nt_fetch_v_new & 0x0FFF)) & 0x3FFF;
+			ppu_address_bus = (0x2000 | (spr_fetch_v_new & 0x0FFF)) & 0x3FFF;
 			// Render-unit load timing preserved from the old working path.
-			sprite_attribs[sprite_n] = sec_oam[(base + 2) & 0x1F];
+			spr_attr_latch[sprite_n] = secondary_oam[(base + 2) & 0x1F];
 			break;
 		}
 
@@ -2408,22 +2543,22 @@ void ppu2c0x_device::do_sprite_loading() {
 		// Read garbage NT fetch #2 / AT-style fetch slot.
 	case 3: {
 			ppu_bus_read_can_fill_2007 = true;
-			(void)ppu_bus_read(ppu_addr_bus, ppu_fetch_phase::SPR_AT);
+			(void)ppu_bus_read(ppu_address_bus, ppu_fetch_phase::SPR_AT);
 			ppu_bus_read_can_fill_2007 = false;
 
 			// Render-unit load timing preserved from the old working path.
-			sprite_x[sprite_n] = sec_oam[(base + 3) & 0x1F];
-			sprite_x_cnt[sprite_n] = sprite_x[sprite_n];
+			spr_x_latch[sprite_n] = secondary_oam[(base + 3) & 0x1F];
+			spr_x_counter[sprite_n] = spr_x_latch[sprite_n];
 			break;
 		}
 
 		// dot 261, 269, 277...
 		// Set up sprite pattern low fetch.
 	case 4: {
-			sprite_in_range = calc_sprite_tile_addr(
-				sprite_y,
-				sprite_index,
-				sprite_attribs[sprite_n],
+			eval_candidate_in_range = calc_sprite_tile_addr(
+				eval_sprite_y,
+				eval_sprite_tile,
+				spr_attr_latch[sprite_n],
 				false);
 			break;
 		}
@@ -2432,13 +2567,13 @@ void ppu2c0x_device::do_sprite_loading() {
 		// Read sprite pattern low fetch.
 	case 5: {
 			ppu_bus_read_can_fill_2007 = true;
-			uint8_t const pat = ppu_bus_read(ppu_addr_bus, ppu_fetch_phase::SPR_PTL);
+			uint8_t const pat = ppu_bus_read(ppu_address_bus, ppu_fetch_phase::SPR_PTL);
 			ppu_bus_read_can_fill_2007 = false;
 
-			sprite_pat_l[sprite_n] = sprite_in_range ? pat : 0;
+			spr_pt_l_shift[sprite_n] = eval_candidate_in_range ? pat : 0;
 
-			if (sprite_in_range && (sprite_attribs[sprite_n] & 0x40))
-			sprite_pat_l[sprite_n] = rev_byte(sprite_pat_l[sprite_n]);
+			if (eval_candidate_in_range && (spr_attr_latch[sprite_n] & 0x40))
+			spr_pt_l_shift[sprite_n] = rev_byte(spr_pt_l_shift[sprite_n]);
 
 			break;
 		}
@@ -2446,10 +2581,10 @@ void ppu2c0x_device::do_sprite_loading() {
 		// dot 263, 271, 279...
 		// Set up sprite pattern high fetch.
 	case 6: {
-			sprite_in_range = calc_sprite_tile_addr(
-				sprite_y,
-				sprite_index,
-				sprite_attribs[sprite_n],
+			eval_candidate_in_range = calc_sprite_tile_addr(
+				eval_sprite_y,
+				eval_sprite_tile,
+				spr_attr_latch[sprite_n],
 				true);
 
 			break;
@@ -2459,27 +2594,27 @@ void ppu2c0x_device::do_sprite_loading() {
 		// Read sprite pattern high fetch.
 	case 7: {
 			ppu_bus_read_can_fill_2007 = true;
-			uint8_t const pat = ppu_bus_read(ppu_addr_bus, ppu_fetch_phase::SPR_PTH);
+			uint8_t const pat = ppu_bus_read(ppu_address_bus, ppu_fetch_phase::SPR_PTH);
 			ppu_bus_read_can_fill_2007 = false;
 
-			sprite_pat_h[sprite_n] = sprite_in_range ? pat : 0;
+			spr_pt_h_shift[sprite_n] = eval_candidate_in_range ? pat : 0;
 
-			if (is_prerender_scanline() && sprite_in_range) {
+			if (is_prerender_scanline() && eval_candidate_in_range) {
 				sl0_stale_s0_loaded = true;
 
 				if (sprite_n == 0)
 				sl0_stale_sprite0_identity = true;
 			}
 
-			if (sprite_in_range && (sprite_attribs[sprite_n] & 0x40))
-			sprite_pat_h[sprite_n] = rev_byte(sprite_pat_h[sprite_n]);
+			if (eval_candidate_in_range && (spr_attr_latch[sprite_n] & 0x40))
+			spr_pt_h_shift[sprite_n] = rev_byte(spr_pt_h_shift[sprite_n]);
 
 			if (corrupt_resume_high_pending &&
 				sprite_n == corrupt_resume_high_lane) {
-				sprite_pat_h[sprite_n] = corrupt_resume_high_value;
+				spr_pt_h_shift[sprite_n] = corrupt_resume_high_value;
 				corrupt_resume_high_pending = false;
 			}
-			sprite_shift_count[sprite_n] = 0;
+			spr_shift_count[sprite_n] = 0;
 			break;
 		}
 
@@ -2513,22 +2648,22 @@ void ppu2c0x_device::do_sprite_loading() {
 		const unsigned spr_load_phase = (dot - 1) & 7;
 
 		if (spr_load_phase < 3 || spr_load_phase == 7)
-		sec_oam_addr = (sec_oam_addr + 1) & 0x1F;
+		oam2addr = (oam2addr + 1) & 0x1F;
 }
 
 	// Called for dots on the pre-render line
 	void ppu2c0x_device::run_prerender_scanline_dot() {
 	if (dot == 1) {
-		sprite_overflow = sprite_zero_hit =  false;
-		in_vblank = false;
+		ppustatus_sprite_overflow = ppustatus_sprite0_hit =  false;
+		ppustatus_vblank = false;
 		set_nmi(false);
 	}
 
 	// Sprite0 identity latch (one-shot) at dot 257.
 	// Evaluation on scanline N determines identity for scanline N+1.
 	if (dot == 257) {
-		s0_on_cur_scanline = false;
-		s0_on_next_scanline = false;
+		sprite0_in_oam2_current = false;
+		sprite0_in_oam2_next = false;
 	}
 
 	// === BG shift clocking happens regardless of rendering (composite) ===
@@ -2555,21 +2690,21 @@ void ppu2c0x_device::do_prerender_oam_sweep() {
 	// So: OAM2 selected, automatic writes become reads, and OAM1 is not touched.
 
 	if (dot == 65) {
-		// Don't touch oam_addr / oam_eval_addr at all.
+		// Don't touch oamaddr / oam_eval_addr at all.
 		// Just start a harmless OAM2 read sweep if you want.
-		sec_oam_addr = 0;
+		oam2addr = 0;
 	}
 
 	// Read OAM2 every dot in this phase.
-	oam_data = sec_oam[sec_oam_addr & 0x1F];
-	oam_2004_latch = oam_data;
-	oam_latch_addr = sec_oam_addr;
+	oamdata_read_buffer = secondary_oam[oam2addr & 0x1F];
+	oamdata_latch = oamdata_read_buffer;
+	oam_latch_addr = oam2addr;
 
 	// Optionally advance OAM2ADDR occasionally to "sweep" and refresh for decay behavior.
 	// The exact increment cadence is analog-weird and probably not test-critical,
 	// but advancing every other dot is a reasonable approximation.
 	if (!(dot & 1)) {
-		sec_oam_addr = (sec_oam_addr + 1) & 0x1F;
+		oam2addr = (oam2addr + 1) & 0x1F;
 	}
 }
 
@@ -2577,10 +2712,10 @@ void ppu2c0x_device::do_prerender_oam_sweep() {
 // Called for dots on line 241
 void ppu2c0x_device::run_scanline_241_dot() {
 	if (!suppress_vblank_flag) {
-		if (dot == 1 && !in_vblank) {
-			in_vblank = true;
+		if (dot == 1 && !ppustatus_vblank) {
+			ppustatus_vblank = true;
 
-			if (nmi_on_vblank)
+			if (ppuctrl_nmi_enable)
 			set_nmi(true);
 		}
 	}
@@ -2598,15 +2733,15 @@ void ppu2c0x_device::do_2007_post_access_bump() {
 		// e.g. $0FFF -> $1000 after a $2007 read/write.
 		const uint16_t old_v = v & 0x3FFF;
 
-		v = (v + v_inc) & 0x7FFF;
+		v = (v + ppuctrl_vram_increment) & 0x7FFF;
 
 		const uint16_t new_v = v & 0x3FFF;
 
 		// Palette space is internal to the PPU. This is the Steins fix:
 			// do not let $3Fxx palette-space bumps create MMC3 clocks.
 			if ((old_v & 0x3F00) == 0x3F00 || (new_v & 0x3F00) == 0x3F00) {
-			ppu_addr_bus = new_v;
-			ppu_ext_low_latch = new_v & 0xFF;
+			ppu_address_bus = new_v;
+			ppu_ad_latch = new_v & 0xFF;
 		} else {
 			ppu_bus_address_drive(new_v);
 		}
@@ -2614,8 +2749,8 @@ void ppu2c0x_device::do_2007_post_access_bump() {
 }
 
 void ppu2c0x_device::write_oam_dma_byte(uint8_t val) {
-	oam[oam_addr] = val;
-	oam_addr = (oam_addr + 1) & 0xFF;
+	primary_oam[oamaddr] = val;
+	oamaddr = (oamaddr + 1) & 0xFF;
 }
 
 void ppu2c0x_device::write_oam_data_reg(uint8_t val) {
@@ -2631,14 +2766,14 @@ void ppu2c0x_device::write_oam_data_reg(uint8_t val) {
 		const bool render_line  = is_render_scanline();
 
 		if (render_line && rendering_on) {
-		oam_2004_latch = val;
-		oam_addr = (uint8_t)(oam_addr + 4);
-		oam_addr &= 0xFC;
+		oamdata_latch = val;
+		oamaddr = (uint8_t)(oamaddr + 4);
+		oamaddr &= 0xFC;
 		return;
 	}
 
-	oam[oam_addr] = val;
-	oam_addr = (uint8_t)(oam_addr + 1);
+	primary_oam[oamaddr] = val;
+	oamaddr = (uint8_t)(oamaddr + 1);
 }
 
 //The coarse X component of v needs to be incremented when the next tile is reached. Bits 0-4 are incremented, with overflow toggling bit 10.
@@ -2744,7 +2879,7 @@ uint8_t ppu2c0x_device::palette_read(offs_t offset) {
 		if (offset == 0x10 || offset == 0x14 || offset == 0x18 || offset == 0x1C)
 		offset &= ~0x10;
 
-		// 3. Perform the read and apply grayscale if enabled (grayscale_color_mask is set by $2001 bit 0).
+		// 3. Perform the read and apply grayscale if enabled (ppumask_grayscale_mask is set by $2001 bit 0).
 		return m_palette_ram[offset] & 0x3F;
 }
 
@@ -2760,9 +2895,9 @@ uint8_t ppu2c0x_device::read(offs_t offset) {
 	case 0: case 1: case 3: case 5: case 6: return ppu_open_bus_peek();
 	case PPU_STATUS: /* 2 */ {
 			// Read-start sample for vblank
-			bool vblank_read = in_vblank;
-			bool spr0_read = sprite_zero_hit;
-			bool ovf_read  = sprite_overflow;
+			bool vblank_read = ppustatus_vblank;
+			bool spr0_read = ppustatus_sprite0_hit;
+			bool ovf_read  = ppustatus_sprite_overflow;
 
 			// Scheduler convention: dot is the next PPU dot to execute.
 			// dot == 1 here means hardware dot 0 has completed, but dot 1 has not run yet.
@@ -2777,7 +2912,7 @@ uint8_t ppu2c0x_device::read(offs_t offset) {
 				ovf_read = false;
 			}
 
-			write_flip_flop = false;
+			w = false;
 
 			const uint8_t old_bus = ppu_open_bus_peek();
 
@@ -2790,7 +2925,7 @@ uint8_t ppu2c0x_device::read(offs_t offset) {
 					  (ovf_read    ? 0x20 : 0x00) |
 					  (old_bus & 0x1f));
 
-			in_vblank = false;
+			ppustatus_vblank = false;
 			set_nmi(false);
 
 			// $2002 read drives only status bits 7-5.
@@ -2813,26 +2948,26 @@ uint8_t ppu2c0x_device::read(offs_t offset) {
 			if (render_line && rendering_enabled) {
 				if (dot == 1) {
 					//Reading from $2004 (with rendering enabled) on dot 0 should return Secondary_OAM Index 0.
-					ret = sec_oam[0];
+					ret = secondary_oam[0];
 				} else if (dot >= 2 && dot <= 65) {
 					//Reading from $2004 (with rendering enabled) from dots 1 through dots 64 should return #$FF.
-					ret = oam_2004_latch;
+					ret = oamdata_latch;
 				} else if (dot >= 66 && dot <= 257) {
 					//Reading from $2004 (with rendering enabled) from dots 65 through 256 should read from the "OAM Latch" used during OAM Evaluation.
-					ret = oam_2004_latch;
+					ret = oamdata_latch;
 					if ((oam_latch_addr & 3) == 2)
 					ret &= 0xE3;
 				} else if (dot >= 258 && dot <= 321) {
 					//Reading from $2004 (with rendering enabled) from dots 257 through 320 should read from secondary OAM.
-					ret = oam_2004_latch;
+					ret = oamdata_latch;
 				} else {
 					//Reading from $2004 (with rendering enabled) from dots 321 through 340 should read from index 0 of secondary OAM.
-					ret = sec_oam[0];
+					ret = secondary_oam[0];
 				}
 			} else {
 				// Non-rendering: CPU reads primary OAM at OAMADDR
-				ret = oam[oam_addr];
-				if ((oam_addr & 3) == 2) ret &= 0xE3;
+				ret = primary_oam[oamaddr];
+				if ((oamaddr & 3) == 2) ret &= 0xE3;
 			}
 
 			// $2004 read drives the PPU internal data bus.
@@ -2854,14 +2989,14 @@ uint8_t ppu2c0x_device::read(offs_t offset) {
 				const uint8_t old_bus = ppu_open_bus_peek();
 
 				ret = (old_bus & 0xC0) |
-				(m_palette_ram[bus_addr & 0x1F] & grayscale_color_mask);
+				(m_palette_ram[bus_addr & 0x1F] & ppumask_grayscale_mask);
 
 				// Palette reads drive only bits 5-0.
 				// Bits 7-6 remain open bus.
 				ppu_open_bus_drive_masked(ret, 0x3F);
 			} else {
 				// Normal reads return the existing buffered value.
-				ret = ppu_data_reg;
+				ret = ppudata_read_buffer;
 				ppu_open_bus_drive(ret);
 			}
 
@@ -2878,7 +3013,7 @@ uint8_t ppu2c0x_device::read(offs_t offset) {
 				// Rendering:
 					// Do not perform a hidden memory read here.
 					// This is only for CPU $2007 reads during rendering; normal rendering fetches
-					// do not update ppu_data_reg unless a pending $2007 refill is armed.
+					// do not update ppudata_read_buffer unless a pending $2007 refill is armed.
 					// The rendering H+V increment glitch is scheduled when the delayed read matures.
 					schedule_2007_read(bus_addr, 4, true);
 			}
@@ -2897,11 +3032,11 @@ uint8_t ppu2c0x_device::read(offs_t offset) {
 	// Only apply the PPUCTRL bits that affect delayed fetch/render pipeline state.
 
 	// Bit 3: sprite pattern table select for 8x8 sprites.
-	sprite_pat_addr = (val & 0x08) ? 0x1000 : 0x0000;
+	ppuctrl_sprite_pattern_base = (val & 0x08) ? 0x1000 : 0x0000;
 	// Bit 4: background pattern table select.
-	bg_pat_addr     = (val & 0x10) ? 0x1000 : 0x0000;
+	ppuctrl_bg_pattern_base     = (val & 0x10) ? 0x1000 : 0x0000;
 	// Bit 5: sprite size.
-	sprite_size     = (val & 0x20) ? EIGHT_BY_SIXTEEN : EIGHT_BY_EIGHT;
+	ppuctrl_sprite_size     = (val & 0x20) ? EIGHT_BY_SIXTEEN : EIGHT_BY_EIGHT;
 }
 
 void ppu2c0x_device::apply_delayed_2001(uint8_t val) {
@@ -2925,19 +3060,19 @@ void ppu2c0x_device::apply_delayed_2001(uint8_t val) {
 		is_render_scanline() &&
 		dot >= 257 && dot <= 320 &&
 		sprite_oam_source[0] != 0xFF &&
-		(sprite_pat_l[0] != 0 || sprite_pat_h[0] != 0)) {
+		(spr_pt_l_shift[0] != 0 || spr_pt_h_shift[0] != 0)) {
 		const unsigned sprite_n = (dot - 257) / 8;
 
 		if (sprite_n != 0) {
-			sprite_x[sprite_n] = oam[sprite_oam_source[0] & 0xFC];
-			sprite_x_cnt[sprite_n] = sprite_x[sprite_n];
-			sprite_attribs[sprite_n] = sprite_attribs[0];
-			sprite_pat_l[sprite_n] = sprite_pat_l[0];
-			sprite_pat_h[sprite_n] = sprite_pat_h[0];
+			spr_x_latch[sprite_n] = primary_oam[sprite_oam_source[0] & 0xFC];
+			spr_x_counter[sprite_n] = spr_x_latch[sprite_n];
+			spr_attr_latch[sprite_n] = spr_attr_latch[0];
+			spr_pt_l_shift[sprite_n] = spr_pt_l_shift[0];
+			spr_pt_h_shift[sprite_n] = spr_pt_h_shift[0];
 
 			corrupt_resume_high_pending = true;
 			corrupt_resume_high_lane = sprite_n;
-			corrupt_resume_high_value = sprite_pat_h[0];
+			corrupt_resume_high_value = spr_pt_h_shift[0];
 		}
 	}
 
@@ -2953,8 +3088,8 @@ void ppu2c0x_device::apply_delayed_2001(uint8_t val) {
 	spr_output_enabled = true;
 
 	// Clip vars follow output domain.
-	bg_clip_comp     = !bg_output_enabled  ? 256 : show_bg_left_8      ? 0 : 8;
-	sprite_clip_comp = !spr_output_enabled ? 256 : show_sprites_left_8 ? 0 : 8;
+	bg_left_clip     = !bg_output_enabled  ? 256 : ppumask_show_bg_left      ? 0 : 8;
+	spr_left_clip = !spr_output_enabled ? 256 : ppumask_show_spr_left ? 0 : 8;
 
 	bool const new_pipe = (bg_pipeline_enabled || spr_pipeline_enabled);
 
@@ -2968,7 +3103,7 @@ void ppu2c0x_device::apply_delayed_2001(uint8_t val) {
 		const bool in_fetch_region = ((dot >= 2 && dot <= 257) || (dot >= 322 && dot <= 337));
 
 		if (render_line && in_fetch_region)
-		inhibit_bg_shift_one_dot = true;
+		skip_bg_reload_once = true;
 	}
 
 	// --------------------------------------------------
@@ -2976,7 +3111,7 @@ void ppu2c0x_device::apply_delayed_2001(uint8_t val) {
 	// --------------------------------------------------
 	if (prev_pipe && !new_pipe) {
 
-		inhibit_bg_shift_one_dot = false;
+		skip_bg_reload_once = false;
 
 		const bool render_line = is_render_scanline();
 		const bool early_window = (dot >= 1 && dot <= 64);
@@ -3026,20 +3161,20 @@ void ppu2c0x_device::apply_delayed_2001(uint8_t val) {
 	switch (offset & 7) {
 	case PPU_CONTROL0: /* 0 */ {
 			t               = (t & 0x73FF) | ((val & 0x03) << 10);
-			v_inc           = (val & 0x04) ? 32 : 1;
+			ppuctrl_vram_increment           = (val & 0x04) ? 32 : 1;
 
 			bool new_nmi_on_vblank = val & 0x80;
 
 			// In this scheduler, $2000 writes are handled before the per-dot PPU work,
-			// so a write on the exact pre-render clear tick can still see in_vblank = true
+			// so a write on the exact pre-render clear tick can still see ppustatus_vblank = true
 			// even though hardware would already be past the enable window.
-			bool vblank_seen_for_enable = in_vblank;
+			bool vblank_seen_for_enable = ppustatus_vblank;
 			if (is_prerender_scanline() && dot == 1) { //needed for nmi "on" timing
 				vblank_seen_for_enable = false;
 			}
 
 			// Enabling NMI while VBL is already set retriggers NMI, except on the clear-edge tick.
-			if (new_nmi_on_vblank && !nmi_on_vblank && vblank_seen_for_enable) {
+			if (new_nmi_on_vblank && !ppuctrl_nmi_enable && vblank_seen_for_enable) {
 				nmi_pending = false;
 				nmi_delay = 0;
 				m_maincpu6502->queue_delayed_nmi(2);
@@ -3048,11 +3183,11 @@ void ppu2c0x_device::apply_delayed_2001(uint8_t val) {
 			// Disabling NMI near the VBL-set edge suppresses the pending NMI for one more
 			// scheduler tick than the raw hardware dot because writes are processed before
 			// the PPU edge in this core.
-			if (!new_nmi_on_vblank && nmi_on_vblank && is_vblank_start_scanline() && dot >= 1 && dot <= 3) {
+			if (!new_nmi_on_vblank && ppuctrl_nmi_enable && is_vblank_start_scanline() && dot >= 1 && dot <= 3) {
 				set_nmi(false);
 			}
 
-			nmi_on_vblank = new_nmi_on_vblank;
+			ppuctrl_nmi_enable = new_nmi_on_vblank;
 			m_regs[PPU_CONTROL0] = val;
 			pending_2000.has_pending = true;
 			pending_2000.value = val;
@@ -3074,15 +3209,15 @@ void ppu2c0x_device::apply_delayed_2001(uint8_t val) {
 			// Immediate visual-only properties.
 			m_regs[PPU_CONTROL1] = val;
 
-			show_bg_left_8      = (val & 0x02) != 0;
-			show_sprites_left_8 = (val & 0x04) != 0;
+			ppumask_show_bg_left      = (val & 0x02) != 0;
+			ppumask_show_spr_left = (val & 0x04) != 0;
 
-			grayscale_color_mask = (val & PPU_CONTROL1_DISPLAY_MONO) ? 0x30 : 0x3F;
-			tint_bits = uint16_t(val & PPU_CONTROL1_COLOR_EMPHASIS) << 1;
+			ppumask_grayscale_mask = (val & PPU_CONTROL1_DISPLAY_MONO) ? 0x30 : 0x3F;
+			ppumask_emphasis_bits = uint16_t(val & PPU_CONTROL1_COLOR_EMPHASIS) << 1;
 
 			// Clip vars follow output domain.
-			bg_clip_comp     = !bg_output_enabled  ? 256 : show_bg_left_8      ? 0 : 8;
-			sprite_clip_comp = !spr_output_enabled ? 256 : show_sprites_left_8 ? 0 : 8;
+			bg_left_clip     = !bg_output_enabled  ? 256 : ppumask_show_bg_left      ? 0 : 8;
+			spr_left_clip = !spr_output_enabled ? 256 : ppumask_show_spr_left ? 0 : 8;
 
 			// Retroactive color/render correction.
 			if (scanline <= 239 && dot >= 2 && dot <= 257) {
@@ -3110,7 +3245,7 @@ void ppu2c0x_device::apply_delayed_2001(uint8_t val) {
 
 	case PPU_SPRITE_ADDRESS: /* 3 */ {
 			m_regs[PPU_SPRITE_ADDRESS] = val;
-			oam_addr = val;
+			oamaddr = val;
 
 			const bool render_line = is_render_scanline(); //(scanline < 240) || (scanline == 261);
 			const bool rendering_enabled = (bg_pipeline_enabled || spr_pipeline_enabled);
@@ -3118,14 +3253,14 @@ void ppu2c0x_device::apply_delayed_2001(uint8_t val) {
 			if (render_line && rendering_enabled && sprite_eval_initialized && dot >= 65 && dot <= 256) {
 				oam_eval_addr = val;
 
-				sprite_addr_h = (oam_eval_addr >> 2) & 0x3F;
-				sprite_addr_l =  oam_eval_addr       & 0x03;
+				spr_pt_addr_h = (oam_eval_addr >> 2) & 0x3F;
+				spr_pt_addr_l =  oam_eval_addr       & 0x03;
 
 				sprite_eval_in_range = false;
 				overflow_bug_counter = 0;
 
 				// Do not force this true. $01/$11/$83/$93 must begin misaligned.
-				m_oam_eval_realigned = (sprite_addr_l == 0);
+				m_oam_eval_realigned = (spr_pt_addr_l == 0);
 			}
 
 			break;
@@ -3136,7 +3271,7 @@ void ppu2c0x_device::apply_delayed_2001(uint8_t val) {
 		break;
 
 	case PPU_SCROLL: /* 5 */ {
-			if (!write_flip_flop) {
+			if (!w) {
 				// First write
 				// fine_x = val: .... .ABC
 				// t: ... .... ...D EFGH = val: DEFG H...
@@ -3147,12 +3282,12 @@ void ppu2c0x_device::apply_delayed_2001(uint8_t val) {
 				// t: ABC ..DE FGH. .... = val: DEFG HABC
 				t = (t & 0x0C1F) | ((val & 0xF8) << 2) | ((val & 7) << 12);
 			}
-			write_flip_flop = !write_flip_flop;
+			w = !w;
 			break;
 		}
 
 	case PPU_ADDRESS: /* $2006 */ {
-			if (!write_flip_flop) {
+			if (!w) {
 				t = (t & 0x00FF) | ((val & 0x3F) << 8);
 			} else {
 				t = (t & 0x7F00) | val;
@@ -3161,7 +3296,7 @@ void ppu2c0x_device::apply_delayed_2001(uint8_t val) {
 				pending_2006.apply_ppu = 4;
 			}
 
-			write_flip_flop = !write_flip_flop;
+			w = !w;
 			break;
 		}
 
@@ -3172,8 +3307,8 @@ void ppu2c0x_device::apply_delayed_2001(uint8_t val) {
 			// Bus sees the access address now.
 			// Palette space is internal; don't clock cartridge/MMC3 A12 from it.
 			if ((bus_addr & 0x3F00) == 0x3F00) {
-				ppu_addr_bus = bus_addr & 0x3FFF;
-				//ppu_ext_low_latch = bus_addr & 0xFF;
+				ppu_address_bus = bus_addr & 0x3FFF;
+				//ppu_ad_latch = bus_addr & 0xFF;
 			} else {
 				ppu_bus_address_drive(bus_addr);
 			}
@@ -3195,8 +3330,8 @@ void ppu2c0x_device::apply_delayed_2001(uint8_t val) {
 					// Keep the bus shadow at the access address until the delayed bump runs.
 					// Palette space is internal; don't clock cartridge/MMC3 A12 from it.
 					if ((bus_addr & 0x3F00) == 0x3F00) {
-					ppu_addr_bus = bus_addr & 0x3FFF;
-					//ppu_ext_low_latch = bus_addr & 0xFF;
+					ppu_address_bus = bus_addr & 0x3FFF;
+					//ppu_ad_latch = bus_addr & 0xFF;
 				} else {
 					ppu_bus_address_drive(bus_addr);
 				}
@@ -3211,8 +3346,8 @@ void ppu2c0x_device::apply_delayed_2001(uint8_t val) {
 					// Keep the bus shadow at the access address for now.
 					// Palette space is internal; don't clock cartridge/MMC3 A12 from it.
 					if ((bus_addr & 0x3F00) == 0x3F00) {
-					ppu_addr_bus = bus_addr & 0x3FFF;
-					//ppu_ext_low_latch = bus_addr & 0xFF;
+					ppu_address_bus = bus_addr & 0x3FFF;
+					//ppu_ad_latch = bus_addr & 0xFF;
 				} else {
 					ppu_bus_address_drive(bus_addr);
 				}
@@ -3322,10 +3457,10 @@ void ppu2c0x_device::read_sprite_plane_data(int address) {}
 void ppu2c0x_device::make_sprite_pixel_data(uint8_t& pixel_data, int flipx) {}
 void ppu2c0x_device::draw_sprite_pixel(int sprite_xpos, int color, int pixel, uint8_t pixel_data, bitmap_rgb32& bitmap) {}
 void ppu2c04_clone_device::draw_sprite_pixel(int sprite_xpos, int color, int pixel, uint8_t pixel_data, bitmap_rgb32 &bitmap) {}
-void ppu2c0x_device::read_extra_sprite_bits(int sprite_index) {}
+void ppu2c0x_device::read_extra_sprite_bits(int eval_sprite_tile) {}
 bool ppu2c0x_device::is_spritepixel_opaque(int pixel_data, int color) {return false;}
-void ppu2c0x_device::draw_sprite_pixel_low(bitmap_rgb32& bitmap, int pixel_data, int pixel, int sprite_xpos, int color, int sprite_index, uint8_t* line_priority) {}
-void ppu2c0x_device::draw_sprite_pixel_high(bitmap_rgb32& bitmap, int pixel_data, int pixel, int sprite_xpos, int color, int sprite_index, uint8_t* line_priority) {}
+void ppu2c0x_device::draw_sprite_pixel_low(bitmap_rgb32& bitmap, int pixel_data, int pixel, int sprite_xpos, int color, int eval_sprite_tile, uint8_t* line_priority) {}
+void ppu2c0x_device::draw_sprite_pixel_high(bitmap_rgb32& bitmap, int pixel_data, int pixel, int sprite_xpos, int color, int eval_sprite_tile, uint8_t* line_priority) {}
 int ppu2c0x_device::apply_sprite_pattern_page(int index1, int size) {return 0;}
 void ppu2c0x_device::draw_sprites(uint8_t* line_priority) {}
 void ppu2c04_clone_device::draw_sprites(uint8_t *line_priority) {}
