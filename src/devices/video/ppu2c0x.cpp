@@ -236,6 +236,8 @@ void ppu2c0x_device::init_runtime_reset_state() {
 	// --------------------------------------------------
 	ppustatus_sprite_overflow = false;
 	ppustatus_sprite0_hit = false;
+	sprite0_hit_pending = false;
+	sprite0_hit_delay = 0;
 	ppustatus_vblank = false;
 	suppress_vblank_flag = false;
 
@@ -970,7 +972,7 @@ void ppu2c0x_device::ppu_bus_address_drive(uint16_t addr) {
 	ppu_ad_latch = addr & 0xFF;
 
 	if (m_has_mmc3_a12 && m_mmc3)
-	m_mmc3->observe_ppu_a12(addr, m_cpu->total_cycles());
+	m_mmc3->observe_ppu_a12(addr, m_cpu->total_cycles()-1, ppu_tick_in_cpu_cycle, odd_frame);
 }
 
 uint8_t ppu2c0x_device::ppu_bus_read(uint16_t addr, ppu_fetch_phase phase) {
@@ -1176,6 +1178,19 @@ void ppu2c0x_device::resolve_mapper_ppu_devices() {
 
 void ppu2c0x_device::tick(int x) {
 	ppu_tick_in_cpu_cycle = x;
+	
+	// Sprite-0 hit is detected by pixel overlap now, but $2002 bit 6
+    // becomes visible two PPU dots later.
+    if (sprite0_hit_pending) {
+        if (sprite0_hit_delay > 0)
+            --sprite0_hit_delay;
+
+        if (sprite0_hit_delay == 0) {
+            ppustatus_sprite0_hit = true;
+            sprite0_hit_pending = false;
+        }
+    }
+	
 	// --------------------------------------------------
 	// Delayed $2007 write
 	//
@@ -1529,14 +1544,25 @@ void ppu2c0x_device::retro_fix_previous_pixel_after_ppumask_write() {
 		// Use internal BG, not display-suppressed BG.
 		const bool right_edge_ok = (pixel != 255);
 
-		if (sprite0_in_oam2_current &&
+		/*if (sprite0_in_oam2_current &&
 			prev_sprite0_pat &&
 			bg_pat_internal &&
 			bg_visible &&
 			spr_visible &&
 			right_edge_ok) {
 		ppustatus_sprite0_hit = true;
-	}
+	}*/
+		if (sprite0_in_oam2_current &&
+			prev_sprite0_pat &&
+			bg_pat_internal &&
+			bg_visible &&
+			spr_visible &&
+			right_edge_ok) {
+			if (!ppustatus_sprite0_hit && !sprite0_hit_pending) {
+				sprite0_hit_pending = true;
+				sprite0_hit_delay = 2;
+			}
+		}
 
 	if (rendering_disabled) {
 		pal_index = prev_backdrop_pal_index;
@@ -1669,6 +1695,23 @@ void ppu2c0x_device::run_bg_fetch_dot() {
 }
 
 void ppu2c0x_device::run_visible_scanline_dot() {
+	if (!(bg_pipeline_enabled || spr_pipeline_enabled))
+	{
+		uint8_t ob_addr = oamaddr;
+
+		const unsigned stale_n = corrupt_resume_stale_unit & 7;
+
+		if (is_render_scanline() &&
+			dot >= 257 && dot <= 320 &&
+			sprite_oam_source[stale_n] != 0xFF)
+		{
+			ob_addr = sprite_oam_source[stale_n] & 0xFC;
+		}
+
+		oam_latch_addr = ob_addr;
+		oamdata_read_buffer = primary_oam[ob_addr];
+		oamdata_latch = oamdata_read_buffer;
+	}
 	// AccuracyCoin Stale Sprite Shift Registers:
 		//
 		// Dot 257 normally transfers the sprite0 identity discovered by evaluation
@@ -1990,6 +2033,14 @@ void ppu2c0x_device::do_pixel_output_and_sprite_zero() {
 	bool const right_edge_ok = (dot != 257);
 
 	// Use sprite0_pat (slot0 pixel), NOT the "winning" sprite pixel.
+	/*if (sprite0_in_oam2_current &&
+		sprite0_pat &&
+		bg_pixel_pat &&
+		bg_output_enabled && spr_output_enabled &&
+		left8_ok &&
+		right_edge_ok) {
+		ppustatus_sprite0_hit = true;
+	}*/
 	if (sprite0_in_oam2_current &&
 		sprite0_pat &&
 		bg_pixel_pat &&
@@ -2655,6 +2706,8 @@ void ppu2c0x_device::do_sprite_loading() {
 	void ppu2c0x_device::run_prerender_scanline_dot() {
 	if (dot == 1) {
 		ppustatus_sprite_overflow = ppustatus_sprite0_hit =  false;
+		sprite0_hit_pending = false;
+		sprite0_hit_delay = 0;
 		ppustatus_vblank = false;
 		set_nmi(false);
 	}
@@ -3064,15 +3117,17 @@ void ppu2c0x_device::apply_delayed_2001(uint8_t val) {
 		const unsigned sprite_n = (dot - 257) / 8;
 
 		if (sprite_n != 0) {
-			spr_x_latch[sprite_n] = primary_oam[sprite_oam_source[0] & 0xFC];
+			spr_x_latch[sprite_n] = oamdata_read_buffer;
 			spr_x_counter[sprite_n] = spr_x_latch[sprite_n];
-			spr_attr_latch[sprite_n] = spr_attr_latch[0];
-			spr_pt_l_shift[sprite_n] = spr_pt_l_shift[0];
-			spr_pt_h_shift[sprite_n] = spr_pt_h_shift[0];
+			const unsigned stale_n = corrupt_resume_stale_unit & 7;
+
+			spr_attr_latch[sprite_n] = spr_attr_latch[stale_n];
+			spr_pt_l_shift[sprite_n] = spr_pt_l_shift[stale_n];
+			spr_pt_h_shift[sprite_n] = spr_pt_h_shift[stale_n];
 
 			corrupt_resume_high_pending = true;
 			corrupt_resume_high_lane = sprite_n;
-			corrupt_resume_high_value = spr_pt_h_shift[0];
+			corrupt_resume_high_value = spr_pt_h_shift[stale_n];
 		}
 	}
 
@@ -3112,7 +3167,16 @@ void ppu2c0x_device::apply_delayed_2001(uint8_t val) {
 	if (prev_pipe && !new_pipe) {
 
 		skip_bg_reload_once = false;
+		
+		corrupt_resume_stale_unit = 0;
 
+		for (int i = 0; i < 8; i++) {
+			if (spr_pt_l_shift[i] || spr_pt_h_shift[i]) {
+				corrupt_resume_stale_unit = i;
+				break;
+			}
+		}
+		
 		const bool render_line = is_render_scanline();
 		const bool early_window = (dot >= 1 && dot <= 64);
 		const bool late_window  = (dot >= 257 && dot <= 320);

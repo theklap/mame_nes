@@ -480,6 +480,8 @@ protected:
 
 	uint8_t sprite0_eval_addr;
 	uint8_t sprite0_pat;
+	bool sprite0_hit_pending;
+	uint8_t sprite0_hit_delay;
 
 	bool sprite_go_this_line;
 	bool sprite_go_next_line;
@@ -520,6 +522,7 @@ protected:
 	bool corrupt_resume_high_pending;
 	uint8_t corrupt_resume_high_lane;
 	uint8_t corrupt_resume_high_value;
+	uint8_t corrupt_resume_stale_unit;
 	// Primary-OAM row that supplied each secondary-OAM/render-unit slot.
 	uint8_t sec_oam_source[8];
 	uint8_t sprite_oam_source[8];
