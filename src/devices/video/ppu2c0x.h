@@ -314,7 +314,8 @@ protected:
 	inline uint8_t readbyte(uint16_t bus_addr, uint16_t mem_addr);
 	inline void writebyte(offs_t address, uint8_t data);
 
-	void ppu_bus_address_drive(uint16_t addr);
+	void ppu_bus_address_drive(uint16_t addr); 
+	void ppu_cart_address_drive(uint16_t addr);
 	void ppu_bus_a12_observe(uint16_t addr);
 	uint8_t ppu_bus_read(uint16_t addr, ppu_fetch_phase phase);
 
@@ -470,6 +471,9 @@ protected:
 	uint8_t spr_pt_l_shift[8];
 	uint8_t spr_pt_h_shift[8];
 	uint8_t spr_shift_count[8];
+		
+	bool spr_pt_l_addr_valid[8];
+	bool spr_pt_h_addr_valid[8];
 
 	bool sprite0_in_oam2_next;
 	bool sprite0_in_oam2_current;
@@ -512,21 +516,21 @@ protected:
 	bool spr_output_enabled;
 	bool bg_pipeline_enabled;
 	bool spr_pipeline_enabled;
-
+	
 	// ---------------------------------------------------------------------
 	// OAM corruption / sprite eval edge cases.
 	// ---------------------------------------------------------------------
 	bool oam_corrupt_pending;
 	uint8_t oam_corrupt_seed;
 	
-	bool corrupt_resume_high_pending;
 	uint8_t corrupt_resume_high_lane;
-	uint8_t corrupt_resume_high_value;
-	uint8_t corrupt_resume_stale_unit;
+	uint8_t corrupt_resume_oam2addr;
+	bool corrupt_resume_fifo_pending;
+
 	// Primary-OAM row that supplied each secondary-OAM/render-unit slot.
 	uint8_t sec_oam_source[8];
 	uint8_t sprite_oam_source[8];
-
+	
 	// ---------------------------------------------------------------------
 	// Previous visible pixel state for retroactive $2001 edge behavior.
 	// ---------------------------------------------------------------------
@@ -591,13 +595,6 @@ protected:
 	void schedule_2007_read(uint16_t addr, int delay, bool use_next_ppu_read_for_refill);
 	void schedule_2007_post_access_bump();
 	
-	// ---------------------------------------------------------------------
-	// Delayed fine-X / scroll operation state.
-	// ---------------------------------------------------------------------
-	uint8_t pending_fine_x;
-	bool pending_fine_x_valid;
-	int pending_fine_x_delay;
-
 	// ---------------------------------------------------------------------
 	// Mapper hooks / cached mapper capability flags.
 	// ---------------------------------------------------------------------
