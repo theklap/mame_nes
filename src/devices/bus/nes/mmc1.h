@@ -34,14 +34,10 @@ protected:
 	virtual void set_prg();
 	virtual void set_chr() { set_chr(0x00, 0x1f); }
 	virtual void set_mirror();
-	bool mmc1_ignore_serial_write(u64 now_cpu) const;
-	void mmc1_record_write_cycle(u64 now_cpu);
 	virtual bool prgram_enabled() const;
 	virtual u8 prgram_bank() const;
 	
 	u8 mmc1_active_chr_reg() const;
-	u64 m_last_mmc1_write_cpu_cycle;
-	bool m_last_mmc1_write_valid;
 	bool m_powered;
 	bool m_mmc1_upper_chr;
 	uint16_t m_mmc1_ppu_addr;
@@ -77,7 +73,7 @@ public:
 	virtual void write_m(offs_t offset, u8 data) override;
 
 protected:
-	virtual void device_start() override;
+	//virtual void device_start() override;
 	virtual void set_prg() override;
 	virtual void set_chr() override;
 	virtual bool prgram_enabled() const override;

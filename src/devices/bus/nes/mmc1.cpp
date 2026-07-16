@@ -48,8 +48,6 @@ DEFINE_DEVICE_TYPE(NES_SZROM, nes_szrom_device, "nes_szrom", "NES Cart SZROM (MM
 
 nes_sxrom_device::nes_sxrom_device(const machine_config &mconfig, device_type type, const char *tag, device_t *owner, u32 clock)
 : nes_nrom_device(mconfig, type, tag, owner, clock)
-, m_last_mmc1_write_cpu_cycle(0)
-, m_last_mmc1_write_valid(false)
 , m_powered(false)
 , m_mmc1_upper_chr(false)
 , m_mmc1_ppu_addr(0)
@@ -97,8 +95,6 @@ void nes_sxrom_device::device_start()
 	save_item(NAME(m_count));
 	save_item(NAME(m_reg));
 	save_item(NAME(m_powered));
-	save_item(NAME(m_last_mmc1_write_cpu_cycle));
-	save_item(NAME(m_last_mmc1_write_valid));
 	save_item(NAME(m_mmc1_upper_chr));
 	save_item(NAME(m_mmc1_ppu_addr));
 	m_maincpu6502 = machine().root_device().subdevice<m6502_device>("maincpu");
@@ -106,10 +102,10 @@ void nes_sxrom_device::device_start()
 			ppu->set_mapper(1);
 }
 
-void nes_snrom_device::device_start()
-{
-	nes_sxrom_device::device_start();
-}
+//void nes_snrom_device::device_start()
+//{
+//	nes_sxrom_device::device_start();
+//}
 
 void nes_sxrom_device::pcb_reset()
 {
@@ -117,8 +113,6 @@ m_latch = 0;
 m_count = 0;
 m_mmc1_upper_chr = false;
 m_mmc1_ppu_addr = 0;
-m_last_mmc1_write_cpu_cycle = 0;
-m_last_mmc1_write_valid = false;
 
 if (!m_powered)
 {
@@ -355,20 +349,6 @@ void nes_sxrom_device::update_regs(int reg)
 	}
 }
 
-bool nes_sxrom_device::mmc1_ignore_serial_write(u64 now_cpu) const
-{
-if (!m_last_mmc1_write_valid)
-return false;
-
-return (now_cpu - m_last_mmc1_write_cpu_cycle) == 1;
-}
-
-void nes_sxrom_device::mmc1_record_write_cycle(u64 now_cpu)
-{
-m_last_mmc1_write_cpu_cycle = now_cpu;
-m_last_mmc1_write_valid = true;
-}
-
 bool nes_sxrom_device::prgram_enabled() const
 {
 // MMC1A ignores PRG-RAM disable bit
@@ -389,52 +369,51 @@ return 0;
 
 void nes_sxrom_device::write_h(offs_t offset, u8 data)
 {
-LOG("sxrom write_h, offset: %04x, data: %02x\n", offset, data);
+	LOG("sxrom write_h, offset: %04x, data: %02x\n", offset, data);
 
-if (!m_maincpu6502)
-{
-	logerror("Cannot find CPU in mmc1.cpp->write_h()\n");
-	return;
-}
+	if (!m_maincpu6502)
+	{
+		logerror("Cannot find CPU in mmc1.cpp->write_h()\n");
+		return;
+	}
 
-const u64 now_cpu = m_maincpu6502->total_cycles();
+	const u64 now_cpu = m_maincpu6502->get_last_cpu_write_cycle();
+	const u64 previous_cpu_write = m_maincpu6502->get_previous_cpu_write_cycle();
 
-if (data & 0x80)
-{
-	m_latch = 0;
-	m_count = 0;
-	m_reg[0] |= 0x0c;
+	if (data & 0x80)
+	{
+		m_latch = 0;
+		m_count = 0;
+		m_reg[0] |= 0x0c;
 
-	mmc1_record_write_cycle(now_cpu);
-	set_prg();
-	return;
-}
+		set_prg();
+		return;
+	}
 
-if (mmc1_ignore_serial_write(now_cpu))
-{
-	logerror("sxrom write_h ignored (consecutive serial write): now=%llu last=%llu data=%02x\n",
-		(unsigned long long)now_cpu,
-		(unsigned long long)m_last_mmc1_write_cpu_cycle,
-		data);
-	return;
-}
+	if (previous_cpu_write + 1 == now_cpu)
+	{
+		logerror("MMC1 IGNORE SERIAL now=%llu previous=%llu addr=%04X data=%02X\n",
+			(unsigned long long)now_cpu,
+			(unsigned long long)previous_cpu_write,
+			unsigned(offset + 0x8000),
+			data);
+		return;
+	}
 
-mmc1_record_write_cycle(now_cpu);
+	m_latch >>= 1;
+	m_latch |= (data & 0x01) << 4;
+	++m_count;
 
-m_latch >>= 1;
-m_latch |= (data & 0x01) << 4;
-++m_count;
+	if (m_count == 5)
+	{
+		const int reg = BIT(offset, 13, 2);
+		m_reg[reg] = m_latch & 0x1f;
 
-if (m_count == 5)
-{
-	const int reg = BIT(offset, 13, 2);
-	m_reg[reg] = m_latch & 0x1f;
+		m_latch = 0;
+		m_count = 0;
 
-	m_latch = 0;
-	m_count = 0;
-
-	update_regs(reg);
-}
+		update_regs(reg);
+	}
 }
 
 void nes_sxrom_device::write_m(offs_t offset, u8 data)

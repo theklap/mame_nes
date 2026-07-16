@@ -247,6 +247,9 @@ void ppu2c0x_device::init_runtime_reset_state() {
 	dot = 0;
 	scanline = 0;
 	m_scanline = 0;
+	
+	ppu_tick_in_cpu_cycle = 0;
+	frame_start_ppu_phase = 0;
 
 	// --------------------------------------------------
 	// PPU external bus / open bus / $2007 buffer
@@ -254,6 +257,7 @@ void ppu2c0x_device::init_runtime_reset_state() {
 	ppu_address_bus = 0;
 	ppu_ad_latch = 0;
 	ppudata_read_buffer = 0;
+	ppu_ale_low_latch = 0;
 
 	ppu2007_buffer_fill_armed = false;
 	ppu2007_buffer_fill_arm_pending = false;
@@ -287,23 +291,23 @@ void ppu2c0x_device::init_runtime_reset_state() {
 	// --------------------------------------------------
 	pending_2000.has_pending = false;
 	pending_2000.value = 0;
-	pending_2000.value16 = 0;
-	pending_2000.apply_dot = 0;
-	pending_2000.apply_scanline = 0;
+	//pending_2000.value16 = 0;
+	//pending_2000.apply_dot = 0;
+	//pending_2000.apply_scanline = 0;
 	pending_2000.apply_ppu = 0;
 
 	pending_2001.has_pending = false;
 	pending_2001.value = 0;
-	pending_2001.value16 = 0;
-	pending_2001.apply_dot = 0;
-	pending_2001.apply_scanline = 0;
+	//pending_2001.value16 = 0;
+	//pending_2001.apply_dot = 0;
+	//pending_2001.apply_scanline = 0;
 	pending_2001.apply_ppu = 0;
 
 	pending_2006.has_pending = false;
 	pending_2006.value = 0;
 	pending_2006.value16 = 0;
-	pending_2006.apply_dot = 0;
-	pending_2006.apply_scanline = 0;
+	//pending_2006.apply_dot = 0;
+	//pending_2006.apply_scanline = 0;
 	pending_2006.apply_ppu = 0;
 
 	// --------------------------------------------------
@@ -596,12 +600,15 @@ void ppu2c0x_device::device_start() {
 	save_item(NAME(dot));
 	save_item(NAME(skip_dot));
 	save_item(NAME(s_after_wrap));
+	save_item(NAME(ppu_tick_in_cpu_cycle));
+	save_item(NAME(frame_start_ppu_phase));
 
 	// --------------------------------------------------
 	// PPU data/bus state
 	// --------------------------------------------------
 	save_item(NAME(ppudata_read_buffer));
 	save_item(NAME(ppu_address_bus));
+	save_item(NAME(ppu_ale_low_latch));
 
 	// --------------------------------------------------
 	// Background render pipeline
@@ -645,23 +652,23 @@ void ppu2c0x_device::device_start() {
 	// --------------------------------------------------
 	save_item(NAME(pending_2000.has_pending));
 	save_item(NAME(pending_2000.value));
-	save_item(NAME(pending_2000.value16));
-	save_item(NAME(pending_2000.apply_dot));
-	save_item(NAME(pending_2000.apply_scanline));
+	//save_item(NAME(pending_2000.value16));
+	//save_item(NAME(pending_2000.apply_dot));
+	//save_item(NAME(pending_2000.apply_scanline));
 	save_item(NAME(pending_2000.apply_ppu));
 
 	save_item(NAME(pending_2001.has_pending));
 	save_item(NAME(pending_2001.value));
-	save_item(NAME(pending_2001.value16));
-	save_item(NAME(pending_2001.apply_dot));
-	save_item(NAME(pending_2001.apply_scanline));
+	//save_item(NAME(pending_2001.value16));
+	//save_item(NAME(pending_2001.apply_dot));
+	//save_item(NAME(pending_2001.apply_scanline));
 	save_item(NAME(pending_2001.apply_ppu));
 
 	save_item(NAME(pending_2006.has_pending));
 	save_item(NAME(pending_2006.value));
 	save_item(NAME(pending_2006.value16));
-	save_item(NAME(pending_2006.apply_dot));
-	save_item(NAME(pending_2006.apply_scanline));
+	//save_item(NAME(pending_2006.apply_dot));
+	//save_item(NAME(pending_2006.apply_scanline));
 	save_item(NAME(pending_2006.apply_ppu));
 
 	// --------------------------------------------------
@@ -949,32 +956,24 @@ void ppu2c0x_rgb_device::init_palette_tables() {
 *
 *************************************/
 
-void ppu2c0x_device::ppu_bus_address_drive(uint16_t addr) {
-	addr &= 0x3FFF;
+void ppu2c0x_device::ppu_bus_address_drive(uint16_t addr, ppu_bus_source source)
+{
+	addr &= 0x3fff;
 
 	ppu_address_bus = addr;
-	ppu_ad_latch = addr & 0xFF;
+	ppu_ad_latch = addr & 0xff;
 
 	if (m_has_mmc3_a12 && m_mmc3)
-		m_mmc3->observe_ppu_a12(addr, m_cpu->total_cycles() - 1, ppu_tick_in_cpu_cycle, odd_frame);
+	{
+		const uint64_t cpu_cycle = m_cpu->total_cycles() + (source == ppu_bus_source::CPU_ACCESS ? 1 : 0);
+		const uint64_t ppu_cycle = (cpu_cycle * 3) + ppu_tick_in_cpu_cycle;
+		m_mmc3->observe_ppu_a12(addr, ppu_cycle, ppu_tick_in_cpu_cycle, odd_frame);
+	}
 }
 
 uint8_t ppu2c0x_device::ppu_bus_read(uint16_t addr, ppu_fetch_phase phase) {
 	addr &= 0x3FFF;
 
-	ppu_bus_address_drive(addr);
-
-	// Classify the current PPU fetch phase once.
-	//
-	// This feeds the mapper hooks below without repeatedly comparing the enum.
-	// Keep the meaning the same as the old code:
-	//   NT      = background nametable fetch
-	//   AT      = background attribute fetch
-	//   PTL/PTH = background pattern fetches
-	//   SPR_*   = sprite pattern fetches
-	//
-	// Dummy fetches intentionally leave all of these false unless a mapper
-	// explicitly needs to observe them elsewhere.
 	bool is_nt = false;
 	bool is_at = false;
 	bool is_bg_pattern = false;
@@ -1005,50 +1004,43 @@ uint8_t ppu2c0x_device::ppu_bus_read(uint16_t addr, ppu_fetch_phase phase) {
 
 	const bool chr_fetch = is_bg_pattern || is_spr_pattern;
 
-	// MMC5 needs to observe the full PPU read stream, including NT/AT/pattern
-	// classification. Keep this before the actual read, same as your current path.
+	// Background fetches use the high address lines currently supplied by
+	// the PPU together with the low address byte previously captured by ALE
+	// on the setup dot.
 	//
-	// Note: dummy fetches currently pass all phase booleans as false, matching the
-	// old boolean classification behavior unless you later decide MMC5 needs a
-	// separate dummy-read signal.
+	// Sprite and dummy fetches remain on the existing full-address path for
+	// now so this change is contained to the background fetch pipeline.
+	if (is_nt || is_at || is_bg_pattern)
+		addr = (addr & 0x3F00) | ppu_ale_low_latch;
+
+	addr &= 0x3FFF;
+
+	ppu_bus_address_drive(addr, ppu_bus_source::PPU);
+
 	if (m_has_mmc5_ppu && m_mmc5) {
 		m_mmc5->mmc5_clock_ppu_read(addr, is_nt, is_at, is_bg_pattern, is_spr_pattern);
 	}
 
-	// Actual PPU memory read.
-	//
-	// Keep this after the MMC5 observe call because the mapper may need to see
-	// the bus address/phase before data is returned.
 	const uint8_t data = readbyte(addr);
+
+	// AD0-7 now contain returned memory data. The external ALE latch keeps
+	// the low address byte captured during the preceding setup phase.
 	ppu_ad_latch = data;
+
 	if (addr < 0x2000) {
-		// MMC2/MMC4 latch boards react to CHR pattern address fetches.
-		// If you know your dummy CHR fetches should not clock MMC2/MMC4, keep
-		// this under chr_fetch instead. But for MMC1 board-side CHR-line effects,
-		// the actual address on the PPU bus is what matters.
 		if (chr_fetch && !m_latch.isnull())
 			m_latch(addr);
 
-		// Special MMC1 SxROM-family boards need to know which CHR half was fetched.
-		// This is an address-line observation, not really a "render phase" observation.
-		// If the PPU puts a CHR address on the bus, the board sees CHR A12/A16/etc.
 		if (m_has_mmc1_phase && m_mmc1_sxrom) {
 			const bool upper_chr = (addr & 0x1000) != 0;
 			m_mmc1_sxrom->mmc1_ppu_phase(upper_chr, addr & 0x1FFF);
 		}
 	}
 
-	// Once the delayed $2007 refill is armed, the VERY NEXT actual PPU bus read
-	// provides the refill value, regardless of whether it is BG, sprite, or dummy NT.
-	//
-	// ppu_bus_read_can_fill_2007 is still the external gate that decides which
-	// bus reads are allowed to satisfy the delayed refill.
 	if (ppu2007_buffer_fill_armed && ppu_bus_read_can_fill_2007) {
 		ppudata_read_buffer = data;
 		ppu2007_buffer_fill_armed = false;
 
-		// A rendering $2007 read matures first, then the next allowed real PPU
-		// bus read supplies the internal read-buffer refill.
 		if (m_2007_read.pending && m_2007_read.waiting_for_refill_bus_read) {
 			m_2007_read.pending = false;
 			m_2007_read.waiting_for_refill_bus_read = false;
@@ -1083,7 +1075,7 @@ void ppu2c0x_device::schedule_2007_post_access_bump() {
 	if (rendering_now) {
 		ppu2007_post_bump_pending = true;
 	} else {
-		do_2007_post_access_bump();
+		do_2007_post_access_bump(ppu_bus_source::PPU);
 	}
 }
 
@@ -1192,9 +1184,10 @@ void ppu2c0x_device::tick(int x) {
 
 			if ((bus_addr & 0x3F00) == 0x3F00) {
 				ppu_address_bus = bus_addr;
-				m_palette_ram[bus_addr & 0x1F] = m_2007_write.data & 0x3F;
+				//m_palette_ram[bus_addr & 0x1F] = m_2007_write.data & 0x3F;
+				palette_write(bus_addr & 0x1F, m_2007_write.data);
 			} else {
-				ppu_bus_address_drive(bus_addr);
+				ppu_bus_address_drive(bus_addr, ppu_bus_source::PPU);
 				writebyte(bus_addr, m_2007_write.data);
 			}
 
@@ -1265,7 +1258,7 @@ void ppu2c0x_device::tick(int x) {
 				// Non-rendering $2007 read:
 				// The mapper sees the original $2007 access address.
 				// The read buffer data may come from the palette mirror.
-				ppu_bus_address_drive(delayed_bus_addr);
+				ppu_bus_address_drive(delayed_bus_addr, ppu_bus_source::PPU);
 				ppudata_read_buffer = readbyte(read_addr);
 
 				m_2007_read.pending = false;
@@ -1294,9 +1287,8 @@ void ppu2c0x_device::tick(int x) {
 		// One-shot scanline-0 stale sprite0 identity.
 		// This is only armed by prerender sprite loading.
 		if (scanline == 0) {
-			if (sl0_stale_sprite0_identity)
-				sprite0_in_oam2_current = true;
-
+			sprite0_in_oam2_current = sl0_stale_sprite0_identity;
+		
 			sl0_stale_sprite0_identity = false;
 			sl0_stale_s0_loaded = false;
 		}
@@ -1319,34 +1311,32 @@ void ppu2c0x_device::tick(int x) {
 		if (pending_2006.apply_ppu <= 0) {
 			const uint16_t ppuaddr_reload = pending_2006.value16 & 0x7FFF;
 
-			const bool rendering_now = (bg_pipeline_enabled || spr_pipeline_enabled) && is_visible_scanline();
+			const bool rendering_now =
+				(bg_pipeline_enabled || spr_pipeline_enabled) &&
+				is_visible_scanline();
 
 			if (rendering_now) {
-				const uint8_t old_low = ppu_address_bus & 0xFF;
-
 				t = ppuaddr_reload;
 				copy_horiz();
 				copy_vert();
 
-				// $2006/v update during rendering can corrupt an in-flight fetch address:
-				// high bits come from the newly updated v, low bits remain from the
-				// previously prepared external address latch.
-				// Steins Gate "dust" pixel and also if incorrectly gated will create artifacts in mig29sf
-				// This is intentionally limited to phase 1 of the 8-dot BG fetch.
-				// Applying it across all visible dots causes false corruption in
-				// games that write $2006 mid-scanline.
-				if (dot >= 1 && dot <= 256 && ((dot - 1) & 7) == 1)
-					ppu_address_bus = ((0x2000 | (v & 0x0FFF)) & 0x3F00) | old_low;
+				// W6/2 only replaces the external high-address source when it
+				// matures between the NT setup/ALE dot and the NT read dot.
+				//
+				// Phase 0 already captured the old NT low byte in
+				// ppu_ale_low_latch. ppu_bus_read() will combine that retained
+				// low byte with the new high bits supplied here.
+				if (dot >= 1 && dot <= 256 && ((dot - 1) & 7) == 1) {
+					ppu_address_bus = v & 0x3FFF;
+				}
 			} else {
 				v = ppuaddr_reload;
 
-				// Palette space is internal to the PPU. Keep the PPU bus shadow/latch,
-				// but do not expose this as a cartridge/MMC3 A12 clock.
 				if ((v & 0x3F00) == 0x3F00) {
 					ppu_address_bus = v & 0x3FFF;
 					ppu_ad_latch = v & 0xFF;
 				} else {
-					ppu_bus_address_drive(v);
+					ppu_bus_address_drive(v, ppu_bus_source::PPU);
 				}
 			}
 
@@ -1422,7 +1412,7 @@ void ppu2c0x_device::tick(int x) {
 		if (ppu2007_post_bump_delay > 0) {
 			--ppu2007_post_bump_delay;
 		} else {
-			do_2007_post_access_bump();
+			do_2007_post_access_bump(ppu_bus_source::PPU);
 			ppu2007_post_bump_pending = false;
 			ppu2007_post_bump_delay = 0;
 		}
@@ -1459,6 +1449,7 @@ void ppu2c0x_device::tick(int x) {
 		}
 		if (scanline >= m_scanlines_per_frame) {
 			scanline = 0;
+			frame_start_ppu_phase = ppu_tick_in_cpu_cycle;
 			suppress_vblank_flag = false;
 			odd_frame = !odd_frame;
 			screen().reset_origin(scanline, dot);
@@ -1530,7 +1521,8 @@ void ppu2c0x_device::retro_fix_previous_pixel_after_ppumask_write() {
 			pal_index = (prev_attr_bits << 2) | bg_pat_display;
 	}
 
-	bitmap.pix(scanline, pixel) = m_nespens[apply_grayscale_and_emphasis(palette_read(pal_index))];
+	//bitmap.pix(scanline, pixel) = m_nespens[apply_grayscale_and_emphasis(palette_read(pal_index))];
+	bitmap.pix(prev_pixel_scanline, pixel) = m_nespens[apply_grayscale_and_emphasis(palette_read(pal_index))];
 
 	retro_ppumask_color = false;
 	retro_ppumask_render = false;
@@ -1559,18 +1551,14 @@ void ppu2c0x_device::run_bg_fetch_dot() {
 
 	switch ((dot - 1) % 8) {
 		case 0: {
-			// First dot of nametable fetch:
-			// Hardware has already put the low part of the address path in motion.
-			//
-			// If v changes before the actual read dot, the NT fetch can use:
-			//   low  8 bits = old/prepared address
-			//   high 6 bits = current/new address
-			//
-			// In the normal case where v does not change, this collapses to the
-			// same address as before.
 			bg_fetch_v_nt = v & 0x7FFF;
 			bg_fetch_nt_addr = (0x2000 | (bg_fetch_v_nt & 0x0FFF)) & 0x3FFF;
+
+			// Normal NT ALE phase:
+			// AD0-7 carry the low address and the external latch captures it.
 			ppu_address_bus = bg_fetch_nt_addr;
+			ppu_ad_latch = bg_fetch_nt_addr & 0xFF;
+			ppu_ale_low_latch = ppu_ad_latch;
 			break;
 		}
 
@@ -1582,14 +1570,14 @@ void ppu2c0x_device::run_bg_fetch_dot() {
 		}
 
 		case 2: {
-			// First dot of attribute fetch:
-			// Same mixed-address rule as NT fetches. Prepare the old full AT
-			// address now, then use only its low 8 bits on the read dot.
 			bg_fetch_v_at = v & 0x7FFF;
-			bg_fetch_at_addr = 0x23C0 | (bg_fetch_v_at & 0x0C00) | ((bg_fetch_v_at >> 4) & 0x38) | ((bg_fetch_v_at >> 2) & 0x07);
-
+			bg_fetch_at_addr = 0x23C0 |	(bg_fetch_v_at & 0x0C00) | ((bg_fetch_v_at >> 4) & 0x38) | ((bg_fetch_v_at >> 2) & 0x07);
 			bg_fetch_at_addr &= 0x3FFF;
+
+			// Normal attribute ALE phase.
 			ppu_address_bus = bg_fetch_at_addr;
+			ppu_ad_latch = bg_fetch_at_addr & 0xFF;
+			ppu_ale_low_latch = ppu_ad_latch;
 			break;
 		}
 
@@ -1598,8 +1586,6 @@ void ppu2c0x_device::run_bg_fetch_dot() {
 			bg_at_latch = ppu_bus_read(ppu_address_bus, ppu_fetch_phase::AT);
 			ppu_bus_read_can_fill_2007 = false;
 
-			// Attribute quadrant decode should use the v that started this AT fetch,
-			// not the possibly changed v from the read dot.
 			bg_at_latch = (bg_at_latch >> (((bg_fetch_v_at >> 4) & 4) | (bg_fetch_v_at & 2))) & 0x03;
 			break;
 		}
@@ -1608,12 +1594,24 @@ void ppu2c0x_device::run_bg_fetch_dot() {
 			bg_fetch_v_pt = v & 0x7FFF;
 			bg_fetch_pt_base = ppuctrl_bg_pattern_base;
 
-			uint16_t addr = (bg_fetch_pt_base + (16 * bg_nt_latch) + (bg_fetch_v_pt >> 12)) & 0x3FFF;
+			ppu_address_bus = (bg_fetch_pt_base + (16 * bg_nt_latch) + (bg_fetch_v_pt >> 12)) & 0x3FFF;
 
-			if (ppu2007_ale_read_addr_latch_poison)
-				addr = (addr & 0x3F00) | ppu2007_ale_read_low_latch;
+			if (ppu2007_ale_read_addr_latch_poison) {
+				// ALE and $2007 Read are active together.
+				//
+				// PAR supplies the high address lines, but the external low
+				// latch remains in the stable feedback state produced by the
+				// preceding data value. Do not capture PAR's normal low byte.
+				ppu_address_bus = (ppu_address_bus & 0x3F00) | ppu2007_ale_read_low_latch;
 
-			ppu_address_bus = addr & 0x3FFF;
+				ppu_ad_latch = ppu2007_ale_read_low_latch;
+				ppu_ale_low_latch = ppu2007_ale_read_low_latch;
+			} else {
+				// Normal pattern-low ALE phase.
+				ppu_ad_latch = ppu_address_bus & 0xFF;
+				ppu_ale_low_latch = ppu_ad_latch;
+			}
+
 			break;
 		}
 
@@ -1627,10 +1625,21 @@ void ppu2c0x_device::run_bg_fetch_dot() {
 
 		case 6:
 			ppu_address_bus = bg_fetch_pt_base + (16 * bg_nt_latch) + (bg_fetch_v_pt >> 12) + 8;
+
 			ppu_address_bus &= 0x3FFF;
 
-			if (ppu2007_ale_read_addr_latch_poison)
+			if (ppu2007_ale_read_addr_latch_poison) {
+				// Same ALE+Read feedback behavior for pattern-high setup.
 				ppu_address_bus = (ppu_address_bus & 0x3F00) | ppu2007_ale_read_low_latch;
+
+				ppu_ad_latch = ppu2007_ale_read_low_latch;
+				ppu_ale_low_latch = ppu2007_ale_read_low_latch;
+			} else {
+				// Normal pattern-high ALE phase.
+				ppu_ad_latch = ppu_address_bus & 0xFF;
+				ppu_ale_low_latch = ppu_ad_latch;
+			}
+
 			break;
 
 		case 7:
@@ -2609,12 +2618,12 @@ void ppu2c0x_device::do_sprite_loading() {
 			const uint8_t pat = ppu_bus_read(ppu_address_bus, ppu_fetch_phase::SPR_PTH);
 			ppu_bus_read_can_fill_2007 = false;
 
-			if (is_prerender_scanline() && eval_candidate_in_range) {
+			// The pre-render line reuses the secondary OAM left by the final visible
+			// scanline. Any in-range lane-0 entry can reach output, but sprite-0
+			// identity remains the identity produced by the original evaluation.
+			if (is_prerender_scanline() && eval_candidate_in_range && sprite_n == 0) {
 				sl0_stale_s0_loaded = true;
-
-				if (sprite_n == 0) {
-					sl0_stale_sprite0_identity = true;
-				}
+				sl0_stale_sprite0_identity = sprite0_in_oam2_current;
 			}
 
 			if (sprite_n != corrupt_resume_high_lane) {
@@ -2660,13 +2669,6 @@ void ppu2c0x_device::run_prerender_scanline_dot() {
 		set_nmi(false);
 	}
 
-	// Sprite0 identity latch (one-shot) at dot 257.
-	// Evaluation on scanline N determines identity for scanline N+1.
-	if (dot == 257) {
-		sprite0_in_oam2_current = false;
-		sprite0_in_oam2_next = false;
-	}
-
 	// === BG shift clocking happens regardless of rendering (composite) ===
 	if ((bg_pipeline_enabled || spr_pipeline_enabled) && ((dot >= 2 && dot <= 257) || (dot >= 322 && dot <= 337))) {
 		clock_bg_shifters_only();
@@ -2692,7 +2694,7 @@ void ppu2c0x_device::do_prerender_oam_sweep() {
 
 	if (dot == 65) {
 		// Don't touch oamaddr / oam_eval_addr at all.
-		// Just start a harmless OAM2 read sweep if you want.
+		// Just start a harmless OAM2 read sweep
 		oam2addr = 0;
 	}
 
@@ -2721,7 +2723,7 @@ void ppu2c0x_device::run_scanline_241_dot() {
 	}
 }
 
-void ppu2c0x_device::do_2007_post_access_bump() {
+void ppu2c0x_device::do_2007_post_access_bump(ppu_bus_source source) {
 	if ((bg_pipeline_enabled || spr_pipeline_enabled) && is_visible_scanline()) {
 		// Accessing $2007 during rendering performs this glitch. Used by Young
 		// Indiana Jones Chronicles to shake the screen.
@@ -2743,7 +2745,7 @@ void ppu2c0x_device::do_2007_post_access_bump() {
 			ppu_address_bus = new_v;
 			ppu_ad_latch = new_v & 0xFF;
 		} else {
-			ppu_bus_address_drive(new_v);
+			ppu_bus_address_drive(new_v, source);
 		}
 	}
 }
@@ -2979,7 +2981,11 @@ uint8_t ppu2c0x_device::read(offs_t offset) {
 
 			// $2007 read is a real PPU address-bus event.
 			// mmc3_test_2/3-A12_clocking expects this to clock when A12 rises.
-			ppu_bus_address_drive(bus_addr);
+			if ((bus_addr & 0x3F00) == 0x3F00) {
+				ppu_address_bus = bus_addr;
+			} else {
+				ppu_bus_address_drive(bus_addr, ppu_bus_source::CPU_ACCESS);
+			}
 
 			uint8_t ret;
 
@@ -3002,7 +3008,7 @@ uint8_t ppu2c0x_device::read(offs_t offset) {
 			if (!rendering_for_access) {
 				// Non-rendering:
 				// The CPU access increments v now.
-				do_2007_post_access_bump();
+				do_2007_post_access_bump(ppu_bus_source::CPU_ACCESS);
 
 				// The internal read buffer refills later from the accessed address.
 				schedule_2007_read(bus_addr, 5, false);
@@ -3211,11 +3217,13 @@ void ppu2c0x_device::write(offs_t offset, uint8_t val) {
 				const int late_delta = dot - prev_pixel_x;
 				const bool late_prev_pixel = prev_pixel_valid && prev_pixel_scanline == scanline && prev_pixel_x >= 0 && prev_pixel_x < 256 && late_delta == 3;
 
-				if ((diff & (0x01 | 0xE0)) && late_prev_pixel)
+				if ((diff & (0x01 | 0xE0)) && late_prev_pixel) {
 					retro_ppumask_color = true;
+				}
 
-				if ((diff & 0x18) && odd_frame && late_prev_pixel)
+				if ((diff & 0x18) && frame_start_ppu_phase == 3 && late_prev_pixel) {
 					retro_ppumask_render = true;
+				}
 			}
 
 			break;
@@ -3290,7 +3298,7 @@ void ppu2c0x_device::write(offs_t offset, uint8_t val) {
 				ppu_address_bus = bus_addr & 0x3FFF;
 				//ppu_ad_latch = bus_addr & 0xFF;
 			} else {
-				ppu_bus_address_drive(bus_addr);
+				ppu_bus_address_drive(bus_addr, ppu_bus_source::CPU_ACCESS);
 			}
 
 			const bool rendering_for_access = (bg_pipeline_enabled || spr_pipeline_enabled) && is_visible_scanline();
@@ -3313,7 +3321,7 @@ void ppu2c0x_device::write(offs_t offset, uint8_t val) {
 					ppu_address_bus = bus_addr & 0x3FFF;
 					//ppu_ad_latch = bus_addr & 0xFF;
 				} else {
-					ppu_bus_address_drive(bus_addr);
+					ppu_bus_address_drive(bus_addr, ppu_bus_source::CPU_ACCESS);
 				}
 			} else {
 				// Rendering:
@@ -3329,7 +3337,7 @@ void ppu2c0x_device::write(offs_t offset, uint8_t val) {
 					ppu_address_bus = bus_addr & 0x3FFF;
 					//ppu_ad_latch = bus_addr & 0xFF;
 				} else {
-					ppu_bus_address_drive(bus_addr);
+					ppu_bus_address_drive(bus_addr, ppu_bus_source::CPU_ACCESS);
 				}
 			}
 			break;
@@ -3456,7 +3464,7 @@ void ppu2c0x_device::update_visible_scanline() {}
 void ppu2c0x_device::update_scanline() {}
 void ppu2c04_clone_device::write(offs_t offset, uint8_t data) {}
 void ppu2c04_clone_device::device_start() {}
-void ppu2c04_clone_device::init_palette_tables() {}
+void ppu2c04_clone_device::init_palette_tables() {}	
 uint8_t ppu2c04_clone_device::read(offs_t offset) {
 	return 0;
 }

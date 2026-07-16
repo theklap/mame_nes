@@ -76,6 +76,12 @@ public:
 		// Both the scanline immediately before and immediately after VBLANK
 		// are non-rendering and non-vblank.
 	};
+	
+	enum class ppu_bus_source : uint8_t
+	{
+		PPU,
+		CPU_ACCESS
+	};
 
 	// CPU-visible PPU register interface.
 	virtual uint8_t read(offs_t offset);
@@ -184,7 +190,7 @@ public:
 	void bump_horiz();
 	void apply_scroll_ops();
 
-	void do_2007_post_access_bump();
+	void do_2007_post_access_bump(ppu_bus_source source);
 	void write_oam_data_reg(uint8_t val);
 	void write_oam_dma_byte(uint8_t val);
 
@@ -314,7 +320,7 @@ protected:
 	inline uint8_t readbyte(uint16_t bus_addr, uint16_t mem_addr);
 	inline void writebyte(offs_t address, uint8_t data);
 
-	void ppu_bus_address_drive(uint16_t addr); 
+	void ppu_bus_address_drive(uint16_t addr, ppu_bus_source source); 
 	void ppu_cart_address_drive(uint16_t addr);
 	void ppu_bus_a12_observe(uint16_t addr);
 	uint8_t ppu_bus_read(uint16_t addr, ppu_fetch_phase phase);
@@ -430,12 +436,14 @@ protected:
 	uint64_t frame;
 	bool skip_dot;
 	int ppu_tick_in_cpu_cycle;
+	uint8_t frame_start_ppu_phase;
 
 	// Current PPU address bus value.
 	unsigned ppu_address_bus;
 	uint8_t ppu_ad_latch = 0;
 	bool ppu2007_ale_read_addr_latch_poison = false;
 	uint8_t ppu2007_ale_read_low_latch = 0;
+	uint8_t ppu_ale_low_latch;
 
 	// ---------------------------------------------------------------------
 	// Background fetch pipeline.
@@ -472,8 +480,8 @@ protected:
 	uint8_t spr_pt_h_shift[8];
 	uint8_t spr_shift_count[8];
 		
-	bool spr_pt_l_addr_valid[8];
-	bool spr_pt_h_addr_valid[8];
+	//bool spr_pt_l_addr_valid[8];
+	//bool spr_pt_h_addr_valid[8];
 
 	bool sprite0_in_oam2_next;
 	bool sprite0_in_oam2_current;

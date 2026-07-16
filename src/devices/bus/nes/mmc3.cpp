@@ -141,6 +141,8 @@ void nes_txrom_device::mmc3_start()
 	save_item(NAME(m_irq_reload));
 	save_item(NAME(m_last_a12_low_cpu));
 	save_item(NAME(m_prev_ppu_addr));
+	save_item(NAME(m_a12_low_seen));
+	save_item(NAME(m_mmc3_odd_skip_a12_pending));
 	save_item(NAME(m_mmc3_clocks_since_c001));
 	save_item(NAME(m_mmc3_seen_c001_recent));
 }
@@ -179,6 +181,7 @@ void nes_txrom_device::mmc3_common_initialize( int prg_mask, int chr_mask, int n
 	m_irq_reload = false;
 	m_last_a12_low_cpu = 0;
 	m_prev_ppu_addr = 0;
+	m_mmc3_odd_skip_a12_pending = false;
 	m_a12_low_seen = false;
 	m_mmc3_clocks_since_c001 = 0xff;
 	m_mmc3_seen_c001_recent = false;
@@ -186,7 +189,7 @@ void nes_txrom_device::mmc3_common_initialize( int prg_mask, int chr_mask, int n
 	
 	// 0 = Sharp/new behavior, nonzero = NEC/old behavior.
 	rev_b_behavior = !nec_irq_behavior;
-	
+	 
 	machine().root_device().subdevice<ppu2c0x_device>("ppu")->set_mapper(4);
 }
 
@@ -242,26 +245,12 @@ void nes_zz_device::pcb_reset()
 
  -------------------------------------------------*/
 
-void nes_txrom_device::observe_ppu_a12(uint16_t ppu_addr, uint64_t cpu_cycles)
+void nes_txrom_device::observe_ppu_a12(uint16_t ppu_addr, uint64_t cpu_cycles, int ppu_tick, bool m_odd_frame)
 {
 	ppu_addr &= 0x3fff;
 
 	const bool prev_a12 = BIT(m_prev_ppu_addr, 12);
 	const bool a12 = BIT(ppu_addr, 12);
-
-	// CPU palette accesses can expose $3Fxx on the PPU address bus, so keep
-	// MMC3's remembered A12 state high.  However, do not count the $3Fxx
-	// palette access itself as an IRQ-counter clock.  The old global
-	// $3Fxx->$2Fxx mask fixed Steins;Gate only by suppressing this clock,
-	// but it also lied about A12 being low and broke MMC3 scanline tests.
-	if ((ppu_addr & 0x3f00) == 0x3f00)
-	{
-		if (!prev_a12 && a12)
-			m_a12_low_seen = false;
-
-		m_prev_ppu_addr = ppu_addr;
-		return;
-	}
 
 	if (!a12)
 	{
@@ -281,15 +270,18 @@ void nes_txrom_device::observe_ppu_a12(uint16_t ppu_addr, uint64_t cpu_cycles)
 	{
 		const uint64_t low_time = cpu_cycles - m_last_a12_low_cpu;
 
-		if (m_a12_low_seen && low_time >= 4)
-		{
+		if (m_a12_low_seen && (low_time > 9 || (m_mmc3_odd_skip_a12_pending && low_time >= 8)))
 			mmc3_irq_clock();
-		}
 
+		m_mmc3_odd_skip_a12_pending = false;
 		m_a12_low_seen = false;
 	}
 
 	m_prev_ppu_addr = ppu_addr;
+}
+
+void nes_txrom_device::notify_ppu_odd_skip() {
+	m_mmc3_odd_skip_a12_pending = true;
 }
 
 void nes_txrom_device::mmc3_irq_clock()
@@ -391,12 +383,15 @@ void nes_txrom_device::ppu_to_mapper(int scanline, unsigned dot, int ppu_tick)
 	m_scanline = scanline;
 	m_dot = dot;
 
-	if (delay_irq > 0) {
+	//if (m_mmc3_odd_skip_a12_pending && scanline == 0 && dot > 8)
+	//	m_mmc3_odd_skip_a12_pending = false;
+
+	if (delay_irq > 0)
+	{
 		--delay_irq;
 
-		if (delay_irq == 0) {
+		if (delay_irq == 0)
 			m_maincpu6502->queue_delayed_mapper_irq(2);
-		}
 	}
 }
 

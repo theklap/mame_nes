@@ -25,9 +25,9 @@ public:
 
 	//virtual void hblank_irq(int scanline, bool vblank, bool blanked) override;
 	virtual void ppu_to_mapper(int scanline, unsigned dot, int ppu_tick) override;	//called from ppu
-	void observe_ppu_a12(uint16_t ppu_addr, uint64_t cpu_cycles);		//called from ppu
-	
-	virtual void pcb_reset() override;
+	void observe_ppu_a12(uint16_t ppu_addr, uint64_t cpu_cycles, int ppu_tick, bool m_odd_frame);		//called from ppu
+	void notify_ppu_odd_skip();
+	virtual void pcb_reset() override; 
 
 protected:
 	nes_txrom_device(const machine_config &mconfig, device_type type, const char *tag, device_t *owner, uint32_t clock);
@@ -128,6 +128,7 @@ protected:
 	bool m_c001_had_one_clock = false;
 	bool m_c001_pathology_pending = false;
 	int m_ppu_tick;
+	bool m_mmc3_odd_skip_a12_pending;
 };
 
 
