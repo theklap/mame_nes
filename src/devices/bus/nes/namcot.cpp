@@ -23,6 +23,7 @@
 
 #include "emu.h"
 #include "namcot.h"
+#include "cpu/m6502/m6502.h"
 #include "ui/uimain.h"
 
 #include "speaker.h"
@@ -68,7 +69,12 @@ nes_namcot3425_device::nes_namcot3425_device(const machine_config &mconfig, cons
 }
 
 nes_namcot340_device::nes_namcot340_device(const machine_config &mconfig, device_type type, const char *tag, device_t *owner, uint32_t clock)
-	: nes_nrom_device(mconfig, type, tag, owner, clock), m_irq_count(0), m_irq_enable(0), irq_timer(nullptr)
+	: nes_nrom_device(mconfig, type, tag, owner, clock)
+	, m_irq_count(0)
+	, m_irq_enable(0)
+	, delay_irq(0)
+	, irq_timer(nullptr)
+	, m_maincpu6502(nullptr)
 {
 }
 
@@ -83,7 +89,11 @@ nes_namcot175_device::nes_namcot175_device(const machine_config &mconfig, const 
 }
 
 nes_namcot163_device::nes_namcot163_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock)
-	: nes_namcot340_device(mconfig, NES_NAMCOT163, tag, owner, clock), m_wram_protect(0), m_latch(0), m_chr_bank(0), m_namco163snd(*this, "n163")
+	: nes_namcot340_device(mconfig, NES_NAMCOT163, tag, owner, clock)
+	, m_wram_protect(0)
+	, m_latch(0)
+	, m_chr_bank{}
+	, m_namco163snd(*this, "n163")
 {
 }
 
@@ -139,11 +149,15 @@ void nes_namcot3425_device::pcb_reset()
 void nes_namcot340_device::device_start()
 {
 	common_start();
+
+	m_maincpu6502 = machine().root_device().subdevice<m6502_device>("maincpu");
+
 	irq_timer = timer_alloc(FUNC(nes_namcot340_device::irq_timer_tick), this);
 	irq_timer->adjust(attotime::zero, 0, clocks_to_attotime(1));
 
 	save_item(NAME(m_irq_enable));
 	save_item(NAME(m_irq_count));
+	save_item(NAME(delay_irq));
 	save_item(NAME(m_n163_ram));
 
 	m_mapper_sram_size = 0x2000;
@@ -157,18 +171,28 @@ void nes_namcot340_device::pcb_reset()
 	chr8(0, m_chr_source);
 	set_nt_mirroring(PPU_MIRROR_VERT);
 
+	set_irq_line(CLEAR_LINE);
+
+	if (m_maincpu6502)
+		m_maincpu6502->cancel_delayed_mapper_irq();
+
 	m_irq_enable = 0;
 	m_irq_count = 0;
+	delay_irq = 0;
 }
 
 void nes_namcot175_device::device_start()
 {
 	common_start();
+
+	m_maincpu6502 = machine().root_device().subdevice<m6502_device>("maincpu");
+
 	irq_timer = timer_alloc(FUNC(nes_namcot175_device::irq_timer_tick), this);
 	irq_timer->adjust(attotime::zero, 0, clocks_to_attotime(1));
 
 	save_item(NAME(m_irq_enable));
 	save_item(NAME(m_irq_count));
+	save_item(NAME(delay_irq));
 	save_item(NAME(m_wram_protect));
 	save_item(NAME(m_n163_ram));
 
@@ -183,23 +207,31 @@ void nes_namcot175_device::pcb_reset()
 	chr8(0, m_chr_source);
 	set_nt_mirroring(PPU_MIRROR_VERT);
 
+	set_irq_line(CLEAR_LINE);
+
+	if (m_maincpu6502)
+		m_maincpu6502->cancel_delayed_mapper_irq();
+
 	m_irq_enable = 0;
 	m_irq_count = 0;
+	delay_irq = 0;
 	m_wram_protect = 0;
 }
 
 void nes_namcot163_device::device_start()
 {
 	common_start();
+	m_maincpu6502 = machine().root_device().subdevice<m6502_device>("maincpu");
 	irq_timer = timer_alloc(FUNC(nes_namcot163_device::irq_timer_tick), this);
 	irq_timer->adjust(attotime::zero, 0, clocks_to_attotime(1));
-
+	
 	save_item(NAME(m_irq_enable));
 	save_item(NAME(m_irq_count));
 	save_item(NAME(m_wram_protect));
 	save_item(NAME(m_latch));
 	save_item(NAME(m_chr_bank));
 	save_item(NAME(m_n163_ram));
+	save_item(NAME(delay_irq));
 
 	m_mapper_sram_size = 0x2000;
 	m_mapper_sram = m_n163_ram;
@@ -230,11 +262,18 @@ void nes_namcot163_device::pcb_reset()
 	chr8(0, m_chr_source);
 	set_nt_mirroring(PPU_MIRROR_VERT);
 
+	set_irq_line(CLEAR_LINE);
+
+	if (m_maincpu6502)
+		m_maincpu6502->cancel_delayed_mapper_irq();
+
 	m_irq_enable = 0;
 	m_irq_count = 0;
+	delay_irq = 0;
 	m_wram_protect = 0;
 	m_latch = 0;
-	m_chr_bank = 0;
+
+	memset(m_chr_bank, 0, sizeof(m_chr_bank));
 }
 
 
@@ -398,12 +437,23 @@ void nes_namcot3425_device::write_h(offs_t offset, uint8_t data)
 
 TIMER_CALLBACK_MEMBER(nes_namcot340_device::irq_timer_tick)
 {
-	if (m_irq_enable)
+	if (m_irq_enable && m_irq_count < 0x7fff)
 	{
-		if (m_irq_count == 0x7fff)  // counter does not wrap to 0!
-			set_irq_line(ASSERT_LINE);
-		else
-			m_irq_count++;
+		m_irq_count++;
+
+		if (m_irq_count == 0x7fff)
+			delay_irq = 2;
+	}
+}
+
+void nes_namcot340_device::ppu_to_mapper(int scanline, unsigned dot, int ppu_tick)
+{
+	if (delay_irq > 0)
+	{
+		--delay_irq;
+
+		if (delay_irq == 0)
+			m_maincpu6502->queue_delayed_mapper_irq(2);
 	}
 }
 
@@ -414,14 +464,21 @@ void nes_namcot340_device::n340_lowrite(offs_t offset, uint8_t data)
 
 	switch (offset & 0x1800)
 	{
-		case 0x1000: /* low byte of IRQ */
+		case 0x1000: // Low byte of IRQ counter
 			m_irq_count = (m_irq_count & 0x7f00) | data;
+			delay_irq = 0;
+
 			set_irq_line(CLEAR_LINE);
+			m_maincpu6502->cancel_delayed_mapper_irq();
 			break;
-		case 0x1800: /* high byte of IRQ, IRQ enable in high bit */
-			m_irq_count = (m_irq_count & 0xff) | ((data & 0x7f) << 8);
-			m_irq_enable = data & 0x80;
+
+		case 0x1800: // High byte and IRQ enable
+			m_irq_count = (m_irq_count & 0x00ff) | ((data & 0x7f) << 8);
+			m_irq_enable = BIT(data, 7);
+			delay_irq = 0;
+
 			set_irq_line(CLEAR_LINE);
+			m_maincpu6502->cancel_delayed_mapper_irq();
 			break;
 	}
 }
@@ -435,12 +492,10 @@ uint8_t nes_namcot340_device::n340_loread(offs_t offset)
 	{
 		case 0x1000:
 			return m_irq_count & 0xff;
-			set_irq_line(CLEAR_LINE); // FIXME: unreachable
-			[[fallthrough]];
+
 		case 0x1800:
 			return m_irq_count >> 8;
-			set_irq_line(CLEAR_LINE); // FIXME: unreachable
-			[[fallthrough]];
+
 		default:
 			return 0x00;
 	}
@@ -563,29 +618,40 @@ void nes_namcot175_device::write_h(offs_t offset, uint8_t data)
 void nes_namcot163_device::chr_w(offs_t offset, uint8_t data)
 {
 	int bank = offset >> 10;
+	uint8_t chr_bank = m_chr_bank[bank];
 
-	if (!(m_latch & 0x40) && m_chr_bank >= 0xe0)
+	// $E800 bit 6 disables CIRAM mapping for pattern-table banks 0-3.
+	// $E800 bit 7 disables CIRAM mapping for pattern-table banks 4-7.
+	bool disable_ciram = bank < 4 ? BIT(m_latch, 6) : BIT(m_latch, 7);
+
+	if (!disable_ciram && chr_bank >= 0xe0)
 	{
-		// CIRAM!!!
-		machine().ui().popup_time(10, "CIRAM mapped to VRAM. Please contact MAMEDevs.");
+		int ciram_page = BIT(chr_bank, 0);
 
-		if (!m_nt_writable[bank & 0x03])
+		if (!m_nt_writable[ciram_page])
 			return;
-		m_nt_access[bank & 0x03][offset & 0x3ff] = data;
+
+		m_nt_access[ciram_page][offset & 0x3ff] = data;
 	}
-	// or ROM, so no write
+
+	// Otherwise the selected memory is CHR-ROM, so writes are ignored.
 }
 
 uint8_t nes_namcot163_device::chr_r(offs_t offset)
 {
 	int bank = offset >> 10;
-	if (!(m_latch & 0x40) && m_chr_bank >= 0xe0)
+	uint8_t chr_bank = m_chr_bank[bank];
+
+	// $E800 bit 6 disables CIRAM mapping for pattern-table banks 0-3.
+	// $E800 bit 7 disables CIRAM mapping for pattern-table banks 4-7.
+	bool disable_ciram = bank < 4 ? BIT(m_latch, 6) : BIT(m_latch, 7);
+
+	if (!disable_ciram && chr_bank >= 0xe0)
 	{
-		// CIRAM!!!
-		machine().ui().popup_time(10, "CIRAM mapped to VRAM. Please contact MAMEDevs.");
-		return m_nt_access[bank & 0x03][offset & 0x3ff];
+		int ciram_page = BIT(chr_bank, 0);
+		return m_nt_access[ciram_page][offset & 0x3ff];
 	}
-	// or ROM, accessed as usual
+
 	return m_chr_access[bank][offset & 0x3ff];
 }
 
@@ -600,10 +666,16 @@ uint8_t nes_namcot163_device::read_m(offs_t offset)
 
 void nes_namcot163_device::write_m(offs_t offset, uint8_t data)
 {
-	// the pcb can separately protect each 2KB chunk of the external wram from writes
+	// $F800 bits 0-3 separately protect the four 2 KB WRAM regions.
+	// The upper nibble must be $4 before WRAM writes are enabled.
 	int bank = BIT(offset, 11, 2);
-	if (!m_battery.empty() && !BIT(m_wram_protect, bank))
+
+	if (!m_battery.empty() &&
+		(m_wram_protect & 0xf0) == 0x40 &&
+		!BIT(m_wram_protect, bank))
+	{
 		m_battery[offset & (m_battery.size() - 1)] = data;
+	}
 }
 
 void nes_namcot163_device::write_l(offs_t offset, uint8_t data)
@@ -650,34 +722,48 @@ void nes_namcot163_device::write_h(offs_t offset, uint8_t data)
 
 	switch (offset & 0x7800)
 	{
-		case 0x0000: case 0x0800:
-		case 0x1000: case 0x1800:
-		case 0x2000: case 0x2800:
-		case 0x3000: case 0x3800:
-			m_chr_bank = data;
-			chr1_x(offset >> 11, m_chr_bank, CHRROM);
+		case 0x0000:
+		case 0x0800:
+		case 0x1000:
+		case 0x1800:
+		case 0x2000:
+		case 0x2800:
+		case 0x3000:
+		case 0x3800:
+		{
+			int bank = offset >> 11;
+
+			m_chr_bank[bank] = data;
+			chr1_x(bank, data, CHRROM);
 			break;
+		}
+
 		case 0x4000:
 		case 0x4800:
 		case 0x5000:
 		case 0x5800:
 			set_mirror(BIT(offset, 11, 2), data);
 			break;
+
 		case 0x6000:
-			m_namco163snd->disable_w((data & 0x40) ? ASSERT_LINE : CLEAR_LINE);
+			m_namco163snd->disable_w(BIT(data, 6) ? ASSERT_LINE : CLEAR_LINE);
 			prg8_89(data & 0x3f);
 			break;
+
 		case 0x6800:
 			m_latch = data & 0xc0;
 			prg8_ab(data & 0x3f);
 			break;
-		case 0x7800:
-			// the lower 4 bits work *BOTH* as WRAM write protect *AND* as sound address!
-			m_wram_protect = data & 0x0f;
-			m_namco163snd->addr_w(data);
+
+		case 0x7000:
+			prg8_cd(data & 0x3f);
 			break;
-		default:
-			n340_hiwrite(offset, data);
+
+		case 0x7800:
+			// Bits 0-3 control WRAM protection and bits 0-6 select
+			// the N163 sound RAM address. Bit 7 enables auto-increment.
+			m_wram_protect = data;
+			m_namco163snd->addr_w(data);
 			break;
 	}
 }

@@ -10,7 +10,7 @@
 
 
 // ======================> nes_sunsoft_1_device
-
+class m6502_device;
 class nes_sunsoft_1_device : public nes_nrom_device
 {
 public:
@@ -106,6 +106,8 @@ public:
 	void fme7_write(offs_t offset, uint8_t data);
 	virtual void write_h(offs_t offset, uint8_t data) override { fme7_write(offset, data); }
 
+	virtual void ppu_to_mapper(int scanline, unsigned dot, int ppu_tick) override;
+
 	virtual void pcb_reset() override;
 
 protected:
@@ -119,13 +121,14 @@ protected:
 private:
 	uint16_t m_irq_count;
 	int m_irq_enable;
+	int delay_irq;
 
 	emu_timer *irq_timer;
+	required_device<m6502_device> m_maincpu6502;
 
 	uint8_t m_latch;
 	uint8_t m_wram_bank;
 };
-
 
 // ======================> nes_sunsoft_5_device
 

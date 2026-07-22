@@ -10,7 +10,7 @@
 
 
 // ======================> nes_namcot3433_device
-
+class m6502_device;
 class nes_namcot3433_device : public nes_nrom_device
 {
 public:
@@ -87,10 +87,12 @@ public:
 	uint8_t n340_loread(offs_t offset);
 	void n340_lowrite(offs_t offset, uint8_t data);
 	void n340_hiwrite(offs_t offset, uint8_t data);
+
 	virtual uint8_t read_l(offs_t offset) override { return n340_loread(offset); }
 	virtual void write_l(offs_t offset, uint8_t data) override { n340_lowrite(offset, data); }
 	virtual void write_h(offs_t offset, uint8_t data) override { n340_hiwrite(offset, data); }
 
+	virtual void ppu_to_mapper(int scanline, unsigned dot, int ppu_tick) override;
 	virtual void pcb_reset() override;
 
 protected:
@@ -104,7 +106,13 @@ protected:
 	uint16_t m_irq_count;
 	int m_irq_enable;
 
+	// Mapper-side IRQ publication delay.
+	int delay_irq;
+
 	emu_timer *irq_timer;
+
+	// Cached CPU pointer for delayed mapper IRQ queue/cancel.
+	m6502_device *m_maincpu6502;
 
 	// Namcot-163 chip contains 8K of internal ram, possibly battery backed up (not emulated yet)
 	// was it also present in 175 & 340 chips?
@@ -147,7 +155,7 @@ public:
 	virtual void write_m(offs_t offset, uint8_t data) override;
 	virtual void write_h(offs_t offset, uint8_t data) override;
 
-	// we have to overwrite these to allow CIRAM to be used for VRAM, even if it's not clear which game(s) use this
+	// We overwrite these to allow CIRAM to be mapped into the pattern tables.
 	virtual uint8_t chr_r(offs_t offset) override;
 	virtual void chr_w(offs_t offset, uint8_t data) override;
 
@@ -156,13 +164,15 @@ public:
 protected:
 	// device-level overrides
 	virtual void device_start() override;
-
 	virtual void device_add_mconfig(machine_config &config) override;
 
 private:
 	void set_mirror(uint8_t page, uint8_t data);
 
-	uint8_t m_wram_protect, m_latch, m_chr_bank;
+	uint8_t m_wram_protect;
+	uint8_t m_latch;
+	uint8_t m_chr_bank[8];
+
 	required_device<namco_163_sound_device> m_namco163snd;
 };
 

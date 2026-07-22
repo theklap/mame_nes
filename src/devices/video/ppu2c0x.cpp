@@ -22,6 +22,7 @@ Total rewrite by Matthew Sutton for Accuracy NTSC and PAL
 #include "bus/nes/mmc5.h"
 #include "bus/nes/mmc3.h"
 #include "bus/nes/mmc1.h"
+#include "bus/nes/tengen.h"
 
 #include "screen.h"
 
@@ -435,11 +436,13 @@ void ppu2c0x_device::init_startup_only_state() {
 	m_mmc5 = nullptr;
 	m_mmc3 = nullptr;
 	m_mmc1_sxrom = nullptr;
+	m_rambo1 = nullptr;
 
 	// --------------------------------------------------
 	// Mapper feature flags
 	// --------------------------------------------------
 	m_has_mmc3_a12 = false;
+	m_has_rambo1_a12 = false;
 	m_has_mmc5_ppu = false;
 	m_has_mmc1_phase = false;
 	m_has_chr_latch = false;
@@ -526,6 +529,7 @@ void ppu2c0x_device::device_start() {
 	save_item(NAME(m_prerender_line));
 	save_item(NAME(frame));
 	save_item(NAME(m_has_mmc3_a12));
+	save_item(NAME(m_has_rambo1_a12));
 	save_item(NAME(m_has_mmc5_ppu));
 	save_item(NAME(m_has_mmc1_phase));
 	save_item(NAME(m_has_chr_latch));
@@ -963,12 +967,15 @@ void ppu2c0x_device::ppu_bus_address_drive(uint16_t addr, ppu_bus_source source)
 	ppu_address_bus = addr;
 	ppu_ad_latch = addr & 0xff;
 
+	const uint64_t cpu_cycle = m_cpu->total_cycles() + (source == ppu_bus_source::CPU_ACCESS ? 1 : 0);
+
+	const uint64_t ppu_cycle = (cpu_cycle * 3) + ppu_tick_in_cpu_cycle;
+
 	if (m_has_mmc3_a12 && m_mmc3)
-	{
-		const uint64_t cpu_cycle = m_cpu->total_cycles() + (source == ppu_bus_source::CPU_ACCESS ? 1 : 0);
-		const uint64_t ppu_cycle = (cpu_cycle * 3) + ppu_tick_in_cpu_cycle;
 		m_mmc3->observe_ppu_a12(addr, ppu_cycle, ppu_tick_in_cpu_cycle, odd_frame);
-	}
+
+	if (m_has_rambo1_a12 && m_rambo1)
+		m_rambo1->observe_ppu_a12(addr, ppu_cycle, ppu_tick_in_cpu_cycle, odd_frame);
 }
 
 uint8_t ppu2c0x_device::ppu_bus_read(uint16_t addr, ppu_fetch_phase phase) {
@@ -1079,17 +1086,19 @@ void ppu2c0x_device::schedule_2007_post_access_bump() {
 	}
 }
 
-void ppu2c0x_device::set_mapper(int mapper) {
+void ppu2c0x_device::set_mapper(int mapper)
+{
 	m_mapper_number = mapper;
 
-	// Start optimistic.  resolve_mapper_ppu_devices() will only leave this true
-	// if the loaded NES slot contains a nes_txrom_device-derived PCB.
+	// Start optimistic for MMC3-derived boards. Device resolution below
+	// disables this when the loaded PCB is not derived from nes_txrom_device.
 	m_has_mmc3_a12 = true;
+
+	// RAMBO-1 mapper 64 and mapper 158 use filtered PPU A12 in scanline mode.
+	m_has_rambo1_a12 = mapper == 64 || mapper == 158;
 
 	m_has_mmc5_ppu = mapper == 5;
 
-	// Start conservative. resolve_mapper_ppu_devices() will turn this off if no
-	// SxROM-family device is actually present.
 	m_has_mmc1_phase = mapper == 1;
 
 	resolve_mapper_ppu_devices();
@@ -1123,6 +1132,25 @@ void ppu2c0x_device::resolve_mapper_ppu_devices() {
 	if (m_has_mmc3_a12 && !m_mmc3) {
 		m_has_mmc3_a12 = false;
 	}
+
+	if (m_has_rambo1_a12 && !m_rambo1)
+	{
+		device_t *const slot = machine().root_device().subdevice("nes_slot");
+
+		if (slot)
+		{
+			for (device_t &dev : slot->subdevices())
+			{
+				m_rambo1 = dynamic_cast<nes_tengen032_device *>(&dev);
+
+				if (m_rambo1)
+					break;
+			}
+		}
+	}
+
+	if (m_has_rambo1_a12 && !m_rambo1)
+		m_has_rambo1_a12 = false;
 
 	// MMC1 special SxROM-family phase feed.
 	//
@@ -3073,10 +3101,8 @@ void ppu2c0x_device::apply_delayed_2001(uint8_t val) {
 		spr_output_enabled = true;
 
 	// Clip vars follow output domain.
-	bg_left_clip = !bg_output_enabled ? 256 : ppumask_show_bg_left ? 0 :
-																	 8;
-	spr_left_clip = !spr_output_enabled ? 256 : ppumask_show_spr_left ? 0 :
-																		8;
+	bg_left_clip = !bg_output_enabled ? 256 : ppumask_show_bg_left ? 0 : 8;
+	spr_left_clip = !spr_output_enabled ? 256 : ppumask_show_spr_left ? 0 :8;
 
 	const bool new_pipe = bg_pipeline_enabled || spr_pipeline_enabled;
 

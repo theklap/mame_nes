@@ -41,6 +41,7 @@ extern bool g_nes_p1_a_pressed_edge;
 class nes_exrom_device;
 class nes_txrom_device;
 class nes_sxrom_device;
+class nes_tengen032_device;
 class m6502_device;
 
 
@@ -609,8 +610,10 @@ protected:
 	nes_exrom_device *m_mmc5 = nullptr;
 	nes_txrom_device *m_mmc3 = nullptr;
 	nes_sxrom_device *m_mmc1_sxrom = nullptr;
+	nes_tengen032_device *m_rambo1 = nullptr;
 
 	bool m_has_mmc3_a12 = false;
+	bool m_has_rambo1_a12 = false;
 	bool m_has_mmc5_ppu = false;
 	bool m_has_mmc1_phase = false;
 	bool m_has_chr_latch = false;

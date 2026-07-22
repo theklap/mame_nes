@@ -3,7 +3,12 @@
 #ifndef MAME_BUS_NES_TENGEN_H
 #define MAME_BUS_NES_TENGEN_H
 
+#pragma once
+
 #include "nxrom.h"
+
+
+class m6502_device;
 
 
 // ======================> nes_tengen032_device
@@ -16,7 +21,8 @@ public:
 
 	virtual void write_h(offs_t offset, u8 data) override;
 
-	virtual void hblank_irq(int scanline, bool vblank, bool blanked) override;
+	void observe_ppu_a12(uint16_t ppu_addr, uint64_t ppu_cycles, int ppu_tick, bool odd_frame);
+
 	virtual void pcb_reset() override;
 
 protected:
@@ -34,16 +40,25 @@ protected:
 
 private:
 	void set_prg();
-	void irq_clock(int blanked);
+	void irq_clock();
 
-	u16 m_irq_count, m_irq_count_latch;
-	u8 m_irq_mode, m_irq_reset;
-	u8 m_irq_enable, m_irq_pending;
+	u16 m_irq_count;
+	u16 m_irq_count_latch;
+
+	u8 m_irq_mode;
+	u8 m_irq_reset;
+	u8 m_irq_enable;
 
 	u8 m_mmc_prg_bank[3];
 
 	emu_timer *irq_timer;
 	attotime timer_freq;
+
+	uint64_t m_last_a12_low_cycle;
+	uint16_t m_prev_ppu_addr;
+	bool m_a12_low_seen;
+
+	m6502_device *m_maincpu6502;
 };
 
 

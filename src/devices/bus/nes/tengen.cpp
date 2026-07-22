@@ -18,7 +18,7 @@
 
 #include "emu.h"
 #include "tengen.h"
-
+#include "cpu/m6502/m6502.h"
 #include "video/ppu2c0x.h"      // this has to be included so that IRQ functions can access ppu2c0x_device::BOTTOM_VISIBLE_SCANLINE
 
 
@@ -39,7 +39,18 @@ DEFINE_DEVICE_TYPE(NES_TENGEN_800037, nes_tengen037_device, "nes_tengen037", "NE
 
 
 nes_tengen032_device::nes_tengen032_device(const machine_config &mconfig, device_type type, const char *tag, device_t *owner, u32 clock)
-	: nes_nrom_device(mconfig, type, tag, owner, clock), m_latch(0), m_irq_count(0), m_irq_count_latch(0), m_irq_mode(0), m_irq_reset(0), m_irq_enable(0), m_irq_pending(0), irq_timer(nullptr)
+	: nes_nrom_device(mconfig, type, tag, owner, clock)
+	, m_latch(0)
+	, m_irq_count(0)
+	, m_irq_count_latch(0)
+	, m_irq_mode(0)
+	, m_irq_reset(0)
+	, m_irq_enable(0)
+	, irq_timer(nullptr)
+	, m_last_a12_low_cycle(0)
+	, m_prev_ppu_addr(0)
+	, m_a12_low_seen(false)
+	, m_maincpu6502(nullptr)
 {
 }
 
@@ -59,9 +70,12 @@ nes_tengen037_device::nes_tengen037_device(const machine_config &mconfig, const 
 void nes_tengen032_device::device_start()
 {
 	common_start();
+
+	m_maincpu6502 = machine().root_device().subdevice<m6502_device>("maincpu");
+
 	irq_timer = timer_alloc(FUNC(nes_tengen032_device::irq_timer_tick), this);
 	timer_freq = clocks_to_attotime(4);
-	irq_timer->adjust(attotime::zero, 0, timer_freq);
+	irq_timer->adjust(attotime::never);
 
 	save_item(NAME(m_mmc_prg_bank));
 	save_item(NAME(m_mmc_vrom_bank));
@@ -70,9 +84,12 @@ void nes_tengen032_device::device_start()
 	save_item(NAME(m_irq_mode));
 	save_item(NAME(m_irq_reset));
 	save_item(NAME(m_irq_enable));
-	save_item(NAME(m_irq_pending));
 	save_item(NAME(m_irq_count));
 	save_item(NAME(m_irq_count_latch));
+
+	save_item(NAME(m_last_a12_low_cycle));
+	save_item(NAME(m_prev_ppu_addr));
+	save_item(NAME(m_a12_low_seen));
 }
 
 void nes_tengen032_device::pcb_reset()
@@ -85,12 +102,23 @@ void nes_tengen032_device::pcb_reset()
 	std::fill(std::begin(m_mmc_vrom_bank), std::end(m_mmc_vrom_bank), 0x00);
 
 	m_latch = 0;
+
 	m_irq_mode = 0;
 	m_irq_reset = 0;
 	m_irq_enable = 0;
-	m_irq_pending = 0;
 	m_irq_count = 0;
 	m_irq_count_latch = 0xff;
+
+	m_last_a12_low_cycle = 0;
+	m_prev_ppu_addr = 0;
+	m_a12_low_seen = false;
+
+	irq_timer->adjust(attotime::never);
+
+	set_irq_line(CLEAR_LINE);
+	m_maincpu6502->cancel_delayed_mapper_irq();
+
+	machine().root_device().subdevice<ppu2c0x_device>("ppu")->set_mapper(type() == NES_TENGEN_800037 ? 158 : 64);
 }
 
 
@@ -120,26 +148,62 @@ void nes_tengen032_device::pcb_reset()
 
  -------------------------------------------------*/
 
-inline void nes_tengen032_device::irq_clock(int blanked)
+inline void nes_tengen032_device::irq_clock()
 {
-	// From NESdev wiki: Regardless of the mode used to clock the counter, every time the counter is clocked,
-	// the following actions occur:
-	// - If Reset reg ($C001) was written to after previous clock, reload IRQ counter with IRQ Reload + 1
-	// - Otherwise, if IRQ Counter is 0, reload IRQ counter with IRQ Reload value
-	// - Otherwise, first decrement IRQ counter by 1, then if IRQ counter is now 0 and IRQs are enabled,
-	//   trigger IRQ
 	if (m_irq_reset)
 	{
 		m_irq_reset = 0;
-		m_irq_count = m_irq_count_latch | (m_irq_count_latch ? 1 : 0);
-	}
-	else if (!m_irq_count)
-		m_irq_count = m_irq_count_latch;
-	else
-		m_irq_count--;
 
-	if (m_irq_enable && !blanked && !m_irq_count)
-		m_irq_pending = 1;
+		// A nonzero reload value is forced odd on the first clock after $C001.
+		m_irq_count = m_irq_count_latch ?
+			(m_irq_count_latch | 0x01) :
+			0x00;
+	}
+	else if (m_irq_count == 0)
+	{
+		m_irq_count = m_irq_count_latch;
+	}
+	else
+	{
+		--m_irq_count;
+	}
+
+	if (m_irq_enable && m_irq_count == 0)
+		m_maincpu6502->queue_delayed_mapper_irq(4);
+}
+
+void nes_tengen032_device::observe_ppu_a12(uint16_t ppu_addr, uint64_t ppu_cycles, int ppu_tick, bool odd_frame)
+{
+	ppu_addr &= 0x3fff;
+
+	const bool prev_a12 = BIT(m_prev_ppu_addr, 12);
+	const bool a12 = BIT(ppu_addr, 12);
+
+	if (!a12)
+	{
+		if (prev_a12)
+		{
+			m_last_a12_low_cycle = ppu_cycles;
+			m_a12_low_seen = true;
+		}
+		else if (!m_a12_low_seen)
+		{
+			m_last_a12_low_cycle = ppu_cycles;
+			m_a12_low_seen = true;
+		}
+	}
+
+	if (!prev_a12 && a12)
+	{
+		const uint64_t low_time = ppu_cycles - m_last_a12_low_cycle;
+
+		if (!m_irq_mode && m_a12_low_seen && low_time > 9)
+			irq_clock();
+
+		m_a12_low_seen = false;
+	}
+
+	m_prev_ppu_addr = ppu_addr;
 }
 
 // we use the HBLANK IRQ latch from PPU for the scanline based IRQ mode
@@ -147,26 +211,8 @@ inline void nes_tengen032_device::irq_clock(int blanked)
 
 TIMER_CALLBACK_MEMBER(nes_tengen032_device::irq_timer_tick)
 {
-	if (m_irq_pending)
-	{
-		set_irq_line(ASSERT_LINE);
-		m_irq_pending = 0;
-	}
-
 	if (m_irq_mode)
-		irq_clock(0);
-}
-
-
-void nes_tengen032_device::hblank_irq(int scanline, bool vblank, bool blanked)
-{
-	if (!m_irq_mode) // we are in scanline mode!
-	{
-		if (scanline <= ppu2c0x_device::BOTTOM_VISIBLE_SCANLINE)
-		{
-			irq_clock(blanked);
-		}
-	}
+		irq_clock();
 }
 
 void nes_tengen032_device::set_prg()
@@ -250,24 +296,35 @@ void nes_tengen032_device::write_h(offs_t offset, u8 data)
 			set_nt_mirroring(BIT(data, 0) ? PPU_MIRROR_HORZ : PPU_MIRROR_VERT);
 			break;
 
-		case 0x4000:
+		case 0x4000: // $C000 - IRQ reload value
 			m_irq_count_latch = data;
 			break;
 
-		case 0x4001: // $c001 - IRQ scanline latch
-			m_irq_mode = data & 0x01;
-			if (m_irq_mode)
-				irq_timer->adjust(attotime::zero, 0, timer_freq);
+		case 0x4001: // $C001 - mode select and counter reset
+			m_irq_mode = BIT(data, 0);
 			m_irq_reset = 1;
+
+			if (m_irq_mode)
+			{
+				// Reset the divide-by-four prescaler. The first counter clock occurs
+				// four CPU cycles after this write.
+				irq_timer->adjust(timer_freq, 0, timer_freq);
+			}
+			else
+			{
+				irq_timer->adjust(attotime::never);
+			}
+
 			break;
 
-		case 0x6000:
+		case 0x6000: // $E000 - acknowledge and disable
 			m_irq_enable = 0;
-			m_irq_pending = 0;
+
 			set_irq_line(CLEAR_LINE);
+			m_maincpu6502->cancel_delayed_mapper_irq();
 			break;
 
-		case 0x6001:
+		case 0x6001: // $E001 - enable
 			m_irq_enable = 1;
 			break;
 
