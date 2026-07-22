@@ -65,6 +65,7 @@ inline s8 namco_163_sound_device::get_sample(u16 addr)
 
 void namco_163_sound_device::disable_w(int state)
 {
+	m_stream->update();
 	m_disable = state;
 }
 
@@ -121,7 +122,9 @@ void namco_163_sound_device::disable_w(int state)
 
 void namco_163_sound_device::addr_w(u8 data)
 {
-	m_inc = data & 0x80;
+	m_stream->update();
+
+	m_inc = BIT(data, 7);
 	m_addr = data & 0x7f;
 }
 
@@ -137,7 +140,10 @@ void namco_163_sound_device::data_w(u8 data)
 
 u8 namco_163_sound_device::data_r()
 {
+	m_stream->update();
+
 	const u8 val = m_ram[m_addr];
+
 	if (!machine().side_effects_disabled() && m_inc)
 		m_addr = (m_addr + 1) & 0x7f;
 
@@ -153,27 +159,38 @@ void namco_163_sound_device::sound_stream_update(sound_stream &stream, std::vect
 		return;
 	}
 
-	// Slightly noisy but closer to real hardware behavior
 	for (int s = 0; s < outputs[0].samples(); s++)
 	{
-		u32 phase = (m_ram[m_reg_addr + 5] << 16) | (m_ram[m_reg_addr + 3] << 8) | m_ram[m_reg_addr + 1];
-		const u32 freq = ((m_ram[m_reg_addr + 4] & 0x3) << 16) | (m_ram[m_reg_addr + 2] << 8) | m_ram[m_reg_addr + 0];
+		const u8 first_channel = 0x78 - ((m_ram[0x7f] & 0x70) >> 1);
+
+		if (m_reg_addr < first_channel || m_reg_addr >= 0x80)
+			m_reg_addr = first_channel;
+
+		u32 phase = (m_ram[m_reg_addr + 5] << 16) |
+			(m_ram[m_reg_addr + 3] << 8) |
+			m_ram[m_reg_addr + 1];
+
+		const u32 freq = ((m_ram[m_reg_addr + 4] & 0x03) << 16) |
+			(m_ram[m_reg_addr + 2] << 8) |
+			m_ram[m_reg_addr];
+
 		const u16 length = 256 - (m_ram[m_reg_addr + 4] & 0xfc);
 		const u16 offset = m_ram[m_reg_addr + 6];
-		const u8 vol = m_ram[m_reg_addr + 7] & 0xf;
+		const u8 vol = m_ram[m_reg_addr + 7] & 0x0f;
 
 		phase = (phase + freq) % (length << 16);
-		s32 output = get_sample((phase >> 16) + offset) * vol;
 
-		m_ram[m_reg_addr + 1] = phase & 0xff;
+		const s32 output = get_sample((phase >> 16) + offset) * vol;
+
+		m_ram[m_reg_addr + 1] = phase;
 		m_ram[m_reg_addr + 3] = phase >> 8;
 		m_ram[m_reg_addr + 5] = phase >> 16;
 
 		m_reg_addr += 8;
+
 		if (m_reg_addr >= 0x80)
-		{
-			m_reg_addr = 0x78 - ((m_ram[0x7f] & 0x70) >> 1);
-		}
+			m_reg_addr = first_channel;
+
 		outputs[0].put_int(s, output, 128);
 	}
 }

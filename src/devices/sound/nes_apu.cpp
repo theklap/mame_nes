@@ -1073,7 +1073,7 @@ void nesapu_device::tick() {
 	// Clock the PPU from the APU/CPU tick stream.
 	//
 	// Boot edge case:
-	// The original guard used (cpu_cycle + 1 > 0) to avoid ticking the PPU
+	// Avoid ticking the PPU
 	// before the CPU/APU cycle relationship is valid at startup. Keep that
 	// behavior as a one-time latch instead of rechecking cpu_cycle math forever.
 	if (!run_ppu)
@@ -1083,23 +1083,14 @@ void nesapu_device::tick() {
 	}
 	else
 	{
-		if(!m_is_pal) {
-			m_ppu_dev->tick(1);
-			m_ppu_dev->tick(2);
-			m_ppu_dev->tick(3);
-		} else {
-			if(pal_cpu_ppu == 4) {
-				m_ppu_dev->tick(1);
-				m_ppu_dev->tick(2);
-				m_ppu_dev->tick(3);
-				m_ppu_dev->tick(4);
-				pal_cpu_ppu = 0;
-			} else {
-				m_ppu_dev->tick(1);
-				m_ppu_dev->tick(2);
-				m_ppu_dev->tick(3);
-				pal_cpu_ppu++;
-			}
+		m_ppu_dev->tick(1);
+		m_ppu_dev->tick(2);
+		m_ppu_dev->tick(3);
+
+		if (m_is_pal && ++pal_cpu_ppu == 5)
+		{
+			m_ppu_dev->tick(4);
+			pal_cpu_ppu = 0;
 		}
 	}
 }

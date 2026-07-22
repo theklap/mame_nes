@@ -58,9 +58,10 @@ protected:
 		std::vector<write_stream_view> &outputs) override;
 
 private:
+
 	/* GLOBAL CONSTANTS */
-	static constexpr unsigned  SYNCS_MAX1     = 0x20;
-	static constexpr unsigned  SYNCS_MAX2     = 0x80;
+	//static constexpr unsigned  SYNCS_MAX1     = 0x20;
+	//static constexpr unsigned  SYNCS_MAX2     = 0x80;
 	static constexpr u32       NTSC_APU_CLOCK = 21477272 / 12;
 	static constexpr u32       PAL_APU_CLOCK  = 26601712 / 16;
 	//============================================================
@@ -318,7 +319,7 @@ private:
 	s32  dmc_4015_load_defer_delay;
 
 	//bool dmc_4011_write_pending;
-	u8   dmc_4011_old_counter;
+	//u8   dmc_4011_old_counter;
 
 	//============================================================
 	//  Debug/stat counters
