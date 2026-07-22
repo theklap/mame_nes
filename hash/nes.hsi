@@ -7,6 +7,10 @@ license:CC0-1.0
 	     for the exclusive use of MAME.  This source is known to contain bad headers,
 	     though some have been fixed here.  Keep this notice intact if editing this file -->
 
+	<hash crc32="75679c5f" sha1="e925a172c29dd46ba385d526f3c317db039fa2bf" name="MMC1_A12 - mmc1_a12.nes">
+		<extrainfo>1 16 8 0</extrainfo>
+	
+	</hash>
 	<hash crc32="ba58ed29" sha1="56fe858d1035dce4b68520f457a0858bae7bb16d" name="'89 Dennou Kyuusei Uranai (J)">
 		<status>GoodNES Verified Image</status>
 		<extrainfo>1 0 16 0</extrainfo>
