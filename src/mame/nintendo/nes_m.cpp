@@ -148,6 +148,10 @@ static std::vector<open_bus_range> compute_open_bus_ranges(
 				range_6000_is_special = true;
 				ranges.push_back({ 0x7000, 0x7fff });
 				break;
+			case SUNSOFT_FME7:
+			case SUNSOFT_5:
+				range_6000_is_special = true;
+				break;
 
 			default:
 				break;
@@ -172,10 +176,15 @@ void nes_state::machine_start()
 	// Fill main RAM with an arbitrary pattern (alternating 0x00/0xff) for software that depends on its contents at boot up (tsk tsk!)
 	// The fill value is a compromise since certain games malfunction with zero-filled memory, others with one-filled memory
 	// Examples: Minna no Taabou won't boot with all 0x00, Sachen's Dancing Block won't boot with all 0xff, Terminator 2 skips its copyright screen with all 0x00
-	for (int i = 0; i < 0x800; i += 2)
+	/*for (int i = 0; i < 0x800; i += 2)
 	{
 		m_mainram[i] = 0x00;
 		m_mainram[i + 1] = 0xff;
+	}*/
+	// Fill main RAM with semi-random power-up contents for software that uses
+	// uninitialized RAM as an RNG seed or otherwise depends on power-up state.
+	for (int i = 0; i < 0x800; i++) {
+		m_mainram[i] = machine().rand() & 0xff;
 	}
 
 	// CIRAM (Character Internal RAM)

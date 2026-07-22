@@ -87,7 +87,8 @@ public:
 	void cancel_delayed_apu_irq();								//used in APU
 	bool get_is_pal() { return is_pal; }						//used in APU
 	void set_is_pal(bool x) { is_pal = x; }						//used in APU
-	
+	int64_t get_previous_cpu_write_cycle() { return m_previous_cpu_write_cycle; }	//mmc1.cpp
+	int64_t	get_last_cpu_write_cycle() { return m_last_cpu_write_cycle; } 	//mmc1.cpp
 	//MMC5 Mapper
 	void set_m_exram_control(int x);							//used in mmc5.cpp
 	void set_is_mmc5 (bool x);									//used in mmc5.cpp
@@ -225,6 +226,8 @@ protected:
 	bool nmi_overlap_brk_irq;			//NMI stuff
 	bool m_real_brk;					//NMI stuff
 	uint8_t last_cpu_write_latch;		//mmc3_clone.cpp
+	int64_t m_previous_cpu_write_cycle; //mmc1.cpp
+	int64_t m_last_cpu_write_cycle;		//mmc1.cpp
 	bool mapper_irq;
 	int mapper_irq_delay;
 	int64_t mapper_irq_cpu_cycle;

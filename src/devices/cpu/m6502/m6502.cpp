@@ -216,6 +216,8 @@ void m6502_device::init()
 	mapper_irq_delay = 0;
 	mapper_irq_cpu_cycle = 0;
 	last_cpu_write_latch = 0x00;
+	m_last_cpu_write_cycle = 0;
+	m_previous_cpu_write_cycle = 0;
 }
 
 void m6502_device::device_reset()
@@ -276,6 +278,8 @@ void m6502_device::device_reset()
 	mapper_irq_delay = 0;
 	mapper_irq_cpu_cycle = 0;
 	last_cpu_write_latch = 0x00;
+	m_last_cpu_write_cycle = 0;
+	m_previous_cpu_write_cycle = 0;
 }
 
 uint32_t m6502_device::execute_min_cycles() const noexcept
@@ -576,7 +580,6 @@ void m6502_device::handle_dma_rdy_stall()
 
 void m6502_device::execute_run()
 {	
-	
 	apu_clk1_is_high = (((total_cycles()) & 0x01) == 0);
 	prev_next_read = next_read;
 	
@@ -1012,6 +1015,7 @@ uint8_t m6502_device::read(uint16_t adr)
 	// --- OPEN BUS CHECK ---
 	if (is_open_bus_address(adr))
 	{
+		logerror("OPENBUS READ addr=%04X value=%02X\n", adr, cpu_external_bus);
 		cpu_data_bus = cpu_external_bus;
 		return cpu_data_bus;
 	}
@@ -1071,6 +1075,7 @@ uint8_t m6502_device::read_9(uint16_t adr)
 
 	if (is_open_bus_address(adr))
 	{
+		logerror("OPENBUS READ addr=%04X value=%02X\n", adr, cpu_external_bus);
 		cpu_data_bus = cpu_external_bus;
 		return cpu_data_bus;
 	}
@@ -1110,7 +1115,8 @@ void m6502_device::write(uint16_t adr, uint8_t val) {
 	// the mapper's own address range.  Keep this CPU-side so cart code can
 	// query the true last CPU write without coupling the CPU to a mapper.
 	last_cpu_write_latch = val;
-
+	m_previous_cpu_write_cycle = m_last_cpu_write_cycle;
+	m_last_cpu_write_cycle = total_cycles();
 	if (adr == 0x4016 || adr == 0x4017) {
 		bool const suppress = rmw_1 && get_apu_clk1_is_high() && !(val & 1);
 
@@ -1152,7 +1158,8 @@ void m6502_device::write_1(uint16_t adr, uint8_t val) {
 	// the mapper's own address range.  Keep this CPU-side so cart code can
 	// query the true last CPU write without coupling the CPU to a mapper.
 	last_cpu_write_latch = val;
-
+	m_previous_cpu_write_cycle = m_last_cpu_write_cycle;
+	m_last_cpu_write_cycle = total_cycles();
 	if (adr == 0x4016 || adr == 0x4017) {
 		if (adr == 0x4016)
 			prev_4016_write = total_cycles();
@@ -1183,7 +1190,8 @@ void m6502_device::write_9(uint16_t adr, uint8_t val) {
 	// the mapper's own address range.  Keep this CPU-side so cart code can
 	// query the true last CPU write without coupling the CPU to a mapper.
 	last_cpu_write_latch = val;
-
+	m_previous_cpu_write_cycle = m_last_cpu_write_cycle;
+	m_last_cpu_write_cycle = total_cycles();
 	if (adr == 0x4016) {
 		if ((total_cycles() - prev_4016_write == 1) && get_apu_clk1_is_high() && !(val & 1)) {
 			//osd_printf_info("0x4016 Detected: Controllers should not be strobed when the CPU transitions from a \"put\" cycle to a \"get\" cycle.\n");
@@ -1239,6 +1247,7 @@ uint8_t m6502_device::read_arg(uint16_t adr)
 
 	if (is_open_bus_address(adr))
 	{
+		logerror("OPENBUS READ addr=%04X value=%02X\n", adr, cpu_external_bus);
 		cpu_data_bus = cpu_external_bus;
 		return cpu_data_bus;
 	}
@@ -1298,6 +1307,7 @@ uint8_t m6502_device::read_pc()
 
 	if (is_open_bus_address(adr))
 	{
+		logerror("OPENBUS READ addr=%04X value=%02X\n", adr, cpu_external_bus);
 		cpu_data_bus = cpu_external_bus;
 		return cpu_data_bus;
 	}
@@ -1355,6 +1365,7 @@ uint8_t m6502_device::read_sync(uint16_t adr)
 
 	if (is_open_bus_address(adr))
 	{
+		logerror("OPENBUS READ addr=%04X value=%02X\n", adr, cpu_external_bus);
 		cpu_data_bus = cpu_external_bus;
 		return cpu_data_bus;
 	}
@@ -1543,7 +1554,7 @@ bool m6502_device::is_open_bus_address(uint16_t adr) const
 		uint16_t end   = r & 0xFFFF;
 
 		if (adr >= start && adr <= end) {
-			logerror("open-bus read @ %04x\n", adr);
+			//logerror("open-bus read @ %04x\n", adr);
 			return true;
 		}
 	}
