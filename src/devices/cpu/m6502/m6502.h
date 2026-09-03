@@ -12,9 +12,11 @@
 #define MAME_CPU_M6502_M6502_H
 
 #pragma once
-class nes_exrom_device;
+//class nes_exrom_device;
 class m6502_device : public cpu_device {
 public:
+typedef device_delegate<void ()> mmc5_reset_scanline_irq_delegate;
+typedef device_delegate<void (uint8_t data)> mmc5_register_write_delegate;
 	enum {
 		IRQ_LINE = INPUT_LINE_IRQ0,
 		APU_IRQ_LINE = INPUT_LINE_IRQ1,
@@ -54,7 +56,10 @@ public:
 	auto sync_cb() { return sync_w.bind(); }
 
 	devcb_write_line sync_w;
-
+	mmc5_reset_scanline_irq_delegate m_mmc5_reset_scanline_irq;
+	mmc5_register_write_delegate m_mmc5_ppuctrl_write;
+	mmc5_register_write_delegate m_mmc5_ppumask_write;
+	
 	//Added Functions
 	bool get_apu_clk1_is_high(); 								//used in m6502.cpp
 	bool get_cpu_is_reading(); 									//used in APU
@@ -91,7 +96,24 @@ public:
 	int64_t	get_last_cpu_write_cycle() { return m_last_cpu_write_cycle; } 	//mmc1.cpp
 	//MMC5 Mapper
 	void set_m_exram_control(int x);							//used in mmc5.cpp
-	void set_is_mmc5 (bool x);									//used in mmc5.cpp
+	//void set_is_mmc5 (bool x);									//used in mmc5.cpp
+	template <typename... T>
+	void set_mmc5_reset_scanline_irq(T &&... args) {
+		m_mmc5_reset_scanline_irq.set(std::forward<T>(args)...);
+		m_mmc5_reset_scanline_irq.resolve();
+	}
+
+	template <typename... T>
+	void set_mmc5_ppuctrl_write(T &&... args) {
+		m_mmc5_ppuctrl_write.set(std::forward<T>(args)...);
+		m_mmc5_ppuctrl_write.resolve();
+	}
+
+	template <typename... T>
+	void set_mmc5_ppumask_write(T &&... args) {
+		m_mmc5_ppumask_write.set(std::forward<T>(args)...);
+		m_mmc5_ppumask_write.resolve();
+	}
 	
 	//MMC3 Clone Mappers
 	uint8_t get_last_cpu_write_latch() const { return last_cpu_write_latch; }
@@ -161,12 +183,12 @@ protected:
 	// device_disasm_interface overrides
 	virtual std::unique_ptr<util::disasm_interface> create_disassembler() override;
 	
-	void handle_mmc5_vector_read_side_effect();
-	bool handle_repeated_controller_read(uint16_t adr, uint8_t &result);
-	void cache_controller_read_value(uint16_t adr, uint8_t value);
-	void handle_mmc5_ppu_register_write_side_effect(uint16_t adr, uint8_t val);
-	bool handle_controller_write_suppression(uint16_t adr, uint8_t val);
-	bool handle_controller_write_9_suppression(uint16_t adr, uint8_t val);
+	//void handle_mmc5_vector_read_side_effect();
+	//bool handle_repeated_controller_read(uint16_t adr, uint8_t &result);
+	//void cache_controller_read_value(uint16_t adr, uint8_t value);
+	//void handle_mmc5_ppu_register_write_side_effect(uint16_t adr, uint8_t val);
+	//bool handle_controller_write_suppression(uint16_t adr, uint8_t val);
+	//bool handle_controller_write_9_suppression(uint16_t adr, uint8_t val);
 
 	address_space_config program_config, sprogram_config;
 	
@@ -221,7 +243,6 @@ protected:
 	uint16_t 	prevReadAddress;		//used in m6502.h
 	int 		m_exram_control;		//used in m6502.h
 	bool		is_mmc5;				//used in m6502.h
-	nes_exrom_device *m_mmc5;			//MMC5 mapper
 	int64_t nmi_cpu_cycle;				//NMI stuff
 	bool nmi_overlap_brk_irq;			//NMI stuff
 	bool m_real_brk;					//NMI stuff

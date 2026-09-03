@@ -7,6 +7,8 @@
 
 #include "nxrom.h"
 
+class m6502_device;
+
 
 // ======================> nes_lrog017_device
 
@@ -99,8 +101,10 @@ protected:
 private:
 	u16 m_irq_count, m_irq_count_latch;
 	u8 m_irq_enable;
+	u8 m_irq_delay;
 
 	emu_timer *irq_timer;
+	m6502_device *m_maincpu6502;
 };
 
 

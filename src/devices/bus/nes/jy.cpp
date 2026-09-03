@@ -2,26 +2,31 @@
 // copyright-holders:Fabio Priuli
 /***********************************************************************************************************
 
+ NES/Famicom cartridge emulation for J.Y. Company ASIC boards
 
- NES/Famicom cartridge emulation for JY Company
+ Supported iNES mappers:
+   35  - Type C with 8KB WRAM
+   90  - Type A
+   209 - Type C
+   211 - Type B
 
+ The programmable IRQ counter supports the following clock sources:
+   - CPU M2 cycles
+   - unfiltered PPU A12 rising edges
+   - PPU memory reads
+   - CPU writes (not implemented; no known software requires this source)
 
- Here we emulate multiple PCBs by JY Company with weird IRQ mechanisms [mappers 90, 209, 211]
-
- TODO: long list...
- - add dipswitches
- - revamp IRQ system
-   * scanline/hblank irq should fire 8 times per line (currently not possible)
-   * implement CPU write IRQ (used by any games?)
-   * possibly implementing 'funky' IRQ mode (unused?)
+To-Do:
+-CPU-write IRQ source mode 3 remains unimplemented.
+-$C007 behavior remains unknown.
+-The multiplier currently returns the result immediately; real hardware takes eight M2 cycles.
+-Your jumper reading covers $5000/$5400, but not the alternate $5C00 wiring.
 
  ***********************************************************************************************************/
 
 
 #include "emu.h"
 #include "jy.h"
-
-#include "video/ppu2c0x.h"      // this has to be included so that IRQ functions can access ppu2c0x_device::BOTTOM_VISIBLE_SCANLINE
 
 #ifdef NES_PCB_DEBUG
 #define VERBOSE (LOG_GENERAL)
@@ -34,20 +39,48 @@
 //-------------------------------------------------
 //  constructor
 //-------------------------------------------------
+static INPUT_PORTS_START(nes_jy)
+	PORT_START("DIP")
+	PORT_DIPNAME(0x40, 0x00, "J.Y. DIP Switch 1")
+	PORT_DIPSETTING(0x00, DEF_STR(Off))
+	PORT_DIPSETTING(0x40, DEF_STR(On))
+	PORT_DIPNAME(0x80, 0x00, "J.Y. DIP Switch 2")
+	PORT_DIPSETTING(0x00, DEF_STR(Off))
+	PORT_DIPSETTING(0x80, DEF_STR(On))
+INPUT_PORTS_END
+
+ioport_constructor nes_jy_typea_device::device_input_ports() const
+{
+	return INPUT_PORTS_NAME(nes_jy);
+}
 
 DEFINE_DEVICE_TYPE(NES_JY_TYPEA, nes_jy_typea_device, "nes_jya", "NES Cart JY Company Type A PCB")
 DEFINE_DEVICE_TYPE(NES_JY_TYPEB, nes_jy_typeb_device, "nes_jyb", "NES Cart JY Company Type B PCB")
 DEFINE_DEVICE_TYPE(NES_JY_TYPEC, nes_jy_typec_device, "nes_jyc", "NES Cart JY Company Type C PCB")
 
 
-nes_jy_typea_device::nes_jy_typea_device(const machine_config &mconfig, device_type type, const char *tag, device_t *owner, uint32_t clock)
-	: nes_nrom_device(mconfig, type, tag, owner, clock), m_latch(0), m_extra_chr_bank(0), m_extra_chr_mask(0), m_bank_6000(0),
-	m_irq_mode(0), m_irq_count(0), m_irq_prescale(0), m_irq_prescale_mask(0), m_irq_flip(0), m_irq_enable(0), m_irq_up(0), m_irq_down(0), irq_timer(nullptr)
+nes_jy_typea_device::nes_jy_typea_device(const machine_config &mconfig, device_type type, const char *tag, device_t *owner, uint32_t clock) :
+	nes_nrom_device(mconfig, type, tag, owner, clock),
+	m_accumulator(0),
+	m_test(0),
+	m_bank_6000(0),
+	m_irq_mode(0),
+	m_irq_count(0),
+	m_irq_prescale(0),
+	m_irq_prescale_mask(0xff),
+	m_irq_flip(0),
+	m_irq_enable(0),
+	m_irq_up(0),
+	m_irq_down(0),
+	m_irq_last_a12(false),
+	m_irq_delay(0),
+	irq_timer(nullptr),
+	m_dips(*this, "DIP")
 {
 }
 
-nes_jy_typea_device::nes_jy_typea_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock)
-	: nes_nrom_device(mconfig, NES_JY_TYPEA, tag, owner, clock)
+nes_jy_typea_device::nes_jy_typea_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock) :
+	nes_jy_typea_device(mconfig, NES_JY_TYPEA, tag, owner, clock)
 {
 }
 
@@ -66,9 +99,6 @@ nes_jy_typec_device::nes_jy_typec_device(const machine_config &mconfig, const ch
 {
 }
 
-
-
-
 void nes_jy_typea_device::device_start()
 {
 	common_start();
@@ -77,7 +107,8 @@ void nes_jy_typea_device::device_start()
 	timer_freq = clocks_to_attotime(1);
 
 	save_item(NAME(m_mul));
-	save_item(NAME(m_latch));
+	save_item(NAME(m_accumulator));
+	save_item(NAME(m_test));
 	save_item(NAME(m_mmc_prg_bank));
 	save_item(NAME(m_mmc_nt_bank));
 	save_item(NAME(m_mmc_vrom_bank));
@@ -93,6 +124,8 @@ void nes_jy_typea_device::device_start()
 	save_item(NAME(m_irq_enable));
 	save_item(NAME(m_irq_up));
 	save_item(NAME(m_irq_down));
+	save_item(NAME(m_irq_last_a12));
+	save_item(NAME(m_irq_delay));
 }
 
 void nes_jy_typea_device::pcb_reset()
@@ -100,16 +133,16 @@ void nes_jy_typea_device::pcb_reset()
 	prg32(0);
 	chr8(0, m_chr_source);
 
-	// 0x5000-0x5fff
 	m_mul[0] = 0;
 	m_mul[1] = 0;
-	m_latch = 0;
+	m_accumulator = 0;
+	m_test = 0;
 
-	// 0x8000-0xffff
 	memset(m_mmc_prg_bank, 0xff, sizeof(m_mmc_prg_bank));
 	memset(m_mmc_nt_bank, 0, sizeof(m_mmc_nt_bank));
 	memset(m_mmc_vrom_bank, 0xffff, sizeof(m_mmc_vrom_bank));
 	memset(m_reg, 0, sizeof(m_reg));
+
 	m_chr_latch[0] = 0;
 	m_chr_latch[1] = 4;
 	m_bank_6000 = 0;
@@ -126,6 +159,11 @@ void nes_jy_typea_device::pcb_reset()
 	m_irq_enable = 0;
 	m_irq_up = 0;
 	m_irq_down = 0;
+	m_irq_last_a12 = false;
+	m_irq_delay = 0;
+
+	irq_timer->adjust(attotime::never);
+	set_irq_line(CLEAR_LINE);
 }
 
 
@@ -138,6 +176,9 @@ void nes_jy_typea_device::pcb_reset()
  JY Company Type A board emulation
 
  iNES: mapper 90
+
+ This board uses standard CIRAM nametable mirroring
+ selected by the J.Y. ASIC mirroring register.
 
  -------------------------------------------------*/
 
@@ -158,69 +199,68 @@ uint8_t nes_jy_typea_device::chr_r(offs_t offset)
 
 void nes_jy_typea_device::irq_clock(bool blanked, int mode)
 {
-	bool clock = false, fire = false;
-
 	if (m_irq_mode != mode)
 		return;
 
-	// no counter changes if both Up/Down are set or clear
-	if ((m_irq_down && m_irq_up) || (!m_irq_down && !m_irq_up))
+	if ((!m_irq_down && !m_irq_up) || (m_irq_down && m_irq_up))
 		return;
 
-	// update prescaler
-	if (m_irq_down)
-	{
-		if ((m_irq_prescale & m_irq_prescale_mask) == 0)
-		{
+	bool clock = false;
+	bool fire = false;
+
+	if (m_irq_down) {
+		if ((m_irq_prescale & m_irq_prescale_mask) == 0) {
 			clock = true;
-			m_irq_prescale = (m_irq_prescale_mask == 7) ? ((m_irq_prescale & 0xf8) | 7) : 0xff;
+
+			if (m_irq_prescale_mask == 0x07)
+				m_irq_prescale = (m_irq_prescale & 0xf8) | 0x07;
+			else
+				m_irq_prescale = 0xff;
+		} else if (m_irq_prescale_mask == 0x07) {
+			m_irq_prescale = (m_irq_prescale & 0xf8) | ((m_irq_prescale - 1) & 0x07);
+		} else {
+			m_irq_prescale--;
 		}
-		else
-			m_irq_prescale = (m_irq_prescale_mask == 7) ? ((m_irq_prescale & 0xf8) | ((m_irq_prescale - 1) & m_irq_prescale_mask)) : (m_irq_prescale - 1);
 	}
 
-	if (m_irq_up)
-	{
-		if ((m_irq_prescale & m_irq_prescale_mask) == m_irq_prescale_mask)
-		{
+	if (m_irq_up) {
+		if ((m_irq_prescale & m_irq_prescale_mask) == m_irq_prescale_mask) {
 			clock = true;
-			m_irq_prescale = (m_irq_prescale_mask == 7) ? (m_irq_prescale & 0xf8) : 0;
+
+			if (m_irq_prescale_mask == 0x07)
+				m_irq_prescale &= 0xf8;
+			else
+				m_irq_prescale = 0;
+		} else if (m_irq_prescale_mask == 0x07) {
+			m_irq_prescale = (m_irq_prescale & 0xf8) | ((m_irq_prescale + 1) & 0x07);
+		} else {
+			m_irq_prescale++;
 		}
-		else
-			m_irq_prescale = (m_irq_prescale_mask == 7) ? ((m_irq_prescale & 0xf8) | ((m_irq_prescale + 1) & m_irq_prescale_mask)) : (m_irq_prescale + 1);
 	}
 
-	// if prescaler wraps, update count
-	if (clock)
-	{
-		if (m_irq_down)
-		{
-			if (m_irq_count == 0)
-			{
-				fire = true;
-				m_irq_count = 0xff;
-			}
-			else
-				m_irq_count--;
+	if (!clock)
+		return;
+
+	if (m_irq_down) {
+		if (m_irq_count == 0) {
+			fire = true;
+			m_irq_count = 0xff;
+		} else {
+			m_irq_count--;
 		}
-
-		if (m_irq_up)
-		{
-			if (m_irq_count == 0xff)
-			{
-				fire = true;
-				m_irq_count = 0;
-			}
-			else
-				m_irq_count++;
-		}
-
-
-		// if count wraps, check if IRQ is enabled
-		if (fire && m_irq_enable && !blanked)
-			set_irq_line(ASSERT_LINE);
-
 	}
+
+	if (m_irq_up) {
+		if (m_irq_count == 0xff) {
+			fire = true;
+			m_irq_count = 0;
+		} else {
+			m_irq_count++;
+		}
+	}
+
+	if (fire && m_irq_enable && !blanked)
+		m_irq_delay = 2;
 }
 
 TIMER_CALLBACK_MEMBER(nes_jy_typea_device::irq_timer_tick)
@@ -228,33 +268,50 @@ TIMER_CALLBACK_MEMBER(nes_jy_typea_device::irq_timer_tick)
 	irq_clock(false, 0);
 }
 
-void nes_jy_typea_device::scanline_irq(int scanline, bool vblank, bool blanked)
+void nes_jy_typea_device::ppu_to_mapper(int scanline, unsigned dot, int ppu_tick, uint16_t ppu_address)
 {
-	if (scanline < ppu2c0x_device::BOTTOM_VISIBLE_SCANLINE)
-		irq_clock(blanked, 1);
+	if (m_irq_delay) {
+		m_irq_delay--;
+
+		if (!m_irq_delay)
+			set_irq_line(ASSERT_LINE);
+	}
 }
 
+void nes_jy_typea_device::ppu_bus_address(uint16_t address, uint64_t, int, bool)
+{
+	const bool a12 = BIT(address, 12);
+
+	if (a12 && !m_irq_last_a12)
+		irq_clock(false, 1);
+
+	m_irq_last_a12 = a12;
+}
 
 // 0x5000-0x5fff : sort of protection?
 uint8_t nes_jy_typea_device::read_l(offs_t offset)
 {
-	LOG("JY Company write_m, offset: %04x\n", offset);
+	LOG("J.Y. read_l, offset: %04x\n", offset);
+
 	offset += 0x100;
 
 	if (offset >= 0x1000 && offset < 0x1800)
-	{
-		// bit6/bit7 DSW read
-		return get_open_bus() & 0x3f;
-	}
+		return (get_open_bus() & 0x3f) | m_dips->read();
 
-	if (offset >= 0x1800)
-	{
-		if ((offset & 7) == 0)
-			return (m_mul[0] * m_mul[1]) & 0xff;
-		if ((offset & 7) == 1)
-			return ((m_mul[0] * m_mul[1]) >> 8) & 0xff;
-		if ((offset & 7) == 3)
-			return m_latch;
+	if (offset >= 0x1800) {
+		switch (offset & 0x07) {
+			case 0:
+				return (m_mul[0] * m_mul[1]) & 0xff;
+
+			case 1:
+				return (m_mul[0] * m_mul[1]) >> 8;
+
+			case 2:
+				return m_accumulator;
+
+			case 3:
+				return m_test;
+		}
 	}
 
 	return get_open_bus();
@@ -262,31 +319,51 @@ uint8_t nes_jy_typea_device::read_l(offs_t offset)
 
 void nes_jy_typea_device::write_l(offs_t offset, uint8_t data)
 {
-	LOG("JY Company write_m, offset: %04x, data: %02x\n", offset, data);
+	LOG("J.Y. write_l, offset: %04x, data: %02x\n", offset, data);
+
 	offset += 0x100;
 
-	if (offset >= 0x1800)
-	{
-		if ((offset & 7) == 0)
+	if (offset < 0x1800)
+		return;
+
+	switch (offset & 0x07) {
+		case 0:
 			m_mul[0] = data;
-		if ((offset & 7) == 1)
+			break;
+
+		case 1:
 			m_mul[1] = data;
-		if ((offset & 7) == 3)
-			m_latch = data;
+			break;
+
+		case 2:
+			m_accumulator += data;
+			break;
+
+		case 3:
+			m_accumulator = 0;
+			m_test = data;
+			break;
 	}
 }
 
-// 0x6000-0x7fff : WRAM or open bus
+// $6000-$7FFF: WRAM, or PRG ROM when $D000 bit 7 is set
 uint8_t nes_jy_typea_device::read_m(offs_t offset)
 {
-	LOG("JY Company write_m, offset: %04x\n", offset);
+	LOG("JY Company read_m, offset: %04x\n", offset);
 
-	if (m_reg[0] & 0x80)
+	if (BIT(m_reg[0], 7))
 		return m_prg[(m_bank_6000 & m_prg_mask) * 0x2000 + (offset & 0x1fff)];
 
-	return get_open_bus();
+	return device_nes_cart_interface::read_m(offset);
 }
 
+void nes_jy_typea_device::write_m(offs_t offset, uint8_t data)
+{
+	LOG("JY Company write_m, offset: %04x, data: %02x\n", offset, data);
+
+	if (!BIT(m_reg[0], 7))
+		device_nes_cart_interface::write_m(offset, data);
+}
 
 inline uint8_t nes_jy_typea_device::unscramble(uint8_t bank)
 {
@@ -422,10 +499,12 @@ void nes_jy_typea_device::update_banks(int reg)
 
 void nes_jy_typea_device::write_h(offs_t offset, uint8_t data)
 {
-	LOG("JY Company write_m, offset: %04x, data: %02x\n", offset, data);
+	LOG("J.Y. write_h, offset: %04x, data: %02x\n", offset, data);
 
-	switch (offset & 0x7000)
-	{
+	if (BIT(offset, 11) && (offset & 0x7000) != 0x4000)
+		return;
+
+	switch (offset & 0x7000) {
 		case 0x0000:
 			offset &= 3;
 			data &= 0x3f;
@@ -465,45 +544,55 @@ void nes_jy_typea_device::write_h(offs_t offset, uint8_t data)
 			update_mirror();
 			break;
 		case 0x4000:
-			switch (offset & 7)
-			{
+			switch (offset & 7) {
 				case 0:
-					if (BIT(data, 0))
+					if (BIT(data, 0)) {
 						m_irq_enable = 1;
-					else
-					{
+					} else {
+						m_irq_delay = 0;
+						m_irq_prescale = 0;
 						set_irq_line(CLEAR_LINE);
 						m_irq_enable = 0;
 					}
 					break;
+
 				case 1:
-					m_irq_mode = data & 3;
-					m_irq_prescale_mask = (data & 4) ? 0x07 : 0xff;
-					m_irq_down = data & 0x80;
-					m_irq_up = data & 0x40;
-					if (m_irq_mode == 0)
+					m_irq_mode = data & 0x03;
+					m_irq_prescale_mask = BIT(data, 2) ? 0x07 : 0xff;
+					m_irq_down = BIT(data, 7);
+					m_irq_up = BIT(data, 6);
+
+					if (m_irq_mode == 0 && m_irq_down != m_irq_up)
 						irq_timer->adjust(attotime::zero, 0, timer_freq);
 					else
 						irq_timer->adjust(attotime::never);
 					break;
+
 				case 2:
+					m_irq_delay = 0;
+					m_irq_prescale = 0;
 					set_irq_line(CLEAR_LINE);
 					m_irq_enable = 0;
 					break;
+
 				case 3:
 					m_irq_enable = 1;
 					break;
+
 				case 4:
 					m_irq_prescale = data ^ m_irq_flip;
 					break;
+
 				case 5:
 					m_irq_count = data ^ m_irq_flip;
 					break;
+
 				case 6:
 					m_irq_flip = data;
 					break;
+
 				case 7:
-					// this is used for the 'funky' IRQ mode, not implemented yet
+					// The function of $c007 is unknown, and no known software uses it.
 					break;
 			}
 			break;
@@ -523,8 +612,9 @@ void nes_jy_typea_device::write_h(offs_t offset, uint8_t data)
 
  iNES: mapper 211
 
- The mirroring system is a lot more complex in this
- board
+ This board supports extended nametable control,
+ allowing each nametable page to select CIRAM or
+ CHR ROM independently.
 
  -------------------------------------------------*/
 
@@ -549,10 +639,13 @@ void nes_jy_typeb_device::update_mirror_typeb()
 
  JY Company Type C board emulation
 
- iNES: mapper 209
+ iNES: mappers 35 and 209
 
- These board can switch between the Type A and the
- Type B mirroring
+ Mapper 35 is equivalent to mapper 209 but explicitly
+ specifies 8KB of WRAM.
+
+ These boards can switch between the Type A and
+ Type B mirroring modes.
 
  -------------------------------------------------*/
 
@@ -569,16 +662,18 @@ uint8_t nes_jy_typec_device::chr_r(offs_t offset)
 	int bank = offset >> 10;
 
 	irq_clock(false, 2);
-	switch (offset & 0xff0)
-	{
+
+	switch (offset & 0xff0) {
 		case 0xfd0:
-			m_chr_latch[BIT(offset, 12)] = (bank & 0x4);
+			m_chr_latch[BIT(offset, 12)] = bank & 0x4;
 			update_chr();
 			break;
+
 		case 0xfe0:
 			m_chr_latch[BIT(offset, 12)] = (bank & 0x4) | 0x2;
 			update_chr();
 			break;
 	}
+
 	return m_chr_access[bank][offset & 0x3ff];
 }

@@ -30,6 +30,7 @@
 
 #include "emu.h"
 #include "kaiser.h"
+#include "cpu/m6502/m6502.h"
 
 #define LOG_HIFREQ (1U << 1)
 
@@ -69,7 +70,7 @@ nes_ks106c_device::nes_ks106c_device(const machine_config &mconfig, const char *
 }
 
 nes_ks7058_device::nes_ks7058_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock)
-	: nes_nrom_device(mconfig, NES_KS7058, tag, owner, clock)
+	: nes_sxrom_device(mconfig, NES_KS7058, tag, owner, clock)
 {
 }
 
@@ -79,7 +80,14 @@ nes_ks7022_device::nes_ks7022_device(const machine_config &mconfig, const char *
 }
 
 nes_ks7032_device::nes_ks7032_device(const machine_config &mconfig, device_type type, const char *tag, device_t *owner, u32 clock)
-	: nes_nrom_device(mconfig, type, tag, owner, clock), m_latch(0), m_irq_count(0), m_irq_count_latch(0), m_irq_enable(0), irq_timer(nullptr)
+	: nes_nrom_device(mconfig, type, tag, owner, clock)
+	, m_latch(0)
+	, m_irq_count(0)
+	, m_irq_count_latch(0)
+	, m_irq_enable(0)
+	, m_irq_delay(0)
+	, irq_timer(nullptr)
+	, m_maincpu6502(nullptr)
 {
 }
 
@@ -173,6 +181,7 @@ void nes_ks106c_device::pcb_reset()
 void nes_ks7022_device::device_start()
 {
 	common_start();
+
 	save_item(NAME(m_latch));
 }
 
@@ -190,12 +199,14 @@ void nes_ks7032_device::device_start()
 	common_start();
 	irq_timer = timer_alloc(FUNC(nes_ks7032_device::irq_timer_tick), this);
 	irq_timer->adjust(attotime::zero, 0, clocks_to_attotime(1));
+	m_maincpu6502 = machine().root_device().subdevice<m6502_device>("maincpu");
 
 	save_item(NAME(m_latch));
 	save_item(NAME(m_irq_enable));
 	save_item(NAME(m_irq_count));
 	save_item(NAME(m_irq_count_latch));
 	save_item(NAME(m_reg));
+	save_item(NAME(m_irq_delay));
 }
 
 void nes_ks7032_device::pcb_reset()
@@ -204,11 +215,28 @@ void nes_ks7032_device::pcb_reset()
 	m_irq_enable = 0;
 	m_irq_count = 0;
 	m_irq_count_latch = 0;
+	m_irq_delay = 0;
+
+	m_maincpu6502->cancel_delayed_mapper_irq();
+	set_irq_line(CLEAR_LINE);
 	std::fill(std::begin(m_reg), std::end(m_reg), 0x00);
 
 	prg_update();
 	prg8_ef((m_prg_chunks << 1) - 1);
 	chr8(0, m_chr_source);
+}
+
+void nes_ks202_device::pcb_reset()
+{
+	nes_ks7032_device::pcb_reset();
+
+	m_reg[1] = 0x10;
+	m_reg[2] = 0x10;
+	m_reg[3] = 0x10;
+	m_reg[4] = 0x10;
+
+	prg_update();
+	prg8_ef(0x1f);
 }
 
 void nes_ks7016_device::device_start()
@@ -223,6 +251,7 @@ void nes_ks7016_device::pcb_reset()
 	prg8_ab(0x0d ^ m_a15_flip);
 	prg8_cd(0x0e ^ m_a15_flip);
 	prg8_ef(0x0f ^ m_a15_flip);
+	chr8(0, CHRRAM);
 
 	m_latch = 0;
 }
@@ -230,24 +259,33 @@ void nes_ks7016_device::pcb_reset()
 void nes_ks7017_device::device_start()
 {
 	common_start();
+
 	irq_timer = timer_alloc(FUNC(nes_ks7017_device::irq_timer_tick), this);
 	irq_timer->adjust(attotime::zero, 0, clocks_to_attotime(1));
+
+	m_maincpu6502 = machine().root_device().subdevice<m6502_device>("maincpu");
 
 	save_item(NAME(m_latch));
 	save_item(NAME(m_irq_enable));
 	save_item(NAME(m_irq_count));
 	save_item(NAME(m_irq_status));
+	save_item(NAME(m_irq_delay));
 }
 
 void nes_ks7017_device::pcb_reset()
 {
 	prg16_89ab(0);
 	prg16_cdef(2);
+	chr8(0, m_chr_source);
 
 	m_latch = 0;
 	m_irq_enable = 0;
 	m_irq_count = 0;
 	m_irq_status = 0;
+	m_irq_delay = 0;
+
+	set_irq_line(CLEAR_LINE);
+	m_maincpu6502->cancel_delayed_mapper_irq();
 }
 
 void nes_ks7021a_device::pcb_reset()
@@ -274,13 +312,15 @@ void nes_ks7010_device::pcb_reset()
 
 void nes_ks7012_device::pcb_reset()
 {
-	prg32((m_prg_chunks >> 1) - 1);
+	prg32(1);
+	chr8(0, CHRRAM);
 }
 
 void nes_ks7013b_device::pcb_reset()
 {
 	prg16_89ab(0);
-	prg16_cdef(m_prg_chunks - 1);
+	prg16_cdef(7);
+	chr8(0, CHRRAM);
 }
 
 void nes_ks7030_device::device_start()
@@ -291,9 +331,11 @@ void nes_ks7030_device::device_start()
 
 void nes_ks7030_device::pcb_reset()
 {
-	prg32((m_prg_chunks >> 1) - 1);    // not really used...
+	prg32((m_prg_chunks >> 1) - 1);
+	chr8(0, CHRRAM);
 
-	m_reg[0] = m_reg[1] = 0;
+	m_reg[0] = 0;
+	m_reg[1] = 0;
 }
 
 void nes_ks7031_device::device_start()
@@ -304,7 +346,7 @@ void nes_ks7031_device::device_start()
 
 void nes_ks7031_device::pcb_reset()
 {
-	prg32(0);   // not really used...
+	chr8(0, CHRRAM);
 
 	std::fill(std::begin(m_reg), std::end(m_reg), 0x00);
 }
@@ -321,6 +363,7 @@ void nes_ks7037_device::pcb_reset()
 	prg8_ab(0x0e);
 	prg8_cd(0);
 	prg8_ef(0x0f);
+	chr8(0, CHRRAM);
 
 	m_reg = 0;
 }
@@ -335,11 +378,10 @@ void nes_ks7057_device::pcb_reset()
 {
 	prg8_ab(0x0d);
 	prg16_cdef(0x07);
+	chr8(0, CHRRAM);
 
 	std::fill(std::begin(m_reg), std::end(m_reg), 0x00);
 }
-
-
 
 /*-------------------------------------------------
  mapper specific handlers
@@ -362,63 +404,63 @@ void nes_ks7057_device::pcb_reset()
 
 /*-------------------------------------------------
 
- Kaiser Board KS7058
+Kaiser KS-7058 board
 
- Games: Tui Do Woo Ma Jeung
+Game: Tui Do Woo Ma Jeung
 
- Writes to 0xf000-0xffff set 4k chr banks. Namely, if
- offset&0x80 is 0 the lower 4k are set, if it is 1 the
- upper 4k are set.
+The board uses a KS203 MMC1-compatible ASIC with
+hardwired nametable mirroring. MMC1 mirroring writes
+therefore have no effect.
 
- iNES: mapper 171
+NES 2.0: mapper 1, submapper 7
+Legacy iNES: mapper 171
 
- In MAME: Supported.
+In MAME: Supported.
 
- -------------------------------------------------*/
+-------------------------------------------------*/
 
-void nes_ks7058_device::write_h(offs_t offset, u8 data)
-{
-	LOG("ks7058 write_h, offset: %04x, data: %02x\n", offset, data);
+void nes_ks7058_device::set_prg() {
+	prg32(0);
+}
 
-	switch (offset & 0x7080)
-	{
-		case 0x7000:
-			chr4_0(data, CHRROM);
-			break;
-		case 0x7080:
-			chr4_4(data, CHRROM);
-			break;
-	}
+void nes_ks7058_device::set_mirror() {
+	// Nametable mirroring is hardwired on the cartridge.
 }
 
 /*-------------------------------------------------
 
- Kaiser Board KS7022
+Kaiser KS-7022 board
 
- Games: 15 in 1
+Game: 15-in-1
 
- iNES: mapper 175
+$8000 controls nametable mirroring. Writing $A000
+loads the pending PRG/CHR bank. Reading the reset
+vector at $FFFC applies that bank, mapping the same
+16 KiB PRG-ROM bank at $8000-$BFFF and $C000-$FFFF.
 
- In MAME: Supported?
+iNES: mapper 175
 
- -------------------------------------------------*/
+In MAME: Supported.
+
+-------------------------------------------------*/
 
 void nes_ks7022_device::write_h(offs_t offset, u8 data)
 {
 	LOG("ks7022 write_h, offset: %04x, data: %02x\n", offset, data);
 
-	if (offset == 0)
+	if (offset == 0x0000) {
 		set_nt_mirroring(BIT(data, 2) ? PPU_MIRROR_HORZ : PPU_MIRROR_VERT);
-	else if (offset == 0x2000)
+	}
+	else if (offset == 0x2000) {
 		m_latch = data & 0x0f;
+	}
 }
 
 u8 nes_ks7022_device::read_h(offs_t offset)
 {
 	LOG("ks7022 read_h, offset: %04x\n", offset);
 
-	if (offset == 0x7ffc)
-	{
+	if (offset == 0x7ffc) {
 		chr8(m_latch, CHRROM);
 		prg16_89ab(m_latch);
 		prg16_cdef(m_latch);
@@ -429,30 +471,43 @@ u8 nes_ks7022_device::read_h(offs_t offset)
 
 /*-------------------------------------------------
 
- Kaiser Board KS7032
+Kaiser KS-7032 board
 
- Games: FDS conversions of Bubble Bobble, SMB2,
- and Exciting Soccer
+Games: FDS conversions of Bubble Bobble,
+Super Mario Bros. 2 and Exciting Soccer
 
- These boards have a KS202 ASIC that provide both
- banking and a cycle-based IRQ similar to the VRC3.
+The board uses a KS202 ASIC providing four
+switchable 8 KiB PRG-ROM banks and a cycle-based
+16-bit IRQ counter derived from the VRC3.
 
- iNES: mapper 142
+After the counter overflows, the mapper IRQ passes
+through the two-PPU-dot and delayed CPU IRQ path.
 
- In MAME: Supported.
+iNES: mapper 142
 
- -------------------------------------------------*/
+In MAME: Supported.
+
+-------------------------------------------------*/
+
+void nes_ks7032_device::ppu_to_mapper(int scanline, unsigned dot, int ppu_tick, uint16_t ppu_address)
+{
+	if (!m_irq_delay) {
+		return;
+	}
+
+	m_irq_delay--;
+
+	if (!m_irq_delay) {
+		m_maincpu6502->queue_delayed_mapper_irq(2);
+	}
+}
 
 TIMER_CALLBACK_MEMBER(nes_ks7032_device::irq_timer_tick)
 {
-	if (m_irq_enable)
-	{
-		if (++m_irq_count == 0)
-		{
-			set_irq_line(ASSERT_LINE);
-			m_irq_enable = 0;
-			m_irq_count = m_irq_count_latch;
-		}
+	if (m_irq_enable && ++m_irq_count == 0) {
+		m_irq_enable = 0;
+		m_irq_count = m_irq_count_latch;
+		m_irq_delay = 2;
 	}
 }
 
@@ -481,11 +536,18 @@ void nes_ks7032_device::write_h(offs_t offset, u8 data)
 		}
 		case 0x4000:
 			m_irq_enable = BIT(data, 1);
-			if (m_irq_enable)
+			m_irq_delay = 0;
+
+			if (m_irq_enable) {
 				m_irq_count = m_irq_count_latch;
+			}
+
+			m_maincpu6502->cancel_delayed_mapper_irq();
 			set_irq_line(CLEAR_LINE);
 			break;
 		case 0x5000:
+			m_irq_delay = 0;
+			m_maincpu6502->cancel_delayed_mapper_irq();
 			set_irq_line(CLEAR_LINE);
 			break;
 		case 0x6000:
@@ -506,50 +568,57 @@ u8 nes_ks7032_device::read_m(offs_t offset)
 
 /*-------------------------------------------------
 
- Kaiser SMB3 Board with KS202
+Kaiser SMB3 board with KS202
 
- Games: Super Mario Bros. 3 (Pirate, Alt)
+Game: Super Mario Bros. 3 (pirate conversion)
 
- A chip, PAL16L8ANC, provides the extra bits overlaid
- at 0xf000-0xffff. Writes go to both it and the KS202.
+The KS202 ASIC provides the mapper 142 banking and
+cycle-based IRQ functionality. A PAL16L8ANC overlays
+additional registers at $F000-$FFFF for PRG upper
+bank bits, mirroring and 1 KiB CHR-ROM banking.
 
- iNES: mapper 56
+Writes to $F000-$FFFF reach both the PAL and KS202.
+The four PRG upper-bank bits power up set.
 
- In MAME: Supported.
+The device is named after the KS202 because the
+board's actual PCB designation is not known.
 
- TODO: This device needs renaming of some sort. KS202
- is a chip found on some Kaiser PCBs that actually
- provides the functionality implemented above in the
- KS7032 PCB. It's not clear what SMB3's PCB is.
+iNES: mapper 56
 
- -------------------------------------------------*/
+In MAME: Supported.
+
+-------------------------------------------------*/
 
 void nes_ks202_device::write_h(offs_t offset, u8 data)
 {
 	LOG("ks202 write_h, offset: %04x, data: %02x\n", offset, data);
 
-	if (offset >= 0x7000)
-	{
-		switch (offset & 0xc00)
-		{
-			case 0x000:
-				if ((offset & 3) == 3)
-					prg8_ef((data & 0x10) | 0x0f);
-				else
-				{
-					int reg = (offset & 3) + 1;
-					m_reg[reg] = (m_reg[reg] & 0x0f) | (data & 0x10);
+	if (offset >= 0x7000) {
+		switch (offset & 0x0c00) {
+			case 0x0000:
+			{
+				const int reg = (offset & 0x03) + 1;
+
+				m_reg[reg] = (m_reg[reg] & 0x0f) | (data & 0x10);
+
+				if (reg == 4) {
+					prg8_ef(m_reg[4] | 0x0f);
 				}
 				break;
-			case 0x800:
+			}
+
+			case 0x0800:
 				set_nt_mirroring(BIT(data, 0) ? PPU_MIRROR_VERT : PPU_MIRROR_HORZ);
 				break;
-			case 0xc00:
+
+			case 0x0c00:
 				chr1_x(offset & 0x07, data & 0x7f, CHRROM);
 				break;
 		}
 	}
 
+	// The KS202 bank-data register is physically
+	// superimposed on every $F000-$FFFF write.
 	nes_ks7032_device::write_h(offset, data);
 }
 
@@ -598,26 +667,48 @@ void nes_ks7016_device::write_h(offs_t offset, u8 data)
 
 /*-------------------------------------------------
 
- Kaiser Board KS7017
+Kaiser Board KS7017
 
- Games: Almana no Kiseki FDS conversion
+Game: Almana no Kiseki FDS conversion
 
- NES 2.0: mapper 303
+The board provides 8 KiB of PRG-RAM at $6000-$7FFF,
+a switchable 16 KiB PRG-ROM bank at $8000-$BFFF,
+and fixed PRG-ROM bank 2 at $C000-$FFFF.
 
- In MAME: Supported.
+Writes to $4A00-$4AFF select a bank using address
+lines A2, A3 and A6. A write to $5100 commits the
+selected bank.
 
- -------------------------------------------------*/
+The board reproduces the FDS-style 16-bit timer IRQ,
+mirroring control and IRQ status register.
+
+NES 2.0: mapper 303
+
+In MAME: Supported.
+
+-------------------------------------------------*/
 
 TIMER_CALLBACK_MEMBER(nes_ks7017_device::irq_timer_tick)
 {
-	if (m_irq_enable)
-	{
-		if (--m_irq_count == 0)
-		{
-			set_irq_line(ASSERT_LINE);
+	if (m_irq_enable) {
+		if (--m_irq_count == 0) {
 			m_irq_enable = 0;
 			m_irq_status |= 0x01;
+			m_irq_delay = 2;
 		}
+	}
+}
+
+void nes_ks7017_device::ppu_to_mapper(int scanline, unsigned dot, int ppu_tick, uint16_t ppu_address)
+{
+	if (!m_irq_delay) {
+		return;
+	}
+
+	m_irq_delay--;
+
+	if (!m_irq_delay) {
+		m_maincpu6502->queue_delayed_mapper_irq(2);
 	}
 }
 
@@ -626,11 +717,12 @@ void nes_ks7017_device::write_l(offs_t offset, u8 data)
 	LOG("ks7017 write_l, offset: %04x, data: %02x\n", offset, data);
 
 	offset += 0x100;
-	switch (offset & 0x1f00)
-	{
+
+	switch (offset & 0x1f00) {
 		case 0x0a00:
 			m_latch = bitswap<3>(offset, 6, 3, 2);
 			break;
+
 		case 0x1100:
 			prg16_89ab(m_latch);
 			break;
@@ -642,15 +734,17 @@ void nes_ks7017_device::write_ex(offs_t offset, u8 data)
 	LOG("ks7017 write_ex, offset: %04x, data: %02x\n", offset, data);
 
 	offset += 0x4020;
-	switch (offset)
-	{
+
+	switch (offset) {
 		case 0x4020:
 			m_irq_count = (m_irq_count & 0xff00) | data;
 			break;
+
 		case 0x4021:
 			m_irq_count = (m_irq_count & 0x00ff) | (data << 8);
 			m_irq_enable = 1;
 			break;
+
 		case 0x4025:
 			set_nt_mirroring(BIT(data, 3) ? PPU_MIRROR_HORZ : PPU_MIRROR_VERT);
 			break;
@@ -662,12 +756,17 @@ u8 nes_ks7017_device::read_ex(offs_t offset)
 	LOG("ks7017 read_ex, offset: %04x\n", offset);
 
 	offset += 0x4020;
-	if (offset == 0x4030)
-	{
-		int temp = m_irq_status;
+
+	if (offset == 0x4030) {
+		const u8 result = (get_open_bus() & 0xfe) | (m_irq_status & 0x01);
+
 		m_irq_status &= ~0x01;
+		m_irq_delay = 0;
+
+		m_maincpu6502->cancel_delayed_mapper_irq();
 		set_irq_line(CLEAR_LINE);
-		return temp;
+
+		return result;
 	}
 
 	return get_open_bus();
@@ -675,32 +774,37 @@ u8 nes_ks7017_device::read_ex(offs_t offset)
 
 /*-------------------------------------------------
 
- Kaiser Board KS7021A
+Kaiser Board KS7021A
 
- Games: GetsuFumaDen
+Games: Contra, Getsu Fuma Den
 
- This board has a 16K fixed PRG bank at 0xc000 and
- a swappable 16K PRG bank at 0x8000. CHR banks are
- selectable by 1K page.
+This discrete-logic board was used for conversions
+of games originally using the Konami VRC2.
 
- NES 2.0: mapper 525
+It provides a switchable 16 KiB PRG-ROM bank at
+$8000-$BFFF, a fixed 16 KiB PRG-ROM bank at
+$C000-$FFFF, eight individually switchable 1 KiB
+CHR-ROM banks, and selectable mirroring.
 
- In MAME: Supported.
+NES 2.0: mapper 525
 
- -------------------------------------------------*/
+In MAME: Supported.
+
+-------------------------------------------------*/
 
 void nes_ks7021a_device::write_h(offs_t offset, u8 data)
 {
 	LOG("ks7021a write_h, offset: %04x, data: %02x\n", offset, data);
 
-	switch (offset & 0x7000)
-	{
+	switch (offset & 0x7000) {
 		case 0x0000:
 			prg16_89ab(BIT(data, 1, 3));
 			break;
+
 		case 0x1000:
 			set_nt_mirroring(BIT(data, 0) ? PPU_MIRROR_HORZ : PPU_MIRROR_VERT);
 			break;
+
 		case 0x3000:
 			chr1_x(offset & 0x07, data & 0x7f, CHRROM);
 			break;
@@ -709,86 +813,126 @@ void nes_ks7021a_device::write_h(offs_t offset, u8 data)
 
 /*-------------------------------------------------
 
- Kaiser Board KS7010
+Kaiser Board KS7010
 
- Games: Akumajo Dracula FDS Conversion
+Game: Akumajou Dracula FDS conversion
 
- This board has fixed PRG banks in 0x8000-0xffff.
- 0x6000-0x7fff is an 8K swappable PRG bank. This bank
- and the CHR bank are BOTH set by the same latch.
- Moreover, the latch is set by READING certain
- addresses and the exact mask is still unknown...
+The board maps a switchable 8 KiB PRG-ROM bank at
+$6000-$7FFF. The remaining four 8 KiB PRG-ROM
+banks are fixed in the order 10, 11, 6 and 7.
 
- NES 2.0: mapper 554
+The switchable PRG-ROM bank and the 8 KiB CHR-ROM
+bank share a four-bit latch. Reading certain PRG-ROM
+addresses loads the latch from CPU address lines
+A2-A5.
 
- In MAME: Supported.
+The exact address decoding remains unknown. The
+implementation recognizes the addresses known to
+be used by the game.
 
- -------------------------------------------------*/
+NES 2.0: mapper 554
+
+In MAME: Supported.
+
+-------------------------------------------------*/
 
 u8 nes_ks7010_device::read_m(offs_t offset)
 {
-	u8 data = m_prg[(m_latch * 0x2000 + offset) & (m_prg_size - 1)];
+	const u8 data = m_prg[(m_latch * 0x2000 + offset) & (m_prg_size - 1)];
+
 	LOGMASKED(LOG_HIFREQ, "ks7010 read_m, offset: %04x, data: %02x\n", offset, data);
+
 	return data;
 }
 
 u8 nes_ks7010_device::read_h(offs_t offset)
 {
-	if ((offset >= 0x4ab6 && offset <= 0x4ad6) || offset == 0x6be2 || offset == 0x6be3 || offset == 0x6e32 || offset == 0x7ffc) // HACK! FIXME
-	{
+	if ((offset >= 0x4ab6 && offset <= 0x4ad6) || offset == 0x6be2 || offset == 0x6be3 || offset == 0x6e32 || offset == 0x7ffc) {
 		m_latch = BIT(offset, 2, 4);
 		chr8(m_latch, CHRROM);
 	}
 
-	u8 data = hi_access_rom(offset);
+	const u8 data = hi_access_rom(offset);
+
 	LOGMASKED(LOG_HIFREQ, "ks7010 read_h, offset: %04x, data: %02x\n", offset, data);
+
 	return data;
 }
 
 /*-------------------------------------------------
 
- Kaiser Board KS7012
+Kaiser Board KS7012
 
- Games: Zanac FDS Conversion
+Game: Zanac FDS conversion
 
- NES 2.0: mapper 346
+The board contains two 32 KiB PRG-ROM banks.
+Writing to $E0A0 selects bank 0, while writing to
+$EE36 selects bank 1. The written data is ignored.
 
- In MAME: Supported.
+The exact address decoding remains unknown, so only
+the two addresses known to be used by the game are
+currently recognized.
 
- -------------------------------------------------*/
+The board also contains 8 KiB of unbanked PRG-RAM
+at $6000-$7FFF and 8 KiB of unbanked CHR-RAM.
+
+Mirroring is hardwired.
+
+NES 2.0: mapper 346
+
+In MAME: Supported.
+
+-------------------------------------------------*/
 
 void nes_ks7012_device::write_h(offs_t offset, u8 data)
 {
 	LOG("ks7012 write_h, offset: %04x, data: %02x\n", offset, data);
 
-	if (offset == 0x60a0)
+	if (offset == 0x60a0) {
 		prg32(0);
-	if (offset == 0x6e36)
+	}
+	else if (offset == 0x6e36) {
 		prg32(1);
+	}
 }
 
 /*-------------------------------------------------
 
- Kaiser Board KS7013B
+Kaiser Board KS7013B
 
- Games: Highway Star bootleg
+Game: Highway Star bootleg
 
- NES 2.0: mapper 312
+The board maps a switchable 16 KiB PRG-ROM bank at
+$8000-$BFFF and fixes PRG-ROM bank 7 at
+$C000-$FFFF.
 
- In MAME: Supported.
+Writes throughout $6000-$7FFF select the switchable
+PRG-ROM bank using data bits 0-2. Reads from this
+area are open bus.
 
- -------------------------------------------------*/
+Writes throughout $8000-$FFFF select horizontal or
+vertical mirroring using data bit 0.
+
+The board contains 8 KiB of unbanked CHR-RAM.
+
+NES 2.0: mapper 312
+
+In MAME: Supported.
+
+-------------------------------------------------*/
 
 void nes_ks7013b_device::write_m(offs_t offset, u8 data)
 {
-	LOG("ks7013b write_l, offset: %04x, data: %02x\n", offset, data);
-	prg16_89ab(data);
+	LOG("ks7013b write_m, offset: %04x, data: %02x\n", offset, data);
+
+	prg16_89ab(data & 0x07);
 }
 
 void nes_ks7013b_device::write_h(offs_t offset, u8 data)
 {
 	LOG("ks7013b write_h, offset: %04x, data: %02x\n", offset, data);
-	set_nt_mirroring((data & 1) ? PPU_MIRROR_HORZ : PPU_MIRROR_VERT);
+
+	set_nt_mirroring(BIT(data, 0) ? PPU_MIRROR_HORZ : PPU_MIRROR_VERT);
 }
 
 /*-------------------------------------------------
@@ -869,11 +1013,18 @@ void nes_ks7030_device::write_h(offs_t offset, u8 data)
 
  Games: Dracula II FDS Conversion
 
- This board is quite weird. It handles 2K PRG chunks
- and the chip contains chunks in reverse order, so
- that the first 2K are actually loaded at the top
- of the 0x8000-0xffff region. Main bank is fixed, while
- the 8K mapped at 0x6000-0x7fff varies with reg writes.
+ The board maps four independently switchable 2 KiB
+ PRG-ROM banks at $6000-$7FFF.
+
+ The fixed $8000-$FFFF region contains sixteen 2 KiB
+ PRG-ROM banks stored in reverse order: bank 15 is
+ mapped at $8000 and bank 0 is mapped at $F800.
+
+ Writes throughout $8000-$FFFF select one of the four
+ $6000-$7FFF windows using address bits A12-A11.
+ Data bits 5-0 select the 2 KiB PRG-ROM bank.
+
+ The board contains 8 KiB of unbanked CHR-RAM.
 
  NES 2.0: mapper 305
 
@@ -884,20 +1035,30 @@ void nes_ks7030_device::write_h(offs_t offset, u8 data)
 u8 nes_ks7031_device::read_m(offs_t offset)
 {
 	LOGMASKED(LOG_HIFREQ, "ks7031 read_m, offset: %04x\n", offset);
-	return m_prg[(m_reg[BIT(offset, 11, 2)] * 0x0800) + (offset & 0x7ff)];
+
+	const u8 reg = BIT(offset, 11, 2);
+	const u32 address = m_reg[reg] * 0x0800 + (offset & 0x07ff);
+
+	return m_prg[address];
 }
 
 u8 nes_ks7031_device::read_h(offs_t offset)
 {
-	// here the first 32K are accessed, but in 16x2K blocks loaded in reverse order
-	int accessed_2k = BIT(~offset, 11, 4);
-	return m_prg[accessed_2k * 0x0800 + (offset & 0x7ff)];
+	LOGMASKED(LOG_HIFREQ, "ks7031 read_h, offset: %04x\n", offset);
+
+	const u8 bank = 0x0f - BIT(offset, 11, 4);
+	const u32 address = bank * 0x0800 + (offset & 0x07ff);
+
+	return m_prg[address];
 }
 
 void nes_ks7031_device::write_h(offs_t offset, u8 data)
 {
 	LOG("ks7031 write_h, offset: %04x, data: %02x\n", offset, data);
-	m_reg[BIT(offset, 11, 2)] = data & 0x3f;
+
+	const u8 reg = BIT(offset, 11, 2);
+
+	m_reg[reg] = data & 0x3f;
 }
 
 /*-------------------------------------------------
@@ -906,10 +1067,24 @@ void nes_ks7031_device::write_h(offs_t offset, u8 data)
 
  Games: Metroid (FDS conversion)
 
- This PCB maps PRG in 0x7000-0x7fff in a very
- similar fashion to LH10 (see bootleg.cpp)
- but with WRAM split between 0x6000-0x6fff
- and 0xb000-0xbfff.
+ The board is based on a Kaiser clone of the Tengen
+ MIMIC-1 ASIC.
+
+ PRG-RAM is split between $6000-$6FFF and
+ $B000-$BFFF. A fixed 4 KiB PRG-ROM bank is mapped
+ at $7000-$7FFF.
+
+ Switchable 8 KiB PRG-ROM banks are mapped at
+ $8000-$9FFF and $C000-$DFFF. The remaining PRG-ROM
+ regions are fixed.
+
+ Even writes throughout $8000-$9FFF select one of
+ eight registers. Odd writes update the selected
+ register. Registers 2-5 control individual CIRAM
+ nametable pages, while registers 6-7 control the
+ two switchable PRG-ROM windows.
+
+ The board contains 8 KiB of unbanked CHR-RAM.
 
  NES 2.0: mapper 307
 
@@ -920,25 +1095,30 @@ void nes_ks7031_device::write_h(offs_t offset, u8 data)
 u8 nes_ks7037_device::read_m(offs_t offset)
 {
 	LOGMASKED(LOG_HIFREQ, "ks7037 read_m, offset: %04x\n", offset);
-	if (offset < 0x1000)
+
+	if (offset < 0x1000) {
 		return m_prgram[offset];
-	else
-		return m_prg[0x0f * 0x1000 + (offset & 0x0fff)]; // 4k PRG bank 15 is fixed
+	}
+
+	return m_prg[0x0f * 0x1000 + (offset & 0x0fff)];
 }
 
 void nes_ks7037_device::write_m(offs_t offset, u8 data)
 {
 	LOG("ks7037 write_m, offset: %04x, data: %02x\n", offset, data);
-	if (offset < 0x1000)
+
+	if (offset < 0x1000) {
 		m_prgram[offset] = data;
+	}
 }
 
 u8 nes_ks7037_device::read_h(offs_t offset)
 {
 	LOGMASKED(LOG_HIFREQ, "ks7037 read_h, offset: %04x\n", offset);
 
-	if (offset >= 0x3000 && offset < 0x4000)
+	if (offset >= 0x3000 && offset < 0x4000) {
 		return m_prgram[0x1000 + (offset & 0x0fff)];
+	}
 
 	return hi_access_rom(offset);
 }
@@ -947,17 +1127,20 @@ void nes_ks7037_device::write_h(offs_t offset, u8 data)
 {
 	LOG("ks7037 write_h, offset: %04x, data: %02x\n", offset, data);
 
-	switch (offset & 0x7000)
-	{
+	switch (offset & 0x7000) {
 		case 0x0000:
 		case 0x1000:
-			if (!(offset & 1))
-				m_reg = data & 7;
-			else if (m_reg >= 6)
-				prg8_x((m_reg & 1) << 1, data);
-			else if (m_reg >= 2)
-				set_nt_page(bitswap<2>(m_reg, 0, 2), CIRAM, data & 1, 1);
+			if (!BIT(offset, 0)) {
+				m_reg = data & 0x07;
+			}
+			else if (m_reg >= 6) {
+				prg8_x((m_reg & 0x01) << 1, data);
+			}
+			else if (m_reg >= 2) {
+				set_nt_page(bitswap<2>(m_reg, 0, 2), CIRAM, data & 0x01, 1);
+			}
 			break;
+
 		case 0x3000:
 			m_prgram[0x1000 + (offset & 0x0fff)] = data;
 			break;
@@ -968,15 +1151,28 @@ void nes_ks7037_device::write_h(offs_t offset, u8 data)
 
  Kaiser Board KS7057
 
- Games: Gyruss
+ Games: Gyruss (FDS conversion)
 
- This PCB has fixed banks after 0xa000 and 8x2K
- swappable banks in 0x6000-0x9fff. Pairs of nibble
- registers (we store joined as bytes) control the banks,
- with $B000/$B001, $B002/$B003, $C000/$C001, $C002/$C003
- selecting 4 banks in 0x8000-0x9fff, and $D000/$D001,
- $D002/$D003, $E000/$E001, $E002/$E003 selecting the
- remaining 4 banks in 0x6000-0x7fff.
+ Eight independently switchable 2 KiB PRG-ROM banks
+ are mapped from $6000-$9FFF.
+
+ Each bank register is split into low- and high-nibble
+ writes. Address lines A2-A11 are not decoded, so each
+ register is mirrored throughout its 4 KiB region.
+
+ Registers $B000-$C003 control the four banks mapped
+ at $8000-$9FFF. Registers $D000-$E003 control the
+ four banks mapped at $6000-$7FFF.
+
+ The fixed PRG-ROM regions are:
+
+   $A000-$BFFF: 8 KiB bank $0D
+   $C000-$FFFF: 16 KiB bank $07
+
+ Writes throughout $8000-$9FFF control nametable
+ mirroring using data bit 0.
+
+ The board contains 8 KiB of unbanked CHR-RAM.
 
  NES 2.0: mapper 302
 
@@ -986,15 +1182,24 @@ void nes_ks7037_device::write_h(offs_t offset, u8 data)
 
 u8 nes_ks7057_device::read_m(offs_t offset)
 {
-	LOG("ks7057 read_m, offset: %04x\n", offset);
-	return m_prg[0x800 * m_reg[BIT(offset, 11, 2) + 4] + (offset & 0x7ff)];
+	LOGMASKED(LOG_HIFREQ, "ks7057 read_m, offset: %04x\n", offset);
+
+	const u8 reg = BIT(offset, 11, 2) + 4;
+	const u32 address = m_reg[reg] * 0x0800 + (offset & 0x07ff);
+
+	return m_prg[address];
 }
 
 u8 nes_ks7057_device::read_h(offs_t offset)
 {
 	LOGMASKED(LOG_HIFREQ, "ks7057 read_h, offset: %04x\n", offset);
-	if (offset < 0x2000)
-		return m_prg[0x800 * m_reg[BIT(offset, 11, 2)] + (offset & 0x7ff)];
+
+	if (offset < 0x2000) {
+		const u8 reg = BIT(offset, 11, 2);
+		const u32 address = m_reg[reg] * 0x0800 + (offset & 0x07ff);
+
+		return m_prg[address];
+	}
 
 	return hi_access_rom(offset);
 }
@@ -1003,14 +1208,28 @@ void nes_ks7057_device::write_h(offs_t offset, u8 data)
 {
 	LOG("ks7057 write_h, offset: %04x, data: %02x\n", offset, data);
 
-	if (offset < 0x2000)
+	if (offset < 0x2000) {
 		set_nt_mirroring(BIT(data, 0) ? PPU_MIRROR_VERT : PPU_MIRROR_HORZ);
-	else if (offset >= 0x3000 && offset < 0x6004)
-	{
-		u8 reg = bitswap<4>(offset, 14, 13, 12, 1) - 6;
-		if (BIT(offset, 0))
-			m_reg[reg] = (m_reg[reg] & 0x0f) | ((data & 0x03) << 4);
-		else
-			m_reg[reg] = (m_reg[reg] & 0xf0) | (data & 0x0f);
+		return;
+	}
+
+	switch (offset & 0x7000) {
+		case 0x3000:
+		case 0x4000:
+		case 0x5000:
+		case 0x6000:
+		{
+			const u8 reg = bitswap<4>(offset, 14, 13, 12, 1) - 6;
+
+			if (BIT(offset, 0)) {
+				m_reg[reg] &= 0x0f;
+				m_reg[reg] |= (data & 0x03) << 4;
+			}
+			else {
+				m_reg[reg] &= 0x30;
+				m_reg[reg] |= data & 0x0f;
+			}
+			break;
+		}
 	}
 }

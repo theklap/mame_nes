@@ -182,7 +182,6 @@ DEFINE_DEVICE_TYPE(NES_KARAOKESTUDIO, nes_karaokestudio_device, "nes_karaoke", "
 
 nes_karaokestudio_device::nes_karaokestudio_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock)
 	: nes_nrom_device(mconfig, NES_KARAOKESTUDIO, tag, owner, clock)
-	, m_exp_active(0)
 	, m_subslot(*this, "exp_slot")
 	, m_mic_ipt(*this, "MIC")
 {
@@ -200,7 +199,7 @@ void nes_karaokestudio_device::pcb_reset()
 	prg16_89ab(0);
 	prg16_cdef((m_prg_chunks - 1) ^ 0x08);
 	chr8(0, m_chr_source);
-	m_exp_active = 0;
+	m_exp_active = false;
 }
 
 
@@ -225,56 +224,50 @@ void nes_karaokestudio_device::pcb_reset()
 uint8_t nes_karaokestudio_device::read_m(offs_t offset)
 {
 	LOG("karaoke studio read_m, offset: %04x\n", offset);
-	return m_mic_ipt->read();
+
+	return (get_open_bus() & 0xf8) | (m_mic_ipt->read() & 0x07);
 }
 
 uint8_t nes_karaokestudio_device::read_h(offs_t offset)
 {
 	LOG("karaoke studio read_h, offset: %04x\n", offset);
-	// this shall be the proper code, but it's a bit slower, so we access directly the subcart below
-	//return m_subslot->read(offset);
 
-	// access expansion cart only if all of the followings are verified
-	// * we are in $8000-$bfff range
-	// * there has been a bankswitch write to map the expansion to such range
-	// * there actually is an expansion cart mounted
-	if (offset < 0x4000 && m_exp_active && m_subslot->m_cart)
-		return m_subslot->m_cart->read(offset);
-	else
-		return hi_access_rom(offset);
+	if (offset < 0x4000 && m_exp_active) {
+		if (m_subslot->m_cart) {
+			return m_subslot->m_cart->read(offset);
+		}
+
+		return get_open_bus();
+	}
+
+	return hi_access_rom(offset);
 }
 
 void nes_karaokestudio_device::write_h(offs_t offset, uint8_t data)
 {
 	LOG("karaoke studio write_h, offset: %04x, data: %02x\n", offset, data);
-	// bit3 1 = M ROM (main unit), 0=E ROM (expansion)
-	// HACK(?): currently it is not clear how the unit acknowledges the presence of the expansion
-	// cart (when expansion is present, code keeps switching both from the expansion rom and from
-	// the main ROM)
-	// my guess is that writes with bit3=0 and no expansion just do nothing, but it shall be verified
 
-	if (offset >= 04000)
-	{
-		if (BIT(data, 3))
-		{
-			m_exp_active = 0;
-			prg16_89ab(data & 7);
-		}
-		else    // expansion cart
-		{
-			m_exp_active = 1;
-			m_subslot->write_prg_bank(data & 7);
-		}
+	data = account_bus_conflict(offset, data);
+
+	set_nt_mirroring(BIT(data, 5) ? PPU_MIRROR_HORZ : PPU_MIRROR_VERT);
+
+	if (BIT(data, 4)) {
+		m_exp_active = false;
+		prg16_89ab(data & 0x07);
+	}
+	else {
+		m_exp_active = true;
+		m_subslot->write_prg_bank(data & 0x07);
 	}
 }
 
 
-static INPUT_PORTS_START( karaoke_mic )
+static INPUT_PORTS_START(karaoke_mic)
 	PORT_START("MIC")
-	PORT_BIT( 0x01, IP_ACTIVE_HIGH, IPT_BUTTON2 ) PORT_NAME("A (Mic Select)") PORT_CODE(KEYCODE_X)
-	PORT_BIT( 0x02, IP_ACTIVE_HIGH, IPT_BUTTON1 ) PORT_NAME("B (Mic Start)") PORT_CODE(KEYCODE_Z)
-	PORT_BIT( 0x04, IP_ACTIVE_HIGH, IPT_BUTTON3 ) PORT_NAME("Microphone (?)") PORT_CODE(KEYCODE_C)
-	PORT_BIT( 0xf8, IP_ACTIVE_HIGH, IPT_UNUSED )
+	PORT_BIT(0x01, IP_ACTIVE_LOW, IPT_BUTTON2) PORT_NAME("A (Mic Select)") PORT_CODE(KEYCODE_X)
+	PORT_BIT(0x02, IP_ACTIVE_LOW, IPT_BUTTON1) PORT_NAME("B (Mic Start)") PORT_CODE(KEYCODE_Z)
+	PORT_BIT(0x04, IP_ACTIVE_HIGH, IPT_BUTTON3) PORT_NAME("Microphone") PORT_CODE(KEYCODE_C)
+	PORT_BIT(0xf8, IP_ACTIVE_HIGH, IPT_UNUSED)
 INPUT_PORTS_END
 
 ioport_constructor nes_karaokestudio_device::device_input_ports() const

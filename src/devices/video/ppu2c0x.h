@@ -38,11 +38,13 @@
 
 extern bool g_nes_p1_a_pressed_edge;
 
-class nes_exrom_device;
-class nes_txrom_device;
-class nes_sxrom_device;
-class nes_tengen032_device;
+//class nes_exrom_device;
+//class nes_txrom_device;
+//class nes_sxrom_device;
+//class nes_tengen032_device;
+//class nes_sc127_device;
 class m6502_device;
+//class nes_batmap_srrx_device;
 
 
 //**************************************************************************
@@ -58,8 +60,13 @@ public:
 	typedef device_delegate<void (int scanline, bool vblank, bool blanked)> hblank_delegate;
 	typedef device_delegate<int (int address, int data)> vidaccess_delegate;
 	typedef device_delegate<void (offs_t offset)> latch_delegate;
-	typedef device_delegate<void (int scanline, unsigned dot, int ppu_tick)> ppu_to_mapper_delegate;
-
+	typedef device_delegate<void (int scanline, unsigned dot, int ppu_tick, uint16_t ppu_address)> ppu_to_mapper_delegate;
+	typedef device_delegate<void (uint16_t address, uint64_t ppu_cycle, int ppu_tick, bool odd_frame)> ppu_bus_address_delegate;
+	typedef device_delegate<void ()> ppu_odd_frame_skip_delegate;
+	typedef device_delegate<void (bool upper_chr, uint16_t ppu_address)> mmc1_ppu_phase_delegate;
+	typedef device_delegate<void (uint16_t address)> mmc5_ppu_read_delegate;
+	typedef device_delegate<void ()> mmc5_reset_scanline_irq_delegate;
+	
 	enum
 	{
 		NTSC_SCANLINES_PER_FRAME     = 262,
@@ -221,6 +228,39 @@ public:
 		m_ppu_to_mapper.set(std::forward<T>(args)...);
 		m_ppu_to_mapper.resolve();
 	}
+	
+	template <typename... T>
+	void set_ppu_bus_address(T &&... args)
+	{
+		m_ppu_bus_address_callback.set(std::forward<T>(args)...);
+		m_ppu_bus_address_callback.resolve();
+	}
+	
+	template <typename... T>
+	void set_ppu_odd_frame_skip(T &&... args)
+	{
+		m_ppu_odd_frame_skip.set(std::forward<T>(args)...);
+		m_ppu_odd_frame_skip.resolve();
+	}
+	
+	template <typename... T>
+	void set_mmc1_ppu_phase(T &&... args)
+	{
+		m_mmc1_ppu_phase.set(std::forward<T>(args)...);
+		m_mmc1_ppu_phase.resolve();
+	}
+
+	template <typename... T>
+	void set_mmc5_ppu_read(T &&... args) {
+		m_mmc5_ppu_read.set(std::forward<T>(args)...);
+		m_mmc5_ppu_read.resolve();
+	}
+
+	template <typename... T>
+	void set_mmc5_reset_scanline_irq(T &&... args) {
+		m_mmc5_reset_scanline_irq.set(std::forward<T>(args)...);
+		m_mmc5_reset_scanline_irq.resolve();
+	}
 
 protected:
 	ppu2c0x_device(const machine_config& mconfig, device_type type, const char* tag, device_t* owner, uint32_t clock, address_map_constructor internal_map);
@@ -375,6 +415,11 @@ protected:
 
 	latch_delegate m_latch;
 	ppu_to_mapper_delegate m_ppu_to_mapper;
+	ppu_bus_address_delegate m_ppu_bus_address_callback;
+	ppu_odd_frame_skip_delegate m_ppu_odd_frame_skip;
+	mmc1_ppu_phase_delegate m_mmc1_ppu_phase;
+	mmc5_ppu_read_delegate m_mmc5_ppu_read;
+	mmc5_reset_scanline_irq_delegate m_mmc5_reset_scanline_irq;
 
 	// ---------------------------------------------------------------------
 	// Core PPU scroll/address/register state.
@@ -504,6 +549,8 @@ protected:
 	bool oam2_full;
 	uint8_t oamdata_latch;
 	uint8_t oam2_last_write;
+	bool oam2_increment_frozen;
+	bool sprite0_in_oam2_next_valid;
 
 	bool s_after_wrap;
 	bool sl0_stale_s0_loaded;
@@ -607,16 +654,20 @@ protected:
 	// ---------------------------------------------------------------------
 	// Mapper hooks / cached mapper capability flags.
 	// ---------------------------------------------------------------------
-	nes_exrom_device *m_mmc5 = nullptr;
-	nes_txrom_device *m_mmc3 = nullptr;
-	nes_sxrom_device *m_mmc1_sxrom = nullptr;
-	nes_tengen032_device *m_rambo1 = nullptr;
+	//nes_exrom_device *m_mmc5 = nullptr;
+	//nes_txrom_device *m_mmc3 = nullptr;
+	//nes_sxrom_device *m_mmc1_sxrom = nullptr;
+	//nes_tengen032_device *m_rambo1 = nullptr;
+	//nes_sc127_device *m_sc127 = nullptr;
+	//nes_batmap_srrx_device *m_batmap_srrx = nullptr;
 
-	bool m_has_mmc3_a12 = false;
-	bool m_has_rambo1_a12 = false;
-	bool m_has_mmc5_ppu = false;
-	bool m_has_mmc1_phase = false;
-	bool m_has_chr_latch = false;
+	//bool m_has_mmc3_a12 = false;
+	//bool m_has_rambo1_a12 = false;
+	//bool m_has_sc127_a12 = false;
+	//bool m_has_mmc5_ppu = false;
+	//bool m_has_mmc1_phase = false;
+	//bool m_has_chr_latch = false;
+	//bool m_has_batmap_srrx_a12 = false;
 
 	// ---------------------------------------------------------------------
 	// Save-state replacements for old function-local statics.

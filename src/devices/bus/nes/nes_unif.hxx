@@ -48,7 +48,8 @@ enum
 	CHRRAM_6,
 	CHRRAM_8,
 	CHRRAM_16,
-	CHRRAM_32
+	CHRRAM_32,
+	CHRRAM_256
 };
 
 static const unif unif_list[] =
@@ -115,8 +116,8 @@ static const unif unif_list[] =
 	{ "UNL-FS304",                  0,    8, CHRRAM_8,  WAIXING_FS304}, // used in Zelda 3 by Waixing
 	{ "UNL-43272",                  0,    0, CHRRAM_0,  UNL_43272}, // used in Gaau Hok Gwong Cheung
 	{ "BTL-MARIO1-MALEE2",          0,    0, CHRRAM_0,  UNL_MMALEE}, // mapper 55
-	{ "BMC-FK23C",                  0,    0, CHRRAM_0,  BMC_FK23C},
-	{ "BMC-FK23CA",                 0,    0, CHRRAM_0,  BMC_FK23CA},
+	{ "BMC-FK23C",                  0,    0, CHRRAM_256,  BMC_FK23C},
+	{ "BMC-FK23CA",                 0,    0, CHRRAM_256,  BMC_FK23CA},
 	{ "BMC-GHOSTBUSTERS63IN1",      0,    0, CHRRAM_8,  BMC_76IN1 },
 	{ "BMC-BS-5",                   0,    0, CHRRAM_0,  BMC_BENSHIENG},
 	{ "BMC-810544-C-A1",            0,    0, CHRRAM_0,  BMC_810544C},
@@ -192,6 +193,8 @@ void unif_mapr_setup( const char *board, int *pcb_id, int *battery, int *prgram,
 		*vram_chunks = 2;
 	else if (unif_board->chrram == CHRRAM_32)
 		*vram_chunks = 4;
+	else if (unif_board->chrram == CHRRAM_256)
+		*vram_chunks = 32;
 }
 
 

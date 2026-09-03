@@ -1,20 +1,25 @@
 // license:BSD-3-Clause
 // copyright-holders:Fabio Priuli
-/***********************************************************************************************************
+/**************************************************************************************************
 
+ Famicom Disk System emulation
 
- NES/Famicom cartridge emulation for Disk System expansion
+ The Famicom Disk System is not an iNES cartridge mapper. It consists
+ of a RAM Adapter connected to the cartridge port and a separate disk
+ drive.
 
+ The RAM Adapter contains 32 KiB of program RAM, 8 KiB of CHR-RAM,
+ the RP2C33 disk controller, an 8 KiB BIOS ROM and the FDS audio
+ hardware.
 
- Here we emulate the RAM expansion + Disk Drive which form the
- Famicom Disk System.
+ CPU memory map:
 
- Based on info from NESDev wiki ( http://wiki.nesdev.com/w/index.php/Family_Computer_Disk_System )
+     $4020-$403F: RP2C33 disk and timer registers
+     $4040-$4092: FDS audio registers and wave RAM
+     $6000-$DFFF: 32 KiB program RAM
+     $E000-$FFFF: 8 KiB BIOS ROM
 
- TODO:
-   - convert floppy drive + fds format to modern code!
-
- ***********************************************************************************************************/
+**************************************************************************************************/
 
 
 #include "emu.h"
@@ -107,7 +112,8 @@ nes_disksys_device::nes_disksys_device(const machine_config &mconfig, const char
 	, m_disk(*this, "floppy0")
 	, m_sound(*this, "rp2c33snd")
 	, irq_timer(nullptr)
-	, m_irq_count(0), m_irq_count_latch(0), m_irq_enable(0), m_irq_repeat(0), m_irq_transfer(0), m_disk_reg_enable(0), m_fds_motor_on(0), m_fds_door_closed(0), m_fds_current_side(0), m_fds_head_position(0), m_fds_status0(0), m_read_mode(0), m_drive_ready(0)
+	, transfer_timer(nullptr)
+	, m_irq_count(0), m_irq_count_latch(0), m_irq_enable(0), m_irq_repeat(0), m_irq_transfer(0), m_disk_reg_enable(0), m_fds_motor_on(0), m_fds_current_side(0), m_fds_head_position(0), m_fds_status0(0), m_read_mode(0), m_drive_ready(0)
 	, m_fds_sides(0), m_fds_last_side(0), m_fds_count(0)
 {
 }
@@ -123,8 +129,10 @@ void nes_disksys_device::device_start()
 	irq_timer = timer_alloc(FUNC(nes_disksys_device::irq_timer_tick), this);
 	irq_timer->adjust(attotime::zero, 0, clocks_to_attotime(1));
 
+	transfer_timer = timer_alloc(FUNC(nes_disksys_device::transfer_timer_tick), this);
+	transfer_timer->adjust(attotime::zero, 0, attotime::from_hz(12'050));
+
 	save_item(NAME(m_fds_motor_on));
-	save_item(NAME(m_fds_door_closed));
 	save_item(NAME(m_fds_current_side));
 	save_item(NAME(m_fds_head_position));
 	save_item(NAME(m_fds_status0));
@@ -136,6 +144,7 @@ void nes_disksys_device::device_start()
 	save_item(NAME(m_irq_count));
 	save_item(NAME(m_irq_count_latch));
 	save_item(NAME(m_disk_reg_enable));
+	save_item(NAME(m_sound_en));
 
 	save_item(NAME(m_fds_last_side));
 	save_item(NAME(m_fds_count));
@@ -143,17 +152,17 @@ void nes_disksys_device::device_start()
 
 void nes_disksys_device::pcb_reset()
 {
-	// read accesses in 0x6000-0xffff are always handled by
-	// cutom code below, so no need to setup the prg...
+	// Read accesses from $6000-$FFFF are always handled by
+	// the custom handlers below, so no PRG banking setup is needed.
 	chr8(0, CHRRAM);
 	set_nt_mirroring(PPU_MIRROR_VERT);
 
 	m_fds_motor_on = 0;
-	m_fds_door_closed = 0;
 	m_fds_current_side = 1;
 	m_fds_head_position = 0;
 	m_fds_status0 = 0;
-	m_read_mode = 0;
+	// $4023.D0=0 resets $4025 to $06, whose transfer-mode bit is set.
+	m_read_mode = 1;
 	m_drive_ready = 0;
 	m_irq_count = 0;
 	m_irq_count_latch = 0;
@@ -161,6 +170,7 @@ void nes_disksys_device::pcb_reset()
 	m_irq_repeat = 0;
 	m_irq_transfer = 0;
 	m_disk_reg_enable = 0;
+	m_sound_en = false;
 
 	m_fds_count = 0;
 	m_fds_last_side = 0;
@@ -168,7 +178,7 @@ void nes_disksys_device::pcb_reset()
 
 
 /*-------------------------------------------------
- mapper specific handlers
+ Famicom Disk System memory handlers
  -------------------------------------------------*/
 
 /*-------------------------------------------------
@@ -211,16 +221,6 @@ uint8_t nes_disksys_device::read_m(offs_t offset)
 	return m_prgram[offset];
 }
 
-void nes_disksys_device::hblank_irq(int scanline, bool vblank, bool blanked)
-{
-	// FIXME: This looks like a gross hack that ties the disk byte transfer IRQ to the PPU. Seriously?
-	if (m_irq_transfer)
-	{
-		set_irq_line(ASSERT_LINE);
-		m_fds_status0 |= 0x02;
-	}
-}
-
 void nes_disksys_device::write_ex(offs_t offset, uint8_t data)
 {
 	LOG("Famicom Disk System write_ex, offset: %04x, data: %02x\n", offset, data);
@@ -251,52 +251,80 @@ void nes_disksys_device::write_ex(offs_t offset, uint8_t data)
 					set_irq_line(CLEAR_LINE);
 			}
 			break;
-		case 0x03:
-			// bit0 - Enable disk I/O registers
-			// bit1 - Enable sound I/O registers
+		case 0x03: {
+			// $4023
+			// bit 0: enable disk I/O register writes
+			// bit 1: enable FDS audio
 			m_disk_reg_enable = BIT(data, 0);
-			if (!m_disk_reg_enable)
-			{
+			m_sound_en = BIT(data, 1);
+
+			if (!m_disk_reg_enable) {
+				// Disabling disk I/O resets $4025 to $06.
 				m_irq_enable = 0;
+				m_irq_repeat = 0;
+				m_irq_transfer = 0;
+				m_fds_status0 &= ~0x89;
+				m_fds_motor_on = 0;
+				m_read_mode = 1;
+				m_drive_ready = 0;
+				m_fds_head_position = 0;
+				set_nt_mirroring(PPU_MIRROR_VERT);
 				set_irq_line(CLEAR_LINE);
 			}
-			m_sound_en = BIT(data, 1);
 			break;
+		}
+
 		case 0x04:
-			// write data out to disk
-			// TEST!
-			if (m_fds_data && m_fds_current_side && !m_read_mode)
-				m_fds_data[(m_fds_current_side - 1) * 65500 + m_fds_head_position++] = data;
-			// clear the byte transfer flag
-			m_fds_status0 &= ~0x02;
+			// $4024 is ignored while disk I/O registers are disabled.
+			if (!m_disk_reg_enable)
+				break;
+
+			// Write data out to disk.
+			if (m_fds_data && m_fds_current_side && !m_read_mode && m_fds_head_position < 65500) {
+				const uint32_t disk_offset = ((m_fds_current_side - 1) * 65500) + m_fds_head_position;
+
+				m_fds_data[disk_offset] = data;
+				m_fds_head_position++;
+			}
+
+			// Clear the byte-transfer flag and acknowledge its IRQ.
+			m_fds_status0 &= ~0x80;
 			set_irq_line(CLEAR_LINE);
 			break;
+
 		case 0x05:
-			// $4025 - FDS Control
-			// bit0 - Drive Motor Control (0: Stop motor; 1: Turn on motor)
-			// bit1 - Transfer Reset (Set 1 to reset transfer timing to the initial state)
-			// bit2 - Read / Write mode (0: write; 1: read)
-			// bit3 - Mirroring (0: horizontal; 1: vertical)
-			// bit4 - CRC control (set during CRC calculation of transfer)
-			// bit5 - Always set to '1'
-			// bit6 - Read/Write Start (Set to 1 when the drive becomes ready for read/write)
-			// bit7 - Interrupt Transfer (0: Transfer without using IRQ; 1: Enable IRQ when
-			//        the drive becomes ready)
+			// $4025 is ignored while disk I/O registers are disabled.
+			if (!m_disk_reg_enable)
+				break;
+
 			m_fds_motor_on = BIT(data, 0);
 
 			if (BIT(data, 1))
 				m_fds_head_position = 0;
 
-			if (!(data & 0x40) && m_drive_ready && m_fds_head_position > 2)
-				m_fds_head_position -= 2; // ??? is this some sort of compensation??
+			if (!BIT(data, 6) && m_drive_ready && m_fds_head_position > 2)
+				m_fds_head_position -= 2;
 
 			m_read_mode = BIT(data, 2);
+
+			// $4030.D3 directly reflects the latched $4025.D3 value.
+			if (BIT(data, 3))
+				m_fds_status0 |= 0x08;
+			else
+				m_fds_status0 &= ~0x08;
+
 			set_nt_mirroring(BIT(data, 3) ? PPU_MIRROR_HORZ : PPU_MIRROR_VERT);
+
 			m_drive_ready = data & 0x40;
 			m_irq_transfer = BIT(data, 7);
 			break;
+
 		case 0x06:
-			// external connector
+			// $4026 is ignored while disk I/O registers are disabled.
+			if (!m_disk_reg_enable)
+				break;
+
+			// External connector output is not otherwise emulated yet.
 			break;
 		case 0x60:  // $4080 - Volume envelope - read through $4090
 		case 0x62:  // $4082 - Frequency low
@@ -329,17 +357,15 @@ uint8_t nes_disksys_device::read_ex(offs_t offset)
 	switch (offset)
 	{
 		case 0x10:
-			// $4030 - disk status 0
-			// bit0 - Timer Interrupt (1: an IRQ occurred)
-			// bit1 - Byte transfer flag (Set to 1 every time 8 bits have been transferred between
-			//        the RAM adaptor & disk drive through $4024/$4031; Reset to 0 when $4024,
-			//        $4031, or $4030 has been serviced)
-			// bit4 - CRC control (0: CRC passed; 1: CRC error)
-			// bit6 - End of Head (1 when disk head is on the most inner track)
-			// bit7 - Disk Data Read/Write Enable (1 when disk is readable/writable)
-			ret = m_fds_status0 | 0x80;
-			// clear the disk IRQ detect and byte transfer flags
-			m_fds_status0 &= ~0x03;
+			// $4030 - FDS status
+			// bit 0 - Timer IRQ pending
+			// bit 3 - Nametable arrangement latched from $4025.D3
+			// bit 6 - End of head
+			// bit 7 - Byte-transfer flag
+			ret = m_fds_status0;
+
+			// Reading $4030 acknowledges both IRQ sources.
+			m_fds_status0 &= ~0x81;
 			set_irq_line(CLEAR_LINE);
 			break;
 		case 0x11:
@@ -360,7 +386,7 @@ uint8_t nes_disksys_device::read_ex(offs_t offset)
 			else
 				ret = 0;
 			// clear the byte transfer flag
-			m_fds_status0 &= ~0x02;
+			m_fds_status0 &= ~0x80;
 			set_irq_line(CLEAR_LINE);
 			break;
 		case 0x12:
@@ -422,6 +448,25 @@ TIMER_CALLBACK_MEMBER(nes_disksys_device::irq_timer_tick)
 	}
 }
 
+//-------------------------------------------------
+//  transfer_timer_tick - clock disk byte transfers
+//-------------------------------------------------
+
+TIMER_CALLBACK_MEMBER(nes_disksys_device::transfer_timer_tick) {
+	if (!m_disk_reg_enable || !m_fds_motor_on || !m_drive_ready) {
+		return;
+	}
+
+	if (!m_fds_data || !m_fds_current_side) {
+		return;
+	}
+
+	m_fds_status0 |= 0x80;
+
+	if (m_irq_transfer) {
+		set_irq_line(ASSERT_LINE);
+	}
+}
 
 // Hacky helper to allow user to switch disk side with a simple key
 
@@ -437,30 +482,50 @@ void nes_disksys_device::disk_flip_side()
 		popmessage("Disk set to side %c", m_fds_current_side+0x40);
 }
 
-
-
 // Disk Loading / Unloading
 
 void nes_disksys_device::load_disk(device_image_interface &image)
 {
-	int header = 0;
-	m_fds_sides = 0;
+	const uint64_t image_size = image.length();
+	const uint32_t header_size = (image_size % 65500) ? 0x10 : 0;
 
-	if (image.length() % 65500)
-		header = 0x10;
+	m_fds_sides = (image_size - header_size) / 65500;
+	m_fds_data = std::make_unique<uint8_t[]>(m_fds_sides * 65500);
 
-	m_fds_sides = (image.length() - header) / 65500;
+	image.fseek(header_size, SEEK_SET);
+	image.fread(m_fds_data.get(), m_fds_sides * 65500);
 
-	if (!m_fds_data)
-		m_fds_data = std::make_unique<uint8_t[]>(m_fds_sides * 65500);
-
-	// if there is an header, skip it
-	image.fseek(header, SEEK_SET);
-	image.fread(m_fds_data.get(), 65500 * m_fds_sides);
+	m_fds_current_side = m_fds_sides ? 1 : 0;
+	m_fds_last_side = 0;
+	m_fds_count = 0;
+	m_fds_head_position = 0;
+	m_fds_status0 &= ~0xc0;
 }
 
 void nes_disksys_device::unload_disk(device_image_interface &image)
 {
-	/* TODO: should write out changes here as well */
-	m_fds_sides =  0;
+	if (m_fds_data && m_fds_sides && !image.is_readonly()) {
+		const uint64_t image_size = image.length();
+		const uint32_t header_size = (image_size % 65500) ? 0x10 : 0;
+		const uint32_t data_size = m_fds_sides * 65500;
+
+		image.fseek(header_size, SEEK_SET);
+
+		const uint32_t bytes_written = image.fwrite(m_fds_data.get(), data_size);
+
+		if (bytes_written != data_size) {
+			logerror(
+				"FDS: Failed to write disk image: wrote %u of %u bytes\n",
+				bytes_written,
+				data_size);
+		}
+	}
+
+	m_fds_data.reset();
+	m_fds_sides = 0;
+	m_fds_current_side = 0;
+	m_fds_last_side = 0;
+	m_fds_count = 0;
+	m_fds_head_position = 0;
+	m_fds_status0 &= ~0xc0;
 }

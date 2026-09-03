@@ -6,8 +6,9 @@
  NES/Famicom cartridge emulation for Konami PCBs
 
 
- Here we emulate the following PCBs (multiple mappers needed due to different wirings in the pcbs
- causing different addresses to be used for bankswitch & irq)
+ Here we emulate the following Konami VRC PCBs.
+ Several mapper numbers are required because PCB variants connect
+ the register-select address lines differently.
 
  * Konami VRC-1 [mapper 75]
  * Konami VRC-2 [mapper 22,23,25]
@@ -63,7 +64,14 @@ nes_konami_vrc2_device::nes_konami_vrc2_device(const machine_config &mconfig, co
 }
 
 nes_konami_vrc3_device::nes_konami_vrc3_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock)
-	: nes_nrom_device(mconfig, NES_VRC3, tag, owner, clock), m_irq_count(0), m_irq_count_latch(0), m_irq_enable(0), m_irq_enable_latch(0), m_irq_mode(0), irq_timer(nullptr)
+	: nes_nrom_device(mconfig, NES_VRC3, tag, owner, clock), 
+	m_irq_count(0), 
+	m_irq_count_latch(0), 
+	m_irq_enable(0), 
+	m_irq_enable_latch(0), 
+	m_irq_mode(0), 
+	m_irq_delay(0),
+	irq_timer(nullptr)
 {
 }
 
@@ -143,6 +151,7 @@ void nes_konami_vrc3_device::device_start()
 	save_item(NAME(m_irq_enable_latch));
 	save_item(NAME(m_irq_count));
 	save_item(NAME(m_irq_count_latch));
+	save_item(NAME(m_irq_delay));
 }
 
 void nes_konami_vrc3_device::pcb_reset()
@@ -157,6 +166,9 @@ void nes_konami_vrc3_device::pcb_reset()
 	m_irq_count = 0;
 	m_irq_count_latch = 0;
 	m_irq_delay = 0;
+	
+	m_maincpu6502->cancel_delayed_mapper_irq();
+	set_irq_line(CLEAR_LINE);
 }
 
 void nes_konami_vrc4_device::device_start()
@@ -198,6 +210,9 @@ void nes_konami_vrc4_device::pcb_reset()
 	for (int i = 0; i < 8; i++)
 		m_mmc_vrom_bank[i] = i;
 	set_chr();
+	
+	m_maincpu6502->cancel_delayed_mapper_irq();
+	set_irq_line(CLEAR_LINE);
 }
 
 void nes_konami_vrc7_device::pcb_reset()
@@ -214,21 +229,14 @@ void nes_konami_vrc6_device::device_start()
 	save_item(NAME(m_vrc6_chr));
 }
 
-void nes_konami_vrc6_device::pcb_reset()
-{
-	nes_konami_vrc4_device::pcb_reset();
-
-	// IMPORTANT:
-	// device_nes_cart_interface::nt_r/nt_w still uses the current mirroring mode.
-	// Force vertical so offset 0x000 = NTA and offset 0x400 = NTB.
-	// Actual VRC6 nametable logic is handled by nt_r/nt_w below.
-	set_nt_mirroring(PPU_MIRROR_VERT);
-
+void nes_konami_vrc6_device::pcb_reset() {
 	m_vrc6_b003 = 0;
-	m_wram_enable = 0;
 
-	for (int i = 0; i < 8; i++)
+	for (int i = 0; i < 8; i++) {
 		m_vrc6_chr[i] = i;
+	}
+
+	nes_konami_vrc4_device::pcb_reset();
 
 	prg16_89ab(0);
 	prg8_cd((m_prg_chunks * 2) - 2);
@@ -266,9 +274,13 @@ void nes_konami_vrc1_device::write_h(offs_t offset, u8 data)
 			prg8_x(BIT(offset, 13, 2), data & 0x0f);
 			break;
 		case 0x1000:
-			set_nt_mirroring(data & 1 ? PPU_MIRROR_HORZ : PPU_MIRROR_VERT);
-			m_mmc_vrom_bank[0] = (m_mmc_vrom_bank[0] & 0x0f) | BIT(data, 1) << 4;
-			m_mmc_vrom_bank[1] = (m_mmc_vrom_bank[1] & 0x0f) | BIT(data, 2) << 4;
+			if (!m_four_screen_vram) {
+				set_nt_mirroring(BIT(data, 0) ? PPU_MIRROR_HORZ : PPU_MIRROR_VERT);
+			}
+
+			m_mmc_vrom_bank[0] = (m_mmc_vrom_bank[0] & 0x0f) | (BIT(data, 1) << 4);
+			m_mmc_vrom_bank[1] = (m_mmc_vrom_bank[1] & 0x0f) | (BIT(data, 2) << 4);
+
 			chr4_0(m_mmc_vrom_bank[0], CHRROM);
 			chr4_4(m_mmc_vrom_bank[1], CHRROM);
 			break;
@@ -375,19 +387,19 @@ TIMER_CALLBACK_MEMBER(nes_konami_vrc3_device::irq_timer_tick)
 {
 	if (m_irq_enable)
 	{
-		u16 mask = m_irq_mode ? 0x00ff : 0xffff; // 8 or 16 bit mode?
+		u16 mask = m_irq_mode ? 0x00ff : 0xffff; // 8-bit or 16-bit mode
 
 		// upper byte only incremented and reloaded in 16-bit mode
 		m_irq_count = (m_irq_count & ~mask) | ((m_irq_count + 1) & mask);
 		if (!(m_irq_count & mask))
 		{
-			m_irq_delay = 2;  //set_irq_line(ASSERT_LINE);
+			m_irq_delay = 2;
 			m_irq_count = (m_irq_count & ~mask) | (m_irq_count_latch & mask);
 		}
 	}
 }
 
-void nes_konami_vrc3_device::ppu_to_mapper(int scanline, unsigned dot, int ppu_tick) {
+void nes_konami_vrc3_device::ppu_to_mapper(int scanline, unsigned dot, int ppu_tick, uint16_t ppu_address) {
 	if (m_irq_delay > 0)
 	{
 		--m_irq_delay;
@@ -416,23 +428,20 @@ void nes_konami_vrc3_device::write_h(offs_t offset, u8 data)
 			m_irq_mode = BIT(data, 2);
 			m_irq_enable = BIT(data, 1);
 			m_irq_enable_latch = BIT(data, 0);
-			
-			if (m_irq_enable)
+
+			if (m_irq_enable) {
 				m_irq_count = m_irq_count_latch;
-			
-			if (m_irq_delay > 0)
-				m_maincpu6502->cancel_delayed_mapper_irq();
-			
-			m_irq_delay = 0;
-			set_irq_line(CLEAR_LINE);
-			break;
-		case 0x5000:
-			m_irq_enable = m_irq_enable_latch;
-			
-			if (m_irq_delay > 0)
-				m_maincpu6502->cancel_delayed_mapper_irq();
+			}
 
 			m_irq_delay = 0;
+			m_maincpu6502->cancel_delayed_mapper_irq();
+			set_irq_line(CLEAR_LINE);
+			break;
+
+		case 0x5000:
+			m_irq_enable = m_irq_enable_latch;
+			m_irq_delay = 0;
+			m_maincpu6502->cancel_delayed_mapper_irq();
 			set_irq_line(CLEAR_LINE);
 			break;
 		case 0x7000:
@@ -451,7 +460,7 @@ void nes_konami_vrc3_device::write_h(offs_t offset, u8 data)
  In MAME: Supported
 
  -------------------------------------------------*/
-void nes_konami_vrc4_device::ppu_to_mapper(int scanline, unsigned dot, int ppu_tick) {
+void nes_konami_vrc4_device::ppu_to_mapper(int scanline, unsigned dot, int ppu_tick, uint16_t ppu_address) {
 	if (m_irq_delay > 0)
 	{
 		--m_irq_delay;
@@ -460,13 +469,12 @@ void nes_konami_vrc4_device::ppu_to_mapper(int scanline, unsigned dot, int ppu_t
 	}
 }
 
-
 void nes_konami_vrc4_device::irq_tick()
 {
 	if (m_irq_count == 0xff)
 	{
 		m_irq_count = m_irq_count_latch;
-		m_irq_delay = 2; //set_irq_line(ASSERT_LINE);
+		m_irq_delay = 2;
 	}
 	else
 	{
@@ -496,33 +504,29 @@ TIMER_CALLBACK_MEMBER(nes_konami_vrc4_device::irq_timer_tick)
 	}
 }
 
-void nes_konami_vrc4_device::irq_ack_w()
-{
-	if(m_irq_delay > 0)
-		m_maincpu6502->cancel_delayed_mapper_irq();
-	
+void nes_konami_vrc4_device::irq_ack_w() {
+	m_maincpu6502->cancel_delayed_mapper_irq();
+
 	m_irq_enable = m_irq_enable_latch;
 	m_irq_delay = 0;
+
 	set_irq_line(CLEAR_LINE);
 }
 
-void nes_konami_vrc4_device::irq_ctrl_w(u8 data)
-{
-	if(m_irq_delay > 0)
-		m_maincpu6502->cancel_delayed_mapper_irq();
+void nes_konami_vrc4_device::irq_ctrl_w(u8 data) {
+	m_maincpu6502->cancel_delayed_mapper_irq();
 
 	m_irq_mode = BIT(data, 2);
 	m_irq_enable = BIT(data, 1);
 	m_irq_enable_latch = BIT(data, 0);
-
-	// Any write to IRQ control acknowledges pending IRQ and resets prescaler.
 	m_irq_delay = 0;
-	set_irq_line(CLEAR_LINE);
 	m_irq_prescale = 341;
 
-	// Reload IRQ counter from latch only if E is set.
-	if (m_irq_enable)
+	set_irq_line(CLEAR_LINE);
+
+	if (m_irq_enable) {
 		m_irq_count = m_irq_count_latch;
+	}
 }
 
 void nes_konami_vrc4_device::set_mirror(u8 data)
@@ -567,23 +571,28 @@ void nes_konami_vrc4_device::set_chr(int chr_base, int chr_mask)
 		chr1_x(i, chr_base | (m_mmc_vrom_bank[i] & chr_mask), m_chr_source);
 }
 
-u8 nes_konami_vrc4_device::read_m(offs_t offset)
-{
-	
+u8 nes_konami_vrc4_device::read_m(offs_t offset) {
 	LOG("VRC-4 read_m, offset: %04x\n", offset);
 
-	if (m_wram_enable)
+	const bool has_wram = !m_prgram.empty() || !m_battery.empty();
+	const bool has_8k_wram = m_prgram.size() >= 0x2000 || m_battery.size() >= 0x2000;
+
+	if (m_wram_enable && has_wram && (has_8k_wram || offset < 0x1000)) {
 		return device_nes_cart_interface::read_m(offset);
-	else
-		return get_open_bus();
+	}
+
+	return get_open_bus();
 }
 
-void nes_konami_vrc4_device::write_m(offs_t offset, u8 data)
-{
+void nes_konami_vrc4_device::write_m(offs_t offset, u8 data) {
 	LOG("VRC-4 write_m, offset: %04x, data: %02x\n", offset, data);
 
-	if (m_wram_enable)
+	const bool has_wram = !m_prgram.empty() || !m_battery.empty();
+	const bool has_8k_wram = m_prgram.size() >= 0x2000 || m_battery.size() >= 0x2000;
+
+	if (m_wram_enable && has_wram && (has_8k_wram || offset < 0x1000)) {
 		device_nes_cart_interface::write_m(offset, data);
+	}
 }
 
 void nes_konami_vrc4_device::write_h(offs_t offset, u8 data)
@@ -663,15 +672,19 @@ void nes_konami_vrc4_device::write_h(offs_t offset, u8 data)
 
 /*-------------------------------------------------
 
- Konami VRC-6
+Konami VRC6
 
- In MAME: Supported. It also uses konami_irq (there are IRQ
- issues though: see Akumajou Densetsu intro).
+Games: Akumajou Densetsu, Esper Dream II,
+Mouryou Senki Madara
 
- TODO: Implement other CHR modes not used by any of
- the three released VRC6 games?
+The documented CHR and nametable banking modes are
+implemented, including CIRAM and CHR-ROM nametables.
 
- -------------------------------------------------*/
+iNES: mappers 24 and 26
+
+In MAME: Supported.
+
+-------------------------------------------------*/
 u8 nes_konami_vrc6_device::vrc6_nt_bank(int nt) const
 {
 	nt &= 3;
@@ -732,42 +745,35 @@ u8 nes_konami_vrc6_device::vrc6_nt_bank(int nt) const
 	return bank;
 }
 
-u8 nes_konami_vrc6_device::nt_r(offs_t offset)
-{
+u8 nes_konami_vrc6_device::nt_r(offs_t offset) {
 	offset &= 0x0fff;
 
 	const int nt = offset >> 10;
 	const offs_t inner = offset & 0x03ff;
-
 	u8 bank = vrc6_nt_bank(nt);
 
-	if (!BIT(m_vrc6_b003, 4))
-	{
-		// CIRAM / NTRAM mode
+	if (!BIT(m_vrc6_b003, 4)) {
 		bank &= 1;
-		return device_nes_cart_interface::nt_r((bank * 0x400) + inner);
+		return m_ciram[(bank * 0x400) + inner];
 	}
 
-	// CHR-ROM nametable mode:
-	// raw 1 KB CHR ROM bank selected by VRC6 $B003 logic
-	return get_vrom_base()[
-		((bank * 0x400) + inner) & (get_vrom_size() - 1)
-	];
+	if (!get_vrom_size()) {
+		return get_open_bus();
+	}
+
+	return get_vrom_base()[((bank * 0x400) + inner) & (get_vrom_size() - 1)];
 }
 
-void nes_konami_vrc6_device::nt_w(offs_t offset, u8 data)
-{
+void nes_konami_vrc6_device::nt_w(offs_t offset, u8 data) {
 	offset &= 0x0fff;
 
 	const int nt = offset >> 10;
 	const offs_t inner = offset & 0x03ff;
-
 	u8 bank = vrc6_nt_bank(nt);
 
-	if (!BIT(m_vrc6_b003, 4))
-	{
+	if (!BIT(m_vrc6_b003, 4)) {
 		bank &= 1;
-		device_nes_cart_interface::nt_w((bank * 0x400) + inner, data);
+		m_ciram[(bank * 0x400) + inner] = data;
 	}
 }
 
@@ -802,10 +808,6 @@ void nes_konami_vrc6_device::write_h(offs_t offset, u8 data)
 		{
 			// $B003 : PPU banking style / mirroring / WRAM enable
 			m_vrc6_b003 = data;
-
-			// For normal commercial mode 0 with bit 5 set:
-			// data bits 3-2 select V/H/1screen A/1screen B.
-			//set_mirror((data >> 2) & 0x03);
 
 			m_wram_enable = BIT(data, 7);
 
@@ -907,15 +909,21 @@ void nes_konami_vrc6_device::device_add_mconfig(machine_config &config)
 
 /*-------------------------------------------------
 
- Konami VRC7
+Konami VRC7
 
- Games: Lagrange Point, Tiny Toon Adventures 2
+Games: Lagrange Point, Tiny Toon Adventures 2
 
- iNES: mapper 85
+VRC7a uses CPU A4 for register selection and is
+identified by NES 2.0 submapper 2.
 
- In MAME: Supported. It also uses konami_irq.
+VRC7b uses CPU A3 for register selection and is
+identified by NES 2.0 submapper 1.
 
- -------------------------------------------------*/
+iNES: mapper 85
+
+In MAME: Supported.
+
+-------------------------------------------------*/
 
 void nes_konami_vrc7_device::write_h(offs_t offset, u8 data)
 {
@@ -978,7 +986,7 @@ void nes_konami_vrc7_device::write_h(offs_t offset, u8 data)
 
 
 //-------------------------------------------------
-//  MACHINE_DRIVER( vrc7 )
+//  device_add_mconfig
 //-------------------------------------------------
 
 // From NESdev wiki: The VRC7, in addition to being a mapper chip, also produces 6 channels of

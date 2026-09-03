@@ -8,6 +8,8 @@
 #include "nxrom.h"
 #include "machine/i2cmem.h"
 
+class m6502_device;
+
 
 // ======================> nes_oekakids_device
 
@@ -18,14 +20,8 @@ public:
 	nes_oekakids_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock);
 
 	virtual void write_h(offs_t offset, uint8_t data) override;
-	virtual uint8_t nt_r(offs_t offset) override;
-	virtual void nt_w(offs_t offset, uint8_t data) override;
-
 	virtual void pcb_reset() override;
-
-	virtual void ppu_latch(offs_t offset) override;
-
-	// TODO: add oeka kids controller emulation
+	virtual void ppu_to_mapper(int scanline, unsigned dot, int ppu_tick, uint16_t ppu_address) override;
 
 protected:
 	// device-level overrides
@@ -34,6 +30,7 @@ protected:
 	void update_chr();
 
 	uint8_t m_reg, m_latch;
+	bool m_latch_clock;
 };
 
 
@@ -45,8 +42,9 @@ public:
 	// construction/destruction
 	nes_fcg_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock);
 
-	void fcg_write(offs_t offset, uint8_t data);
+	virtual void fcg_write(offs_t offset, uint8_t data);
 	virtual void write_m(offs_t offset, uint8_t data) override;
+	virtual void ppu_to_mapper(int scanline, unsigned dot, int ppu_tick, uint16_t ppu_address) override;
 
 	virtual void pcb_reset() override;
 
@@ -59,9 +57,12 @@ protected:
 	TIMER_CALLBACK_MEMBER(irq_timer_tick);
 
 	uint16_t   m_irq_count;
+	uint16_t   m_irq_latch;
 	int        m_irq_enable;
+	int        m_irq_delay;
 
 	emu_timer *irq_timer;
+	m6502_device *m_maincpu6502;
 };
 
 
@@ -77,6 +78,8 @@ public:
 
 protected:
 	nes_lz93d50_device(const machine_config &mconfig, device_type type, const char *tag, device_t *owner, uint32_t clock);
+
+	virtual void fcg_write(offs_t offset, uint8_t data) override;
 };
 
 
@@ -101,7 +104,6 @@ protected:
 
 	virtual void device_add_mconfig(machine_config &config) override;
 
-	// TODO: fix EEPROM I/O emulation
 	required_device<i2cmem_device> m_i2cmem;
 	uint8_t m_i2c_dir;
 };
@@ -132,6 +134,7 @@ public:
 	virtual uint8_t read_m(offs_t offset) override;
 	virtual void write_m(offs_t offset, uint8_t data) override;
 	virtual void write_h(offs_t offset, uint8_t data) override;
+	virtual void ppu_to_mapper(int scanline, unsigned dot, int ppu_tick, uint16_t ppu_address) override;
 
 	virtual void pcb_reset() override;
 
@@ -140,7 +143,10 @@ protected:
 	virtual void device_start() override;
 
 	void set_prg();
+
 	uint8_t m_reg[5];
+	uint8_t m_prg_outer_select;
+	bool m_wram_enable;
 };
 
 

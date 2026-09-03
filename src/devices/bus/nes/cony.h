@@ -6,6 +6,7 @@
 #pragma once
 
 #include "nxrom.h"
+#include "cpu/m6502/m6502.h"
 
 
 // ======================> nes_cony_device
@@ -22,6 +23,9 @@ public:
 	virtual void write_m(offs_t offset, u8 data) override;
 	virtual void write_h(offs_t offset, u8 data) override;
 
+	virtual void ppu_to_mapper(int scanline, unsigned dot, int ppu_tick, uint16_t ppu_address) override;
+	virtual void ppu_bus_address(uint16_t ppu_address, uint64_t ppu_cycle, int ppu_tick, bool odd_frame) override;
+
 	virtual void pcb_reset() override;
 
 protected:
@@ -34,11 +38,17 @@ protected:
 	virtual void set_prg();
 	virtual void set_chr();
 
+	void irq_clock();
+
 	TIMER_CALLBACK_MEMBER(irq_timer_tick);
 
 	u16 m_irq_count;
 	int m_irq_enable;
+	int m_irq_delay;
+	u8 m_irq_source;
+	bool m_irq_last_a12;
 
+	m6502_device *m_maincpu6502;
 	emu_timer *irq_timer;
 
 	u8 m_mmc_prg_bank[4];
@@ -49,7 +59,6 @@ protected:
 	u8 m_mode_reg;
 	u8 m_outer_reg;
 };
-
 
 // ======================> nes_cony1k_device
 
@@ -71,9 +80,10 @@ public:
 	// construction/destruction
 	nes_yoko_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock);
 
+	virtual u8 read_l(offs_t offset) override;
+	virtual void write_l(offs_t offset, u8 data) override;
 	virtual void write_h(offs_t offset, u8 data) override;
 };
-
 
 // device type definition
 DECLARE_DEVICE_TYPE(NES_CONY,   nes_cony_device)

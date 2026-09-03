@@ -19,10 +19,12 @@ Total rewrite by Matthew Sutton for Accuracy NTSC and PAL
 #include "video/ppu2c0x.h"
 #include "cpu/m6502/m6502.h"
 #include "sound/nes_apu.h"
-#include "bus/nes/mmc5.h"
-#include "bus/nes/mmc3.h"
-#include "bus/nes/mmc1.h"
-#include "bus/nes/tengen.h"
+//#include "bus/nes/mmc5.h"
+//#include "bus/nes/mmc3.h"
+//#include "bus/nes/mmc1.h"
+//#include "bus/nes/tengen.h"
+//#include "bus/nes/bootleg.h"
+//#include "bus/nes/batlab.h"
 
 #include "screen.h"
 
@@ -71,6 +73,11 @@ void ppu2c0x_device::device_config_complete() {
 	m_vidaccess_callback_proc.set(nullptr);
 	m_latch.set(nullptr);
 	m_ppu_to_mapper.set(nullptr);
+	m_ppu_bus_address_callback.set(nullptr);
+	m_ppu_odd_frame_skip.set(nullptr);
+	m_mmc1_ppu_phase.set(nullptr);
+	m_mmc5_ppu_read.set(nullptr);
+	m_mmc5_reset_scanline_irq.set(nullptr);
 }
 
 ppu2c0x_device::ppu2c0x_device(const machine_config& mconfig, device_type type, const char* tag, device_t* owner, uint32_t clock, address_map_constructor internal_map) :
@@ -92,6 +99,11 @@ ppu2c0x_device::ppu2c0x_device(const machine_config& mconfig, device_type type, 
 	m_tilecount(0),
 	m_latch(*this),
 	m_ppu_to_mapper(*this),
+	m_ppu_bus_address_callback(*this),
+	m_ppu_odd_frame_skip(*this),
+	m_mmc1_ppu_phase(*this),
+	m_mmc5_ppu_read(*this),
+	m_mmc5_reset_scanline_irq(*this),
 	m_scanline_callback_proc(*this),
 	m_hblank_callback_proc(*this),
 	m_vidaccess_callback_proc(*this),
@@ -326,6 +338,8 @@ void ppu2c0x_device::init_runtime_reset_state() {
 	oamdata_latch = 0xFF;
 	oam2_last_write = 0xFF;
 	oam2_full = false;
+	oam2_increment_frozen = false;
+	sprite0_in_oam2_next_valid = false;
 
 	// --------------------------------------------------
 	// Sprite evaluation state
@@ -433,19 +447,23 @@ void ppu2c0x_device::init_startup_only_state() {
 	// Mapper / cartridge-side device pointers
 	// --------------------------------------------------
 	m_mapper_number = -1;
-	m_mmc5 = nullptr;
-	m_mmc3 = nullptr;
-	m_mmc1_sxrom = nullptr;
-	m_rambo1 = nullptr;
+	//m_mmc5 = nullptr;
+	//m_mmc3 = nullptr;
+	//m_mmc1_sxrom = nullptr;
+	//m_rambo1 = nullptr;
+	//m_sc127 = nullptr;
+	//m_batmap_srrx = nullptr;
 
 	// --------------------------------------------------
 	// Mapper feature flags
 	// --------------------------------------------------
-	m_has_mmc3_a12 = false;
-	m_has_rambo1_a12 = false;
-	m_has_mmc5_ppu = false;
-	m_has_mmc1_phase = false;
-	m_has_chr_latch = false;
+	//m_has_mmc3_a12 = false;
+	//m_has_rambo1_a12 = false;
+	//m_has_sc127_a12 = false;
+	//m_has_mmc5_ppu = false;
+	//m_has_mmc1_phase = false;
+	//m_has_chr_latch = false;
+	//m_has_batmap_srrx_a12 = false;
 
 	// --------------------------------------------------
 	// PPU model / board configuration
@@ -502,7 +520,7 @@ void ppu2c0x_device::device_start() {
 	// Device pointers
 	// --------------------------------------------------
 	m_maincpu6502 = machine().root_device().subdevice<m6502_device>("maincpu");
-	m_mmc5 = machine().root_device().subdevice<nes_exrom_device>("nes_slot:exrom");
+	//m_mmc5 = machine().root_device().subdevice<nes_exrom_device>("nes_slot:exrom");
 
 	// --------------------------------------------------
 	// Power-up palette RAM
@@ -528,11 +546,13 @@ void ppu2c0x_device::device_start() {
 	save_item(NAME(m_security_value));
 	save_item(NAME(m_prerender_line));
 	save_item(NAME(frame));
-	save_item(NAME(m_has_mmc3_a12));
-	save_item(NAME(m_has_rambo1_a12));
-	save_item(NAME(m_has_mmc5_ppu));
-	save_item(NAME(m_has_mmc1_phase));
-	save_item(NAME(m_has_chr_latch));
+	//save_item(NAME(m_has_mmc3_a12));
+	//save_item(NAME(m_has_rambo1_a12));
+	//save_item(NAME(m_has_sc127_a12));
+	//save_item(NAME(m_has_mmc5_ppu));
+	//save_item(NAME(m_has_mmc1_phase));
+	//save_item(NAME(m_has_chr_latch));
+	//save_item(NAME(m_has_batmap_srrx_a12));
 
 	// --------------------------------------------------
 	// OAM memory
@@ -691,6 +711,8 @@ void ppu2c0x_device::device_start() {
 	save_item(NAME(oam_corrupt_seed));
 	save_item(NAME(oam_latch_addr));
 	save_item(NAME(oam2_full));
+	save_item(NAME(oam2_increment_frozen));
+	save_item(NAME(sprite0_in_oam2_next_valid));
 	save_item(NAME(oamdata_latch));
 	save_item(NAME(oam2_last_write));
 	save_item(NAME(overflow_eval_phase));
@@ -787,7 +809,7 @@ void ppu2c0x_device::presave() {
 
 void ppu2c0x_device::postload() {
 	ppuctrl_sprite_size = Sprite_size(m_save_sprite_size);
-	resolve_mapper_ppu_devices();
+	//resolve_mapper_ppu_devices();
 }
 
 //**************************************************************************
@@ -968,14 +990,10 @@ void ppu2c0x_device::ppu_bus_address_drive(uint16_t addr, ppu_bus_source source)
 	ppu_ad_latch = addr & 0xff;
 
 	const uint64_t cpu_cycle = m_cpu->total_cycles() + (source == ppu_bus_source::CPU_ACCESS ? 1 : 0);
-
 	const uint64_t ppu_cycle = (cpu_cycle * 3) + ppu_tick_in_cpu_cycle;
 
-	if (m_has_mmc3_a12 && m_mmc3)
-		m_mmc3->observe_ppu_a12(addr, ppu_cycle, ppu_tick_in_cpu_cycle, odd_frame);
-
-	if (m_has_rambo1_a12 && m_rambo1)
-		m_rambo1->observe_ppu_a12(addr, ppu_cycle, ppu_tick_in_cpu_cycle, odd_frame);
+	if (!m_ppu_bus_address_callback.isnull())
+		m_ppu_bus_address_callback(addr, ppu_cycle, ppu_tick_in_cpu_cycle, odd_frame);
 }
 
 uint8_t ppu2c0x_device::ppu_bus_read(uint16_t addr, ppu_fetch_phase phase) {
@@ -1024,8 +1042,8 @@ uint8_t ppu2c0x_device::ppu_bus_read(uint16_t addr, ppu_fetch_phase phase) {
 
 	ppu_bus_address_drive(addr, ppu_bus_source::PPU);
 
-	if (m_has_mmc5_ppu && m_mmc5) {
-		m_mmc5->mmc5_clock_ppu_read(addr, is_nt, is_at, is_bg_pattern, is_spr_pattern);
+	if (!m_mmc5_ppu_read.isnull()) {
+		m_mmc5_ppu_read(addr);
 	}
 
 	const uint8_t data = readbyte(addr);
@@ -1034,13 +1052,13 @@ uint8_t ppu2c0x_device::ppu_bus_read(uint16_t addr, ppu_fetch_phase phase) {
 	// the low address byte captured during the preceding setup phase.
 	ppu_ad_latch = data;
 
-	if (addr < 0x2000) {
-		if (chr_fetch && !m_latch.isnull())
+	if (addr < 0x2000 && chr_fetch) {
+		if (!m_latch.isnull())
 			m_latch(addr);
 
-		if (m_has_mmc1_phase && m_mmc1_sxrom) {
-			const bool upper_chr = (addr & 0x1000) != 0;
-			m_mmc1_sxrom->mmc1_ppu_phase(upper_chr, addr & 0x1FFF);
+		if (!m_mmc1_ppu_phase.isnull()) {
+			const bool upper_chr = BIT(addr, 12);
+			m_mmc1_ppu_phase(upper_chr, addr & 0x1fff);
 		}
 	}
 
@@ -1090,21 +1108,13 @@ void ppu2c0x_device::set_mapper(int mapper)
 {
 	m_mapper_number = mapper;
 
-	// Start optimistic for MMC3-derived boards. Device resolution below
-	// disables this when the loaded PCB is not derived from nes_txrom_device.
-	m_has_mmc3_a12 = true;
+	//m_has_mmc5_ppu = mapper == 5;
+	//m_has_mmc1_phase = mapper == 1;
 
-	// RAMBO-1 mapper 64 and mapper 158 use filtered PPU A12 in scanline mode.
-	m_has_rambo1_a12 = mapper == 64 || mapper == 158;
-
-	m_has_mmc5_ppu = mapper == 5;
-
-	m_has_mmc1_phase = mapper == 1;
-
-	resolve_mapper_ppu_devices();
+	//resolve_mapper_ppu_devices();
 }
 
-void ppu2c0x_device::resolve_mapper_ppu_devices() {
+/*void ppu2c0x_device::resolve_mapper_ppu_devices() {
 	// MMC5 has special PPU read observation for scanline detection / ExROM behavior.
 	if (m_has_mmc5_ppu && !m_mmc5)
 		m_mmc5 = machine().root_device().subdevice<nes_exrom_device>("nes_slot:exrom");
@@ -1152,6 +1162,44 @@ void ppu2c0x_device::resolve_mapper_ppu_devices() {
 	if (m_has_rambo1_a12 && !m_rambo1)
 		m_has_rambo1_a12 = false;
 
+	// Mapper 35 uses the J.Y. ASIC's unfiltered PPU A12 IRQ source.
+	if (m_has_sc127_a12 && !m_sc127) {
+		device_t *const slot = machine().root_device().subdevice("nes_slot");
+
+		if (slot) {
+			for (device_t &dev : slot->subdevices()) {
+				m_sc127 = dynamic_cast<nes_sc127_device *>(&dev);
+
+				if (m_sc127) {
+					break;
+				}
+			}
+		}
+	}
+
+	if (m_has_sc127_a12 && !m_sc127) {
+		m_has_sc127_a12 = false;
+	}
+	
+	if (m_has_batmap_srrx_a12 && !m_batmap_srrx)
+	{
+		device_t *const slot = machine().root_device().subdevice("nes_slot");
+
+		if (slot)
+		{
+			for (device_t &dev : slot->subdevices())
+			{
+				m_batmap_srrx = dynamic_cast<nes_batmap_srrx_device *>(&dev);
+
+				if (m_batmap_srrx)
+					break;
+			}
+		}
+	}
+
+	if (m_has_batmap_srrx_a12 && !m_batmap_srrx)
+		m_has_batmap_srrx_a12 = false;
+
 	// MMC1 special SxROM-family phase feed.
 	//
 	// Only boards that repurpose MMC1 CHR register bits for PRG-RAM enable/banking
@@ -1177,9 +1225,10 @@ void ppu2c0x_device::resolve_mapper_ppu_devices() {
 		m_has_mmc1_phase = false;
 
 	m_has_chr_latch = !m_latch.isnull();
-}
+}*/
 
 void ppu2c0x_device::tick(int x) {
+
 	ppu_tick_in_cpu_cycle = x;
 
 	// Sprite-0 hit is detected by pixel overlap now, but $2002 bit 6
@@ -1282,13 +1331,34 @@ void ppu2c0x_device::tick(int x) {
 				}
 
 				schedule_2007_post_access_bump();
-			} else {
+			/*} else {
 				// Non-rendering $2007 read:
 				// The mapper sees the original $2007 access address.
 				// The read buffer data may come from the palette mirror.
 				ppu_bus_address_drive(delayed_bus_addr, ppu_bus_source::PPU);
 				ppudata_read_buffer = readbyte(read_addr);
 
+				m_2007_read.pending = false;
+			}*/
+			} else {
+				// Non-rendering $2007 read:
+				// The mapper sees the original $2007 access address.
+				// The read buffer data may come from the palette mirror.
+				ppu_bus_address_drive(delayed_bus_addr, ppu_bus_source::PPU);
+
+				if (!m_mmc5_ppu_read.isnull()) {
+					m_mmc5_ppu_read(delayed_bus_addr);
+				}
+
+				ppudata_read_buffer = readbyte(read_addr);
+				
+				// MMC2/MMC4 observe pattern-table reads performed through $2007.
+				// Apply the latch only after the triggering byte has been fetched.
+				if (read_addr < 0x2000 && !m_latch.isnull()) {
+					//logerror("MMC2/MMC4 $2007 CHR read: %04X\n", read_addr);
+					m_latch(read_addr);
+				}
+				
 				m_2007_read.pending = false;
 			}
 		}
@@ -1434,7 +1504,7 @@ void ppu2c0x_device::tick(int x) {
 	// Only mapper devices with a PPU tick callback need this.
 	// Avoid call_mapper() overhead for plain carts.
 	if (!m_ppu_to_mapper.isnull())
-		m_ppu_to_mapper(scanline, dot, ppu_tick_in_cpu_cycle);
+		m_ppu_to_mapper(scanline, dot, ppu_tick_in_cpu_cycle, ppu_address_bus);
 
 	if (ppu2007_post_bump_pending) {
 		if (ppu2007_post_bump_delay > 0) {
@@ -1454,8 +1524,10 @@ void ppu2c0x_device::tick(int x) {
 		skip_dot = true;
 		sprite_sl0_early_shift_pending = sl0_stale_s0_loaded;
 
-		if (m_has_mmc3_a12 && m_mmc3)
-			m_mmc3->notify_ppu_odd_skip();
+		//if (m_has_mmc3_a12 && m_mmc3)
+		//	m_mmc3->notify_ppu_odd_skip();
+		if (!m_ppu_odd_frame_skip.isnull())
+			m_ppu_odd_frame_skip();
 	}
 
 	++dot;
@@ -1745,9 +1817,10 @@ void ppu2c0x_device::run_visible_scanline_dot() {
 		}
 	}
 
-	if (dot == 257 && (bg_pipeline_enabled || spr_pipeline_enabled)) {
+	if (dot == 257 && (bg_pipeline_enabled || spr_pipeline_enabled) && sprite0_in_oam2_next_valid) {
 		sprite0_in_oam2_current = sprite0_in_oam2_next;
 		sprite0_in_oam2_next = false;
+		sprite0_in_oam2_next_valid = false;
 	}
 
 	if (dot >= 2 && dot <= 257) {
@@ -1771,6 +1844,10 @@ void ppu2c0x_device::run_render_pipeline_dot() {
 	}
 
 	const bool pipe_render = (bg_pipeline_enabled || spr_pipeline_enabled);
+	
+	if (pipe_render && (dot == 63 || dot == 255 || dot == 339)) {
+		oam2_increment_frozen = false;
+	}
 
 	switch (dot) {
 		case 1 ... 256:
@@ -1780,15 +1857,6 @@ void ppu2c0x_device::run_render_pipeline_dot() {
 
 				if (dot == 256) {
 					bump_vert();
-				}
-				// Micromachines/Scroll Fix:
-				// The PPU bus often holds the first sprite's data during the fetch phase for
-				// the first two background tiles of the next line.
-				//
-				// Dot 321 signal quirk: OAM2ADDR receives one extra increment.
-				// However, $2004-visible secondary-OAM behavior exposes byte 0 here.
-				if (dot == 321) {
-					oam2addr = (oam2addr + 1) & 0x1F;
 				}
 			}
 			break;
@@ -2110,6 +2178,7 @@ void ppu2c0x_device::do_sprite_evaluation() {
 	if (!sprite_eval_initialized) {
 		sprite_eval_initialized = true;
 		sprite0_in_oam2_next = false;
+		sprite0_in_oam2_next_valid = true;
 		// ppustatus_sprite_overflow is intentionally NOT cleared here.
 		// It is the PPUSTATUS-visible flag and is cleared elsewhere.
 
@@ -2388,8 +2457,10 @@ void ppu2c0x_device::do_sprite_evaluation() {
 
 		oam2addr++;
 
-		if (!oam2_full && oam2addr >= 0x20)
+		if (!oam2_full && oam2addr >= 0x20) {
 			oam2_full = true;
+			oam2_increment_frozen = true;
+		}
 
 		step_copy_addr();
 
@@ -2566,7 +2637,8 @@ void ppu2c0x_device::do_sprite_loading() {
 				ppu_address_bus = (0x2000 | (spr_fetch_v_new & 0x0FFF)) & 0x3FFF;
 			}
 
-			eval_sprite_y = secondary_oam[(base + 0) & 0x1F];
+			//eval_sprite_y = secondary_oam[(base + 0) & 0x1F];
+			eval_sprite_y = oam2_read;
 			break;
 		}
 
@@ -2577,7 +2649,8 @@ void ppu2c0x_device::do_sprite_loading() {
 			ppu_bus_read_can_fill_2007 = true;
 			(void)ppu_bus_read(ppu_address_bus, ppu_fetch_phase::SPR_NT);
 			ppu_bus_read_can_fill_2007 = false;
-			eval_sprite_tile = secondary_oam[(base + 1) & 0x1F];
+			//eval_sprite_tile = secondary_oam[(base + 1) & 0x1F];
+			eval_sprite_tile = oam2_read;
 			break;
 		}
 
@@ -2587,7 +2660,8 @@ void ppu2c0x_device::do_sprite_loading() {
 			// Set up garbage nametable fetch #2 and assert the normal
 			// attribute-latch load strobe.
 			ppu_address_bus = (0x2000 | (spr_fetch_v_new & 0x0FFF)) & 0x3FFF;
-			spr_attr_latch[sprite_n] = secondary_oam[(base + 2) & 0x1F];
+			//spr_attr_latch[sprite_n] = secondary_oam[(base + 2) & 0x1F];
+			spr_attr_latch[sprite_n] = oam2_read;
 			break;
 		}
 
@@ -2599,8 +2673,23 @@ void ppu2c0x_device::do_sprite_loading() {
 			ppu_bus_read_can_fill_2007 = true;
 			(void)ppu_bus_read(ppu_address_bus, ppu_fetch_phase::SPR_AT);
 			ppu_bus_read_can_fill_2007 = false;
-			spr_x_latch[sprite_n] = secondary_oam[(base + 3) & 0x1F];
+			
+			// A forced-blank resume has already selected the corrupted output
+			// unit and armed its one-shot high-pattern write inhibit. Preserve
+			// that unit's known-good StarTropics X behavior.
+			//
+			// Every normal output unit loads X from the OAM2 read bus. When
+			// OAM2ADDR is frozen at zero, this supplies OAM2[0] as required.
+			if (sprite_n == corrupt_resume_high_lane) {
+				spr_x_latch[sprite_n] = secondary_oam[(base + 3) & 0x1F];
+			} else {
+				spr_x_latch[sprite_n] = oam2_read;
+			}
+
 			spr_x_counter[sprite_n] = spr_x_latch[sprite_n];
+			
+			//spr_x_latch[sprite_n] = secondary_oam[(base + 3) & 0x1F];
+			//spr_x_counter[sprite_n] = spr_x_latch[sprite_n];
 			break;
 		}
 
@@ -2682,8 +2771,14 @@ void ppu2c0x_device::do_sprite_loading() {
 	//
 	//   byte 0, byte 1, byte 2, byte 3,
 	//   byte 3, byte 3, byte 3, byte 3
-	if (spr_load_phase < 3 || spr_load_phase == 7) {
-		oam2addr = (oam2addr + 1) & 0x1F;
+	if (!oam2_increment_frozen) {
+		if (spr_load_phase < 3 || spr_load_phase == 7) {
+			oam2addr = (oam2addr + 1) & 0x1F;
+
+			if (oam2addr == 0) {
+				oam2_increment_frozen = true;
+			}
+		}
 	}
 }
 
@@ -2953,6 +3048,10 @@ uint8_t ppu2c0x_device::read(offs_t offset) {
 			const uint8_t ret = m_security_value ? uint8_t((vblank_read ? 0x80 : 0x00) | (spr0_read ? 0x40 : 0x00) | m_security_value) :
 												   uint8_t((vblank_read ? 0x80 : 0x00) | (spr0_read ? 0x40 : 0x00) | (ovf_read ? 0x20 : 0x00) | (old_bus & 0x1f));
 
+			if (BIT(ret, 7) && !m_mmc5_reset_scanline_irq.isnull()) {
+				m_mmc5_reset_scanline_irq();
+			}
+
 			ppustatus_vblank = false;
 			set_nmi(false);
 
@@ -3076,19 +3175,6 @@ void ppu2c0x_device::apply_delayed_2001(uint8_t val) {
 	const bool new_bg_on = (val & 0x08) != 0;
 	const bool new_spr_on = (val & 0x10) != 0;
 
-	// Rendering-enable edge.
-	//
-	// $2001 only records that rendering resumed during sprite loading.
-	// The sprite-loading path selects the destination lane and consumes
-	// the previous OAM buffer value.
-	if (!prev_pipe && (new_bg_on || new_spr_on)) {
-		corrupt_resume_fifo_pending = false;
-		corrupt_resume_high_lane = 0xFF;
-
-		if (is_render_scanline() && dot >= 257 && dot <= 320)
-			corrupt_resume_fifo_pending = true;
-	}
-
 	bg_pipeline_enabled = new_bg_on;
 	spr_pipeline_enabled = new_spr_on;
 
@@ -3204,6 +3290,7 @@ void ppu2c0x_device::write(offs_t offset, uint8_t val) {
 			}
 
 			ppuctrl_nmi_enable = new_nmi_on_vblank;
+			
 			m_regs[PPU_CONTROL0] = val;
 			pending_2000.has_pending = true;
 			pending_2000.value = val;
@@ -3213,6 +3300,18 @@ void ppu2c0x_device::write(offs_t offset, uint8_t val) {
 
 		case PPU_CONTROL1: {
 			uint8_t old_ppumask = m_regs[PPU_CONTROL1];
+
+			const bool old_render = (old_ppumask & 0x18) != 0;
+			const bool new_render = (val & 0x18) != 0;
+
+			if (!old_render && new_render) {
+				corrupt_resume_fifo_pending = false;
+				corrupt_resume_high_lane = 0xFF;
+
+				if (is_render_scanline() && dot >= 257 && dot <= 320) {
+					corrupt_resume_fifo_pending = true;
+				}
+			}
 
 			bg_output_enabled = (val & 0x08) != 0;
 			spr_output_enabled = (val & 0x10) != 0;

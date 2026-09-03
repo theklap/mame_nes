@@ -186,23 +186,18 @@ u8 mmc5snd_device::pulse_output(int chan) const
 //  clock_pulse_timers
 //-------------------------------------------------
 
-void mmc5snd_device::clock_pulse_timers()
-{
-	// MMC5 pulse channels are APU-like: timer clocks the 8-step pulse sequencer
-	// on every other CPU cycle.
+void mmc5snd_device::clock_pulse_timers() {
+	// MMC5 pulse timers operate like the native APU pulse timers:
+	// the 8-step duty sequencer is clocked on every other CPU cycle.
 	m_timer_divider = !m_timer_divider;
 	if (!m_timer_divider)
 		return;
 
-	for (auto &pulse : m_pulse)
-	{
-		if (pulse.timer == 0)
-		{
-			pulse.timer = (pulse.timer_low | ((pulse.timer_high & 0x07) << 8)) + 1;
+	for (auto &pulse : m_pulse) {
+		if (pulse.timer == 0) {
+			pulse.timer = pulse.timer_low | ((pulse.timer_high & 0x07) << 8);
 			pulse.duty_step = (pulse.duty_step + 1) & 0x07;
-		}
-		else
-		{
+		} else {
 			--pulse.timer;
 		}
 	}
@@ -261,17 +256,13 @@ void mmc5snd_device::clock_length_counters()
 //  clock_frame_sequencer
 //-------------------------------------------------
 
-void mmc5snd_device::clock_frame_sequencer()
-{
-	// MMC5 does not use APU $4017 frame mode. Envelope and length clocks are
-	// fixed at about 240 Hz. This is intentionally independent from the 2A03
-	// frame counter mode.
-	m_frame_accum += 240;
+void mmc5snd_device::clock_frame_sequencer() {
+	// Die-image analysis indicates that the MMC5 clocks both envelopes and
+	// length counters once every 7424 M2 cycles, approximately 241.079 Hz.
+	++m_frame_accum;
 
-	while (m_frame_accum >= clock())
-	{
-		m_frame_accum -= clock();
-
+	if (m_frame_accum >= 7424) {
+		m_frame_accum -= 7424;
 		clock_envelopes();
 		clock_length_counters();
 	}

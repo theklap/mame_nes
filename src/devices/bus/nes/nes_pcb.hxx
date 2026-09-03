@@ -25,6 +25,7 @@ static const nes_pcb pcb_list[] =
 	{ "bandai_pt554",     BANDAI_PT554 },
 	{ "cprom",            STD_CPROM },
 	{ "axrom",            STD_AXROM },
+	{ "amrom",            STD_AMROM },
 	{ "pxrom",            STD_PXROM },
 	{ "fxrom",            STD_FXROM },
 	{ "bnrom",            STD_BXROM },
@@ -578,6 +579,24 @@ void nes_cart_slot_device::call_load_pcb()
 		m_pcb_id = nes_get_pcb_id(get_feature("slot"));
 	else
 		m_pcb_id = NO_BOARD;
+
+	// BMC-FK23C boards can connect the register-enable input to
+	// one of CPU address lines A4-A11. Store the per-cartridge
+	// solder-pad configuration supplied by the software list.
+	if (m_pcb_id == BMC_FK23C || m_pcb_id == BMC_FK23CA) {
+		const char *feature = get_feature("fk23c_solder_pad");
+		unsigned solder_pad = 0;
+
+		if (feature) {
+			if (sscanf(feature, "%u", &solder_pad) != 1 || solder_pad > 7) {
+				logerror("Invalid FK23C solder-pad setting: %s; using setting 0\n", feature);
+				solder_pad = 0;
+			}
+		}
+
+		m_cart->set_fk23c_solder_pad(solder_pad);
+		logerror("-- FK23C solder pad: setting %u, CPU A%u\n", solder_pad, solder_pad + 4);
+	}
 
 	// SETUP step 3: storing the info needed for emulation
 	if (get_software_region("bwram") != nullptr)

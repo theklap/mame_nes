@@ -403,7 +403,7 @@ TIMER_CALLBACK_MEMBER(nes_sunsoft_fme7_device::irq_timer_tick)
 	}
 }
 
-void nes_sunsoft_fme7_device::ppu_to_mapper(int scanline, unsigned dot, int ppu_tick)
+void nes_sunsoft_fme7_device::ppu_to_mapper(int scanline, unsigned dot, int ppu_tick, uint16_t ppu_address)
 {
 	if (delay_irq) {
 		delay_irq--;

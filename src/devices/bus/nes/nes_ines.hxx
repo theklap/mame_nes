@@ -67,7 +67,8 @@ static const nes_mmc mmc_list[] =
 	{ 32, IREM_G101 },
 	{ 33, TAITO_TC0190FMC },
 	{ 34, STD_BXROM },
-	{ 35, UNL_SC127 },
+	//{ 35, UNL_SC127 },
+	{ 35, JYCOMPANY_C },
 	{ 36, TXC_STRIKEW },
 	{ 37, PAL_ZZ },
 	{ 38, DIS_74X161X138 },
@@ -694,8 +695,13 @@ void nes_cart_slot_device::call_load_ines()
 	if (submapper)
 	{
 		// 001: MMC1 (other submappers are deprecated)
-		if (mapper == 1 && submapper == 5) {
-			logerror("NES 2.0 submapper: SEROM/SHROM/SH1ROM.\n");
+		if (mapper == 1) {
+			if (submapper == 5) {
+				logerror("NES 2.0 submapper: SEROM/SHROM/SH1ROM.\n");
+			}
+			else if (submapper == 7) {
+				pcb_id = KAISER_KS7058;
+			}
 		}
 		// 002, 003, 007: UxROM, CNROM, AxROM
 		else if (mapper == 2 && submapper == 2)
@@ -804,9 +810,19 @@ else if (mapper == 25)
 			m_cart->set_mirroring(PPU_MIRROR_HIGH); // Major League has hardwired mirroring
 		}
 		// iNES Mapper 034
-		else if (mapper == 34 && submapper == 1)
-		{
-			pcb_id = AVE_NINA01; // Mapper 34 is used for 2 diff boards
+		else if (mapper == 34) {
+			// NES 2.0 mapper 34 submappers:
+			//   1 = NINA-001
+			//   2 = BNROM with AND-type bus conflicts
+			if (submapper == 1) {
+				pcb_id = AVE_NINA01;
+			}
+			else if (submapper == 2) {
+				bus_conflict = true;
+			}
+			else {
+				logerror("Unimplemented NES 2.0 submapper %d for mapper 34\n", submapper);
+			}
 		}
 		// iNES Mapper 068 / Sunsoft 4
 		else if (mapper == 68 && submapper == 1)
@@ -878,12 +894,19 @@ else if (mapper == 25)
 			}
 			else
 				logerror("Unimplemented NES 2.0 submapper: %d\n", submapper);
+		//mapper 417 submapper 1: RoboCop PCB
+		} else if (mapper == 417 && submapper == 1) {
+			logerror("NES 2.0 mapper 417 submapper 1: RoboCop PCB.\n");
 		}
 		else if (submapper)
 		{
 			submapper = 0;
 			logerror("Undocumented NES 2.0 submapper, please report it to the MAME boards!\n");
 		}
+	}
+
+	if (pcb_id == CNE_DECATHLON) {
+		bus_conflict = true;
 	}
 
 	// SETUP step 3: storing the info needed for emulation
@@ -951,6 +974,7 @@ else if (mapper == 25)
 				case STD_AMROM:
 				case STD_BXROM:
 				case STD_GXROM:
+				case BTL_DRAGONNINJA:
 					prgram_size = 0;
 					break;
 
@@ -972,6 +996,33 @@ else if (mapper == 25)
 			if (battery_size)
 				battery_size = 0x8000;  // 32KB battery RAM
 		}
+	}
+
+	// Mapper 246 has exactly 2 KiB of battery-backed PRG-RAM
+	// decoded at $6800-$6FFF.
+	if (pcb_id == CNE_FSB) {
+		prgram_size = 0;
+		battery_size = 0x0800;
+	}
+	
+	if (mapper == 83) {
+		const bool banked_nvram = ines20 ? submapper == 2 : vrom_size == 0x100000;
+
+		if (banked_nvram) {
+			prgram_size = 0;
+			battery_size = 0x8000;
+		}
+		else {
+			prgram_size = 0;
+			battery_size = 0;
+		}
+	}
+
+	// Mapper 35 is the J.Y. Type C ASIC with 8KB WRAM.
+	// BTL-SMB3 is mapper 106
+	// Supply it when the image header does not declare PRG RAM.
+	if ((mapper == 35 || mapper == 106) && !prgram_size && !battery_size) {
+		prgram_size = 0x2000;
 	}
 
 	if (m_pcb_id == STD_NROM && vrom_size == 0 && vram_size == 0)
@@ -1066,7 +1117,11 @@ else if (mapper == 25)
 				}
 			}
 			break;
-
+		
+		case CALTRON_6IN1:
+			bus_conflict = true;
+			break;
+	
 		case KONAMI_VRC2:
 			if (mapper == 22)
 				m_cart->set_vrc_lines(0, 1, 1);
@@ -1120,8 +1175,14 @@ else if (mapper == 25)
 			break;
 
 		case CONY_BOARD:
-			if (submapper == 0 || submapper == 2)
-				pcb_id = CONY1K_BOARD;
+			if (ines20) {
+				if (submapper == 0 || submapper == 2) {
+					m_pcb_id = CONY1K_BOARD;
+				}
+			}
+			else if (vrom_size != 0x80000) {
+				m_pcb_id = CONY1K_BOARD;
+			}
 			break;
 
 		case UNL_LH28_LH54:
@@ -1209,7 +1270,10 @@ else if (mapper == 25)
 			fatalerror("Bandai Datach games have to be mounted in the Datach subslot!\n");
 			break;
 	}
-
+	// Original iNES mapper 34 defaults to BNROM unless NINA-001 was selected.
+	if (mapper == 34 && submapper == 0 && m_pcb_id == STD_BXROM) {
+		bus_conflict = true;
+	}
 	// NES 2.0 mapper 3 / CNROM:
 	//   submapper 0 = unknown bus-conflict behavior
 	//   submapper 1 = no bus conflicts
@@ -1228,11 +1292,17 @@ else if (mapper == 25)
 	if (mapper == 7 && submapper == 0)
 		bus_conflict = true;
 
-	// Finally turn off bus conflict emulation, because the pirate variants of the boards are bus conflict free and games would glitch
+	// Apply the bus-conflict behavior selected by the PCB or NES 2.0 submapper.
 	m_cart->set_bus_conflict(bus_conflict);
 
-	// Finally turn off bus conflict emulation, because the pirate variants of the boards are bus conflict free and games would glitch
-	m_cart->set_bus_conflict(bus_conflict);
+	osd_printf_info("NES mapper: %u\n", mapper);
+
+	if (ines20) {
+		osd_printf_info("NES submapper: %u\n", submapper);
+	}
+	else {
+		osd_printf_info("NES submapper: not specified (iNES 1.0)\n");
+	}
 
 	// SETUP step 4: logging what we have found
 	logerror("Loaded game in %s format:\n", ines20 ? "NES 2.0" : "iNES");
@@ -1433,9 +1503,13 @@ const char * nes_cart_slot_device::get_default_card_ines(get_default_card_softwa
 				pcb_id = KONAMI_VRC2;
 		}
 		// iNES Mapper 034
-		else if (mapper == 34 && submapper == 1)
-		{
-			pcb_id = AVE_NINA01; // Mapper 34 is used for 2 diff boards
+		else if (mapper == 34) {
+			if (submapper == 1) {
+				pcb_id = AVE_NINA01;
+			}
+			else if (submapper == 2) {
+				pcb_id = STD_BXROM;
+			}
 		}
 		// iNES Mapper 078
 		else if (mapper == 78)
@@ -1505,8 +1579,14 @@ const char * nes_cart_slot_device::get_default_card_ines(get_default_card_softwa
 			break;
 
 		case CONY_BOARD:
-			if (submapper == 0 || submapper == 2)
-				pcb_id = CONY1K_BOARD;         // Mapper 83 is used for 3 diff boards
+			if (ines20) {
+				if (submapper == 0 || submapper == 2) {
+					pcb_id = CONY1K_BOARD;
+				}
+			}
+			else if (ROM[5] != 0x40) {
+				pcb_id = CONY1K_BOARD;
+			}
 			break;
 
 		case UNL_LH28_LH54:                            // Mapper 108 is used for 4 diff boards

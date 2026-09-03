@@ -20,6 +20,7 @@
 
 #include "emu.h"
 #include "jaleco.h"
+#include "cpu/m6502/m6502.h"
 
 #include "speaker.h"
 
@@ -102,7 +103,9 @@ nes_ss88006_device::nes_ss88006_device(const machine_config &mconfig, device_typ
 	, m_irq_count_latch(0)
 	, m_irq_mode(0)
 	, m_irq_enable(0)
+	, m_irq_delay(0)
 	, irq_timer(nullptr)
+	, m_maincpu6502(nullptr)
 	, m_wram_protect(0)
 {
 }
@@ -159,6 +162,7 @@ void nes_jf17_device::pcb_reset()
 void nes_ss88006_device::device_start()
 {
 	common_start();
+	m_maincpu6502 = machine().root_device().subdevice<m6502_device>("maincpu");
 	irq_timer = timer_alloc(FUNC(nes_ss88006_device::irq_timer_tick), this);
 	irq_timer->adjust(attotime::zero, 0, clocks_to_attotime(1));
 
@@ -168,6 +172,7 @@ void nes_ss88006_device::device_start()
 	save_item(NAME(m_irq_count));
 	save_item(NAME(m_irq_count_latch));
 	save_item(NAME(m_irq_mode));
+	save_item(NAME(m_irq_delay));
 	save_item(NAME(m_wram_protect));
 }
 
@@ -183,7 +188,11 @@ void nes_ss88006_device::pcb_reset()
 	m_irq_mode = 0;
 	m_irq_count = 0;
 	m_irq_count_latch = 0;
+	m_irq_delay = 0;
 	m_wram_protect = 0;
+
+	m_maincpu6502->cancel_delayed_mapper_irq();
+	set_irq_line(CLEAR_LINE);
 }
 
 
@@ -193,174 +202,260 @@ void nes_ss88006_device::pcb_reset()
 
 /*-------------------------------------------------
 
- Jaleco JF-11, JF-12 & JF-14 boards emulation
+Jaleco JF-11 and JF-14 boards
 
- Games: Bio Senshi Dan, Mississippi Satsujin Jiken,
- Yousai Club
+Games: Bio Senshi Dan, Mississippi Satsujin Jiken,
+Yousai Club
 
- iNES: mapper 140
+Writes throughout $6000-$7FFF select a 32 KiB
+PRG-ROM bank with data bits 4-5 and an 8 KiB
+CHR-ROM bank with data bits 0-3.
 
- In MAME: Supported.
+The cartridge does not contain PRG-RAM, so reads
+from $6000-$7FFF return CPU open bus.
 
- -------------------------------------------------*/
+iNES: mapper 140
 
-void nes_jf11_device::write_m(offs_t offset, u8 data)
-{
+In MAME: Supported.
+
+-------------------------------------------------*/
+
+void nes_jf11_device::write_m(offs_t offset, u8 data) {
 	LOG("jf11 write_m, offset: %04x, data: %02x\n", offset, data);
-	chr8(data, CHRROM);
-	prg32(data >> 4);
+
+	prg32(BIT(data, 4, 2));
+	chr8(BIT(data, 0, 4), CHRROM);
 }
 
 /*-------------------------------------------------
 
- Jaleco JF-13 board emulation
+Jaleco JF-13 board
 
- Games: Moero Pro Yakyuu
+Game: Moero!! Pro Yakyuu
 
- Note: we don't emulate the additional sound hardware.
+Writes to $6000-$6FFF select a 32 KiB PRG-ROM
+bank with data bits 4-5 and an 8 KiB CHR-ROM
+bank with data bits 6, 1 and 0.
 
- iNES: mapper 86
+The board contains a µPD7756C speech synthesizer.
+MAME approximates its output using external samples.
+The chip's reset timing and electrical behavior are
+not emulated.
 
- In MAME: Supported.
+Writes to $7000-$7FFF with bits 4-5 equal to $20
+start or restart the sample selected by bits 0-3.
 
- -------------------------------------------------*/
+iNES: mapper 86
 
-void nes_jf13_device::write_m(offs_t offset, u8 data)
-{
+In MAME: Partially supported.
+
+-------------------------------------------------*/
+
+void nes_jf13_device::write_m(offs_t offset, u8 data) {
 	LOG("jf13 write_m, offset: %04x, data: %02x\n", offset, data);
 
-	if (offset < 0x1000)
-	{
+	if (offset < 0x1000) {
 		prg32(BIT(data, 4, 2));
 		chr8(bitswap<3>(data, 6, 1, 0), CHRROM);
 	}
-	else if ((data & 0x30) == 0x20)
-		m_samples->start(data & 0x0f, data & 0x0f);
+	else if (m_samples && (data & 0x30) == 0x20) {
+		const u8 sample = data & 0x0f;
+
+		m_samples->start(0, sample);
+	}
 }
 
 /*-------------------------------------------------
 
- Jaleco JF-16 board emulation
+Jaleco JF-16 board
 
- Games: Uchuusen Cosmo Carrier
+Game: Uchuusen - Cosmo Carrier
 
- iNES: mapper 78 (shared with a diff Irem board)
+Writes throughout $8000-$FFFF select a 16 KiB
+PRG-ROM bank with data bits 0-2 and an 8 KiB
+CHR-ROM bank with data bits 4-7.
 
- -------------------------------------------------*/
+Data bit 3 selects lower or upper one-screen
+nametable mirroring. The board is subject to
+AND-type bus conflicts.
 
-void nes_jf16_device::write_h(offs_t offset, u8 data)
-{
+Mapper 78 is also used by Irem's Holy Diver board,
+which has incompatible horizontal/vertical
+mirroring control.
+
+NES 2.0 submapper 1 identifies the Jaleco JF-16.
+NES 2.0 submapper 3 identifies Irem Holy Diver.
+
+iNES: mapper 78
+NES 2.0: mapper 78, submapper 1
+
+In MAME: Supported.
+
+-------------------------------------------------*/
+
+void nes_jf16_device::write_h(offs_t offset, u8 data) {
 	LOG("jf16 write_h, offset: %04x, data: %02x\n", offset, data);
 
-	// this pcb is subject to bus conflict
 	data = account_bus_conflict(offset, data);
 
+	prg16_89ab(BIT(data, 0, 3));
+	chr8(BIT(data, 4, 4), CHRROM);
 	set_nt_mirroring(BIT(data, 3) ? PPU_MIRROR_HIGH : PPU_MIRROR_LOW);
-	chr8(data >> 4, CHRROM);
-	prg16_89ab(data);
 }
 
 
 /*-------------------------------------------------
 
- Jaleco JF-17 & JF-19 boards emulation
+Jaleco JF-17 and JF-19 boards
 
- Note: we don't emulate the additional sound hardware
-       for Moero!! Pro Tennis
+Games: Moero!! Juudou Warriors, Moero!! Pro Tennis,
+Pinball Quest (Japan), Moero!! Pro Soccer,
+Moero!! Pro Yakyuu '88
 
- Games: Moero!! Juudou Warriors, Moero!! Pro Tennis, Pinball
- Quest Jpn, Moero Pro Soccer, Moero Pro Yakyuu '88
+Data bit 7 clocks the PRG-ROM bank register on a
+0-to-1 transition. Data bit 6 similarly clocks the
+CHR-ROM bank register.
 
- iNES: mapper 72 & 92
+JF-17 switches the 16 KiB PRG-ROM bank mapped at
+$8000-$BFFF. JF-19 switches the bank mapped at
+$C000-$FFFF.
 
- In MAME: Supported, see below for the games with samples
+Some board variants contain a µPD7756C speech
+processor. MAME approximates its output using
+external samples; the sound chip and its precise
+reset and start timing are not emulated.
 
- -------------------------------------------------*/
+Both boards are subject to AND-type bus conflicts.
 
-void nes_jf17_device::write_h(offs_t offset, u8 data)
-{
+iNES: mapper 72 for JF-17
+iNES: mapper 92 for JF-19
+
+In MAME: Supported with sample-based speech.
+
+-------------------------------------------------*/
+
+void nes_jf17_device::write_h(offs_t offset, u8 data) {
 	LOG("jf17 write_h, offset: %04x, data: %02x\n", offset, data);
 
-	// this pcb is subject to bus conflict
 	data = account_bus_conflict(offset, data);
 
-	if (BIT(data, 7) && !BIT(m_latch, 7))  // 74174 clocks on 0 -> 1
-	{
-		if (m_prg_flip)
-			prg16_cdef(data & 0x0f);
-		else
-			prg16_89ab(data & 0x07);
+	if (BIT(data, 7) && !BIT(m_latch, 7)) {
+		if (m_prg_flip) {
+			prg16_cdef(BIT(data, 0, 4));
+		}
+		else {
+			prg16_89ab(BIT(data, 0, 3));
+		}
 	}
-	if (BIT(data, 6) && !BIT(m_latch, 6))  // 74174 clocks on 0 -> 1
-		chr8(data & 0x0f, CHRROM);
+
+	if (BIT(data, 6) && !BIT(m_latch, 6)) {
+		chr8(BIT(data, 0, 4), CHRROM);
+	}
 
 	m_latch = data;
 
-	if (m_samples)
-		if ((data & 0x30) == 0x20)
-			m_samples->start(offset & 0x1f, offset & 0x1f);
+	if (m_samples && (data & 0x30) == 0x20) {
+		const u8 sample = offset & 0x1f;
+
+		m_samples->start(0, sample);
+	}
 }
 
 /*-------------------------------------------------
 
- Jaleco SS88006 board emulation, aka JF-27, JF-29, JF-30, ...,
- JF-38, JF-40, JF-41
+Jaleco SS88006 ASIC
 
- Games: Lord of King, Magic John, Moe Pro '90, Ninja Jajamaru,
- Pizza Pop, Plasma Ball
+Boards include JF-23, JF-24, JF-27, JF-29,
+JF-30, JF-33, JF-38, JF-40 and JF-41.
 
- iNES: mapper 18
+Games include The Lord of King, Magic John,
+Moe Pro! '90, Ninja Jajamaru, Pizza Pop!
+and Plasma Ball.
 
- In MAME: Supported, see below for the games with samples
+The ASIC provides three switchable 8 KiB PRG-ROM
+banks, eight switchable 1 KiB CHR-ROM banks,
+four mirroring modes and protected PRG-RAM.
 
- -------------------------------------------------*/
+Its IRQ counter can operate as a 16-bit, 12-bit,
+8-bit or 4-bit decrementing CPU M2-cycle counter.
+An IRQ is requested whenever the selected portion
+of the counter underflows.
 
-TIMER_CALLBACK_MEMBER(nes_ss88006_device::irq_timer_tick)
-{
-	if (m_irq_enable)
-	{
-		u16 mask = 0xffff;            // 16-bit counter (default)
+Some boards contain a µPD7756C speech processor.
+MAME approximates its output using external samples;
+the speech chip and internal mask ROM are not
+emulated here.
 
-		if (BIT(m_irq_mode, 3))       // 4-bit counter
-			mask = 0x000f;
-		else if (BIT(m_irq_mode, 2))  // 8-bit counter
-			mask = 0x00ff;
-		else if (BIT(m_irq_mode, 1))  // 12-bit counter
-			mask = 0x0fff;
+iNES: mapper 18
+
+In MAME: Supported with sample-based speech.
+
+-------------------------------------------------*/
+
+TIMER_CALLBACK_MEMBER(nes_ss88006_device::irq_timer_tick) {
+	if (m_irq_delay) {
+		m_irq_delay--;
+
+		if (!m_irq_delay) {
+			m_maincpu6502->queue_delayed_mapper_irq(2);
+		}
+	}
+
+	if (m_irq_enable) {
+		u16 mask;
+
+		switch (BIT(m_irq_mode, 1, 3)) {
+			case 0:
+				mask = 0xffff;
+				break;
+
+			case 1:
+				mask = 0x0fff;
+				break;
+
+			case 2:
+			case 3:
+				mask = 0x00ff;
+				break;
+
+			default:
+				mask = 0x000f;
+				break;
+		}
 
 		m_irq_count = (m_irq_count & ~mask) | ((m_irq_count - 1) & mask);
 
-		if ((m_irq_count & mask) == mask)
-			set_irq_line(ASSERT_LINE);
+		if ((m_irq_count & mask) == mask) {
+			m_irq_delay = 2;
+		}
 	}
 }
 
-u8 nes_ss88006_device::read_m(offs_t offset)
-{
+u8 nes_ss88006_device::read_m(offs_t offset) {
 	LOG("ss88006 read_m, offset: %04x\n", offset);
 
-	if (m_wram_protect & 1) // RAM enabled
+	if (BIT(m_wram_protect, 0)) {
 		return device_nes_cart_interface::read_m(offset);
+	}
 
 	return get_open_bus();
 }
 
-void nes_ss88006_device::write_m(offs_t offset, u8 data)
-{
+void nes_ss88006_device::write_m(offs_t offset, u8 data) {
 	LOG("ss88006 write_m, offset: %04x, data: %02x\n", offset, data);
 
-	if (m_wram_protect == 0x03) // RAM enabled and writable
+	if ((m_wram_protect & 0x03) == 0x03) {
 		device_nes_cart_interface::write_m(offset, data);
+	}
 }
 
-void nes_ss88006_device::write_h(offs_t offset, u8 data)
-{
+void nes_ss88006_device::write_h(offs_t offset, u8 data) {
 	LOG("ss88006 write_h, offset: %04x, data: %02x\n", offset, data);
 
-	int bank, shift;
+	int bank;
+	int shift;
 
-	switch (offset & 0x7003)
-	{
+	switch (offset & 0x7003) {
 		case 0x0000:
 		case 0x0001:
 		case 0x0002:
@@ -368,9 +463,11 @@ void nes_ss88006_device::write_h(offs_t offset, u8 data)
 		case 0x1000:
 		case 0x1001:
 			bank = bitswap<2>(offset, 12, 1);
-			shift = (offset & 1) << 2;
+			shift = BIT(offset, 0) << 2;
+
 			m_mmc_prg_bank[bank] &= ~(0x0f << shift);
 			m_mmc_prg_bank[bank] |= (data & 0x0f) << shift;
+
 			prg8_x(bank, m_mmc_prg_bank[bank]);
 			break;
 
@@ -378,14 +475,28 @@ void nes_ss88006_device::write_h(offs_t offset, u8 data)
 			m_wram_protect = data & 0x03;
 			break;
 
-		case 0x2000: case 0x2001: case 0x2002: case 0x2003:
-		case 0x3000: case 0x3001: case 0x3002: case 0x3003:
-		case 0x4000: case 0x4001: case 0x4002: case 0x4003:
-		case 0x5000: case 0x5001: case 0x5002: case 0x5003:
+		case 0x2000:
+		case 0x2001:
+		case 0x2002:
+		case 0x2003:
+		case 0x3000:
+		case 0x3001:
+		case 0x3002:
+		case 0x3003:
+		case 0x4000:
+		case 0x4001:
+		case 0x4002:
+		case 0x4003:
+		case 0x5000:
+		case 0x5001:
+		case 0x5002:
+		case 0x5003:
 			bank = 2 * (BIT(offset, 12, 3) - 2) + BIT(offset, 1);
-			shift = (offset & 1) << 2;
+			shift = BIT(offset, 0) << 2;
+
 			m_mmc_vrom_bank[bank] &= ~(0x0f << shift);
 			m_mmc_vrom_bank[bank] |= (data & 0x0f) << shift;
+
 			chr1_x(bank, m_mmc_vrom_bank[bank], CHRROM);
 			break;
 
@@ -394,34 +505,54 @@ void nes_ss88006_device::write_h(offs_t offset, u8 data)
 		case 0x6002:
 		case 0x6003:
 			shift = 4 * (offset & 0x03);
+
 			m_irq_count_latch &= ~(0x000f << shift);
 			m_irq_count_latch |= (data & 0x0f) << shift;
 			break;
 
 		case 0x7000:
 			m_irq_count = m_irq_count_latch;
+			m_irq_delay = 0;
+
+			m_maincpu6502->cancel_delayed_mapper_irq();
 			set_irq_line(CLEAR_LINE);
 			break;
+
 		case 0x7001:
-			m_irq_enable = data & 0x01;
+			m_irq_enable = BIT(data, 0);
 			m_irq_mode = data & 0x0e;
+			m_irq_delay = 0;
+
+			m_maincpu6502->cancel_delayed_mapper_irq();
 			set_irq_line(CLEAR_LINE);
 			break;
 
 		case 0x7002:
-			switch (data & 0x03)
-			{
-				case 0: set_nt_mirroring(PPU_MIRROR_HORZ); break;
-				case 1: set_nt_mirroring(PPU_MIRROR_VERT); break;
-				case 2: set_nt_mirroring(PPU_MIRROR_LOW); break;
-				case 3: set_nt_mirroring(PPU_MIRROR_HIGH); break;
+			switch (data & 0x03) {
+				case 0:
+					set_nt_mirroring(PPU_MIRROR_HORZ);
+					break;
+
+				case 1:
+					set_nt_mirroring(PPU_MIRROR_VERT);
+					break;
+
+				case 2:
+					set_nt_mirroring(PPU_MIRROR_LOW);
+					break;
+
+				case 3:
+					set_nt_mirroring(PPU_MIRROR_HIGH);
+					break;
 			}
 			break;
 
 		case 0x7003:
-			if (m_samples)
-				if ((data & 0x03) == 0x02)
-					m_samples->start(BIT(data, 2, 5), BIT(data, 2, 5));
+			if (m_samples && (data & 0x03) == 0x02) {
+				const u8 sample = BIT(data, 2, 5);
+
+				m_samples->start(0, sample);
+			}
 			break;
 
 		default:
@@ -430,21 +561,36 @@ void nes_ss88006_device::write_h(offs_t offset, u8 data)
 	}
 }
 
-/**********************************************************
+/***************************************************************************
 
- Boards with external samples
- (due to undumpable UPD7755C/UPD7756C)
+Boards using external samples because the internal
+uPD7755C/uPD7756C mask ROMs are currently undumped.
 
- JF-13 (Moero!! Pro Yakyuu) / iNES mapper 86
- JF-17 (Moero!! Pro Tennis) / iNES mapper 72 + ADPCM
- JF-19 (Moero!! Pro Yakyuu '88 - Kettei Ban) / iNES mapper 92 + ADPCM
- JF-23 (Shin Moero Pro Yakyuu) / iNES mapper 18 + ADPCM
- JF-24 (Terao no Dosukoi Oozumou) / iNES mapper 18 + ADPCM
- JF-29 (Moe Pro 90) / iNES mapper 18 + ADPCM
- JF-33 (Moe Pro Saikyou-hen) / iNES mapper 18 + ADPCM
+JF-13 - Moero!! Pro Yakyuu
+         iNES mapper 86
 
+JF-17 - Moero!! Pro Tennis
+         iNES mapper 72 with ADPCM
 
-***********************************************************/
+JF-19 - Moero!! Pro Yakyuu '88 - Kettei Ban
+         iNES mapper 92 with ADPCM
+
+JF-23 - Shin Moero!! Pro Yakyuu
+         iNES mapper 18 with ADPCM
+
+JF-24 - Terao no Dosukoi Oozumou
+         iNES mapper 18 with ADPCM
+
+JF-29 - Moe Pro! '90
+         iNES mapper 18 with ADPCM
+
+JF-33 - Moe Pro!: Saikyou-hen
+         iNES mapper 18 with ADPCM
+
+Each cartridge contains one speech processor and
+can play only one phrase at a time.
+
+***************************************************************************/
 
 static const char *const jf13_sample_names[] =
 {
@@ -612,82 +758,68 @@ static const char *const jf33_sample_names[] =
 
 
 //-------------------------------------------------
-//  device_add_mconfig - add device configuration
+//  device_add_mconfig
 //-------------------------------------------------
 
-void nes_jf13_device::device_add_mconfig(machine_config &config)
-{
-	// additional sound hardware
+void nes_jf13_device::device_add_mconfig(machine_config &config) {
 	SPEAKER(config, "addon").front_center();
 
 	SAMPLES(config, m_samples);
-	m_samples->set_channels(16);
+	m_samples->set_channels(1);
 	m_samples->set_samples_names(jf13_sample_names);
 	m_samples->add_route(ALL_OUTPUTS, "addon", 0.50);
 }
 
-void nes_jf17_adpcm_device::device_add_mconfig(machine_config &config)
-{
-	// additional sound hardware
+void nes_jf17_adpcm_device::device_add_mconfig(machine_config &config) {
 	SPEAKER(config, "addon").front_center();
 
 	SAMPLES(config, m_samples);
-	m_samples->set_channels(20);
+	m_samples->set_channels(1);
 	m_samples->set_samples_names(jf17_sample_names);
 	m_samples->add_route(ALL_OUTPUTS, "addon", 0.50);
 }
 
-void nes_jf19_adpcm_device::device_add_mconfig(machine_config &config)
-{
-	// additional sound hardware
+void nes_jf19_adpcm_device::device_add_mconfig(machine_config &config) {
 	SPEAKER(config, "addon").front_center();
 
 	SAMPLES(config, m_samples);
-	m_samples->set_channels(20);
+	m_samples->set_channels(1);
 	m_samples->set_samples_names(jf19_sample_names);
 	m_samples->add_route(ALL_OUTPUTS, "addon", 0.50);
 }
 
-void nes_jf23_device::device_add_mconfig(machine_config &config)
-{
-	// additional sound hardware
+void nes_jf23_device::device_add_mconfig(machine_config &config) {
 	SPEAKER(config, "addon").front_center();
 
 	SAMPLES(config, m_samples);
-	m_samples->set_channels(20);
+	m_samples->set_channels(1);
 	m_samples->set_samples_names(jf23_sample_names);
 	m_samples->add_route(ALL_OUTPUTS, "addon", 0.50);
 }
 
-void nes_jf24_device::device_add_mconfig(machine_config &config)
-{
-	// additional sound hardware
+void nes_jf24_device::device_add_mconfig(machine_config &config) {
 	SPEAKER(config, "addon").front_center();
 
 	SAMPLES(config, m_samples);
-	m_samples->set_channels(6);
+	m_samples->set_channels(1);
 	m_samples->set_samples_names(jf24_sample_names);
 	m_samples->add_route(ALL_OUTPUTS, "addon", 0.50);
 }
 
-void nes_jf29_device::device_add_mconfig(machine_config &config)
-{
-	// additional sound hardware
+void nes_jf29_device::device_add_mconfig(machine_config &config) {
 	SPEAKER(config, "addon").front_center();
 
 	SAMPLES(config, m_samples);
-	m_samples->set_channels(20);
+	m_samples->set_channels(1);
 	m_samples->set_samples_names(jf29_sample_names);
 	m_samples->add_route(ALL_OUTPUTS, "addon", 0.50);
 }
 
-void nes_jf33_device::device_add_mconfig(machine_config &config)
-{
-	// additional sound hardware
+void nes_jf33_device::device_add_mconfig(machine_config &config) {
 	SPEAKER(config, "addon").front_center();
 
 	SAMPLES(config, m_samples);
-	m_samples->set_channels(20);
+	m_samples->set_channels(1);
 	m_samples->set_samples_names(jf33_sample_names);
 	m_samples->add_route(ALL_OUTPUTS, "addon", 0.50);
 }

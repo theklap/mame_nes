@@ -15,19 +15,12 @@
  * Nintendo NES-QJ [mapper 47]
  * Nintendo PAL-ZZ [mapper 37]
 
-
- Known issues on specific mappers:
-
- * 004 Mendel Palace has never worked properly
- * 004 Ninja Gaiden 2 has flashing bg graphics in the second level
-
  ***********************************************************************************************************/
 
 
 #include "emu.h"
 #include "mmc3.h"
 #include "cpu/m6502/m6502.h"
-#include "video/ppu2c0x.h"      // this has to be included so that IRQ functions can access ppu2c0x_device::BOTTOM_VISIBLE_SCANLINE
 
 #define LOG_UNHANDLED (1U << 1)
 
@@ -68,11 +61,7 @@ nes_txrom_device::nes_txrom_device(const machine_config &mconfig, device_type ty
 	  delay_irq(0),
 	  m_last_a12_low_cpu(0),
 	  m_prev_ppu_addr(0),
-	  m_maincpu6502(nullptr),
-	  m_scanline(0),
-	  m_dot(0),
-	  m_mmc3_clocks_since_c001(0xff),
-	  m_mmc3_seen_c001_recent(false)
+	  m_maincpu6502(nullptr)
 {
 	std::fill(std::begin(m_mmc_prg_bank), std::end(m_mmc_prg_bank), 0);
 	std::fill(std::begin(m_mmc_vrom_bank), std::end(m_mmc_vrom_bank), 0);
@@ -143,8 +132,6 @@ void nes_txrom_device::mmc3_start()
 	save_item(NAME(m_prev_ppu_addr));
 	save_item(NAME(m_a12_low_seen));
 	save_item(NAME(m_mmc3_odd_skip_a12_pending));
-	save_item(NAME(m_mmc3_clocks_since_c001));
-	save_item(NAME(m_mmc3_seen_c001_recent));
 }
 
 void nes_txrom_device::mmc3_common_initialize( int prg_mask, int chr_mask, int nec_irq_behavior )
@@ -183,14 +170,9 @@ void nes_txrom_device::mmc3_common_initialize( int prg_mask, int chr_mask, int n
 	m_prev_ppu_addr = 0;
 	m_mmc3_odd_skip_a12_pending = false;
 	m_a12_low_seen = false;
-	m_mmc3_clocks_since_c001 = 0xff;
-	m_mmc3_seen_c001_recent = false;
-	m_c001_pathology_pending = false;
 	
 	// 0 = Sharp/new behavior, nonzero = NEC/old behavior.
 	rev_b_behavior = !nec_irq_behavior;
-	 
-	machine().root_device().subdevice<ppu2c0x_device>("ppu")->set_mapper(4);
 }
 
 
@@ -245,7 +227,7 @@ void nes_zz_device::pcb_reset()
 
  -------------------------------------------------*/
 
-void nes_txrom_device::observe_ppu_a12(uint16_t ppu_addr, uint64_t cpu_cycles, int ppu_tick, bool m_odd_frame)
+void nes_txrom_device::ppu_bus_address(uint16_t ppu_addr, uint64_t cpu_cycles, int ppu_tick, bool m_odd_frame)
 {
 	ppu_addr &= 0x3fff;
 
@@ -280,57 +262,14 @@ void nes_txrom_device::observe_ppu_a12(uint16_t ppu_addr, uint64_t cpu_cycles, i
 	m_prev_ppu_addr = ppu_addr;
 }
 
-void nes_txrom_device::notify_ppu_odd_skip() {
-	m_mmc3_odd_skip_a12_pending = true;
+void nes_txrom_device::ppu_odd_frame_skip()
+{
+	//enable to see the wario woods glitch, otherwise my cpu/ppu alignment does not produce it.
+	//m_mmc3_odd_skip_a12_pending = true;
 }
 
 void nes_txrom_device::mmc3_irq_clock()
 {
-	if (m_mmc3_seen_c001_recent && m_mmc3_clocks_since_c001 < 0xff)
-		++m_mmc3_clocks_since_c001;
-
-	if (m_c001_pathology_pending)
-	{
-		logerror("[MMC3 PATHOLOGY APPLY] cpu=%lld sl=%d dot=%u "
-				 "before count=%02X latch=%02X reload=%d enable=%d rev_b=%d\n",
-			(long long)m_maincpu6502->total_cycles(),
-			m_scanline,
-			m_dot,
-			m_irq_count,
-			m_irq_count_latch,
-			m_irq_reload ? 1 : 0,
-			m_irq_enable ? 1 : 0,
-			rev_b_behavior ? 1 : 0);
-
-		if (rev_b_behavior)
-		{
-			// MMC3B/Sharp/new behavior described by mmc3_irq_tests:
-			// counter is ORed with $80, and this clock neither decrements nor reloads.
-			m_irq_count |= 0x80;
-		}
-		else
-		{
-			// MMC3A/NEC/old behavior described as frozen:
-			// this clock neither decrements nor reloads.
-			// Leave m_irq_count unchanged.
-		}
-
-		m_irq_reload = false;
-		m_c001_pathology_pending = false;
-
-		logerror("[MMC3 PATHOLOGY RESULT] cpu=%lld sl=%d dot=%u "
-				 "after count=%02X latch=%02X reload=%d enable=%d\n",
-			(long long)m_maincpu6502->total_cycles(),
-			m_scanline,
-			m_dot,
-			m_irq_count,
-			m_irq_count_latch,
-			m_irq_reload ? 1 : 0,
-			m_irq_enable ? 1 : 0);
-
-		return;
-	}
-	
     const uint8_t old_count = m_irq_count;
     const bool had_reload_request = m_irq_reload;
 
@@ -378,14 +317,8 @@ void nes_txrom_device::mmc3_irq_clock()
     }
 }
 
-void nes_txrom_device::ppu_to_mapper(int scanline, unsigned dot, int ppu_tick)
+void nes_txrom_device::ppu_to_mapper(int scanline, unsigned dot, int ppu_tick, uint16_t ppu_address)
 {
-	m_scanline = scanline;
-	m_dot = dot;
-
-	//if (m_mmc3_odd_skip_a12_pending && scanline == 0 && dot > 8)
-	//	m_mmc3_odd_skip_a12_pending = false;
-
 	if (delay_irq > 0)
 	{
 		--delay_irq;
@@ -483,105 +416,27 @@ void nes_txrom_device::txrom_write(offs_t offset, uint8_t data)
 			break;
 
 		case 0x4000:	//IRQ latch ($C000-$DFFE, even)
-	if ((m_maincpu6502->total_cycles() >= 84711250  && m_maincpu6502->total_cycles() <= 84712100) ||
-		(m_maincpu6502->total_cycles() >= 84741020  && m_maincpu6502->total_cycles() <= 84742050))
-	{
-		logerror("[MMC3 C000] cpu=%llu sl=%d dot=%u data=%02X "
-				 "count=%02X old_latch=%02X enable=%d\n",
-			(unsigned long long)m_maincpu6502->total_cycles(),
-			m_scanline,
-			m_dot,
-			data,
-			m_irq_count,
-			m_irq_count_latch,
-			m_irq_enable ? 1 : 0);
-	}
-
-	m_irq_count_latch = data;
-	break;
+			m_irq_count_latch = data;
+			break;
 
 		case 0x4001:    // IRQ reload ($C001-$DFFF, odd)
-{
-	if ((m_maincpu6502->total_cycles() >= 84711250  && m_maincpu6502->total_cycles() <= 84712100) ||
-		(m_maincpu6502->total_cycles() >= 84741020  && m_maincpu6502->total_cycles() <= 84742050))
-	{
-		logerror("[MMC3 C001] cpu=%llu sl=%d dot=%u "
-				 "count=%02X latch=%02X reload=%d enable=%d clocks=%02X recent=%d\n",
-			(unsigned long long)m_maincpu6502->total_cycles(),
-			m_scanline,
-			m_dot,
-			m_irq_count,
-			m_irq_count_latch,
-			m_irq_reload ? 1 : 0,
-			m_irq_enable ? 1 : 0,
-			m_mmc3_clocks_since_c001,
-			m_mmc3_seen_c001_recent ? 1 : 0);
-	}
-
-	if (m_mmc3_seen_c001_recent && m_mmc3_clocks_since_c001 == 1)
-	{
-		m_c001_pathology_pending = true;
-
-		logerror("[MMC3 PATHOLOGY ARMED] cpu=%lld sl=%d dot=%u "
-				 "count=%02X latch=%02X reload=%d enable=%d rev_b=%d\n",
-			(long long)m_maincpu6502->total_cycles(),
-			m_scanline,
-			m_dot,
-			m_irq_count,
-			m_irq_count_latch,
-			m_irq_reload ? 1 : 0,
-			m_irq_enable ? 1 : 0,
-			rev_b_behavior ? 1 : 0);
-	}
-
-	m_mmc3_seen_c001_recent = true;
-	m_mmc3_clocks_since_c001 = 0;
-
-	m_irq_count = 0;
-	m_irq_reload = true;
-	break;
-}
+		{
+			m_irq_count = 0;
+			m_irq_reload = true;
+			break;
+		}
 
 		case 0x6000:	//IRQ disable ($E000-$FFFE, even)
-	if ((m_maincpu6502->total_cycles() >= 84711250  && m_maincpu6502->total_cycles() <= 84712100) ||
-		(m_maincpu6502->total_cycles() >= 84741020  && m_maincpu6502->total_cycles() <= 84742050))
-	{
-		logerror("[MMC3 E000] cpu=%llu sl=%d dot=%u "
-				 "count=%02X latch=%02X reload=%d delay=%d\n",
-			(unsigned long long)m_maincpu6502->total_cycles(),
-			m_scanline,
-			m_dot,
-			m_irq_count,
-			m_irq_count_latch,
-			m_irq_reload ? 1 : 0,
-			delay_irq);
-	}
+			m_irq_enable = 0;
+			set_irq_line(CLEAR_LINE);
+			m_maincpu6502->cancel_delayed_mapper_irq();
 
-	m_irq_enable = 0;
-	set_irq_line(CLEAR_LINE);
-
-	if (delay_irq > 0)
-		m_maincpu6502->cancel_delayed_mapper_irq();
-
-	delay_irq = 0;
-	break;
+			delay_irq = 0;
+			break;
 
 		case 0x6001:	// IRQ enable ($E001-$FFFF, odd)
-	if ((m_maincpu6502->total_cycles() >= 84711250  && m_maincpu6502->total_cycles() <= 84712100) ||
-		(m_maincpu6502->total_cycles() >= 84741020  && m_maincpu6502->total_cycles() <= 84742050))
-	{
-		logerror("[MMC3 E001] cpu=%llu sl=%d dot=%u "
-				 "count=%02X latch=%02X reload=%d\n",
-			(unsigned long long)m_maincpu6502->total_cycles(),
-			m_scanline,
-			m_dot,
-			m_irq_count,
-			m_irq_count_latch,
-			m_irq_reload ? 1 : 0);
-	}
-
-	m_irq_enable = 1;
-	break;
+			m_irq_enable = 1;
+			break;
 
 		default:
 			LOGMASKED(LOG_UNHANDLED, "txrom_write uncaught: %04x value: %02x\n", offset + 0x8000, data);

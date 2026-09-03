@@ -17,19 +17,11 @@
  * Nintendo UxROM [mapper 2] + Crazy Climbers variant [mapper 180]
  * Nintendo UN1ROM [mapper 94]
 
- Known issues on specific mappers:
-
- * 000 F1 Race requires more precise PPU timing. It currently has plenty of 1-line glitches.
- * 003 Firehouse Rescue has flashing graphics (same PPU issue as Back to the Future 2 & 3?)
- * 007 Marble Madness has small graphics corruptions
- * 034 Titanic 1912 (pirate BxROM) has missing gfx (same PPU issue of many Waixing titles almost for sure)
-
  ***********************************************************************************************************/
 
 
 #include "emu.h"
 #include "nxrom.h"
-#include "cpu/m6502/m6502.h"
 
 #ifdef NES_PCB_DEBUG
 #define VERBOSE (LOG_GENERAL)
@@ -151,63 +143,10 @@ void nes_nrom_device::common_start()
 	save_item(NAME(m_nt_writable));
 }
 
-uint8_t nes_nrom_device::read_l(offs_t offset)
-{
-	// Standard NROM does not decode the cartridge expansion area.
-	//
-	// CPU $4000-$401F is handled by the console/APU/I/O side before the
-	// cartridge gets involved.  The portion that reaches this low cart
-	// handler is the cartridge expansion area, normally $4020-$5FFF.
-	//
-	// Plain mapper 0 / NROM has no registers, PRG RAM, or expansion hardware
-	// there, so no cartridge device drives the data bus.  Return CPU open bus
-	// instead of a fixed value so mapper 0 open-bus tests see the previous
-	// bus value.
-	return get_open_bus();
-}
-
-void nes_nrom_device::write_l(offs_t offset, uint8_t data)
-{
-	// Standard NROM has no writable registers or RAM in the cartridge
-	// expansion area.
-	//
-	// Ignore writes here.  Boards that actually use low-space registers or
-	// expansion hardware should override write_l() in their own device class.
-}
-
-uint8_t nes_nrom_device::read_m(offs_t offset)
-{
-	// Standard NROM / mapper 0 has no PRG RAM unless the loaded image
-	// explicitly allocated PRG RAM through the header or softlist.
-	//
-	// If PRG RAM exists, keep the generic cart-interface behavior.
-	// If it does not exist, CPU $6000-$7FFF is undriven cartridge space
-	// and should read as CPU open bus.
-	if (!m_prgram.empty())
-		return device_nes_cart_interface::read_m(offset);
-
-	return get_open_bus();
-}
-
-void nes_nrom_device::write_m(offs_t offset, uint8_t data)
-{
-	// Standard NROM / mapper 0 has no PRG RAM unless explicitly allocated.
-	// Ignore writes when no PRG RAM exists; otherwise preserve the generic
-	// PRG-RAM write behavior.
-	if (!m_prgram.empty())
-		device_nes_cart_interface::write_m(offset, data);
-}
-
 void nes_nrom_device::pcb_reset()
 {
-	//logerror("nes_nrom_device::pcb_reset - %i ******* Need to fix", m_chr_source);
 	prg32(0);
-	//if (m_chr_source == null)
-	//	logerror("nes_nrom_device::Null - *******");
-	//else {
-	//	logerror("nes_nrom_device::Has something - *******");
 	chr8(0, m_chr_source);
-	//}
 }
 
 void nes_axrom_device::pcb_reset()
@@ -343,7 +282,7 @@ void nes_axrom_device::write_h(offs_t offset, uint8_t data)
 {
 	LOG("axrom write_h, offset: %04x, data: %02x\n", offset, data);
 
-	// this pcb is subject to bus conflict
+	// Bus-conflict behavior is selected by the PCB metadata or NES 2.0 submapper.
 	data = account_bus_conflict(offset, data);
 
 	set_nt_mirroring(BIT(data, 4) ? PPU_MIRROR_HIGH : PPU_MIRROR_LOW);
@@ -369,13 +308,12 @@ void nes_axrom_device::write_m(offs_t offset, uint8_t data)
 
  -------------------------------------------------*/
 
-void nes_bxrom_device::write_h(offs_t offset, uint8_t data)
-{
+void nes_bxrom_device::write_h(offs_t offset, uint8_t data) {
 	/* This portion of the mapper is nearly identical to Mapper 7, except no one-screen mirroring */
 	/* Deadly Towers is really a BxROM game - the demo screens look wrong using mapper 7. */
 	LOG("bxrom write_h, offset: %04x, data: %02x\n", offset, data);
 
-	// this pcb is subject to bus conflict, but the same is not true for some pirate variants
+	// Bus-conflict behavior is selected by the PCB metadata or NES 2.0 submapper.
 	data = account_bus_conflict(offset, data);
 
 	prg32(data);
@@ -436,19 +374,6 @@ uint8_t nes_cnrom_device::chr_r(offs_t offset)
 		return get_open_bus();
 
 	return device_nes_cart_interface::chr_r(offset);
-}
-
-uint8_t nes_cnrom_device::read_m(offs_t offset)
-{
-	// Standard CNROM has no PRG RAM at CPU $6000-$7FFF.
-	// No device drives this range, so return CPU open bus.
-	return get_open_bus();
-}
-
-void nes_cnrom_device::write_m(offs_t offset, uint8_t data)
-{
-	// Standard CNROM has no writable PRG RAM at $6000-$7FFF.
-	// Ignore writes.
 }
 
 /*-------------------------------------------------
@@ -541,7 +466,9 @@ void nes_uxrom_device::write_h(offs_t offset, uint8_t data)
 void nes_uxrom_cc_device::write_h(offs_t offset, uint8_t data)
 {
 	LOG("uxrom_cc write_h, offset: %04x, data: %02x\n", offset, data);
-
+	
+	data = account_bus_conflict(offset, data);
+	
 	prg16_cdef(data);
 }
 

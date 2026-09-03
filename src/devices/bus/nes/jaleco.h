@@ -10,6 +10,7 @@
 
 
 // ======================> nes_jf11_device
+class m6502_device;
 
 class nes_jf11_device : public nes_nrom_device
 {
@@ -144,8 +145,10 @@ private:
 	u16 m_irq_count, m_irq_count_latch;
 	u8 m_irq_mode;
 	u8 m_irq_enable;
+	u8 m_irq_delay;
 
 	emu_timer *irq_timer;
+	m6502_device *m_maincpu6502;
 
 	u8 m_mmc_prg_bank[3];
 	u8 m_mmc_vrom_bank[8];

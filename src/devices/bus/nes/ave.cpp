@@ -8,9 +8,9 @@
 
  Here we emulate the following PCBs
 
-   * AVE Nina-001 [mapper 34]
-   * AVE Nina-006/Nina-003/MB-91 [mapper 79]
-   * AVE Maxi 15 [mapper 234]
+	* AVE NINA-001/NINA-002 [mapper 34, submapper 1]
+	* AVE NINA-03/NINA-06 [mapper 79]
+	* AVE Maxi 15 [mapper 234]
 
 
  ***********************************************************************************************************/
@@ -61,12 +61,13 @@ void nes_maxi15_device::device_start()
 	save_item(NAME(m_reg));
 }
 
-void nes_maxi15_device::pcb_reset()
-{
+void nes_maxi15_device::pcb_reset() {
 	prg32(0);
 	chr8(0, CHRROM);
 
-	m_reg[0] = m_reg[1] = 0;
+	// Both mapper registers are cleared on reset.
+	m_reg[0] = 0;
+	m_reg[1] = 0;
 }
 
 void nes_nina001_device::pcb_reset()
@@ -158,36 +159,66 @@ void nes_nina006_device::write_l(offs_t offset, u8 data)
 
 /*-------------------------------------------------
 
- AVE Maxi 15 boards emulation
+ AVE Maxi 15 board emulation
 
- Games: Maxi 15
+ Game: Maxi 15
 
  iNES: mapper 234
 
  In MAME: Supported.
 
+ The mapper registers occupy CPU $FF80-$FF9F and
+ $FFE8-$FFF7. Reading a register returns the PRG ROM
+ byte at that address and clocks the same byte into the
+ mapper register.
+
+ Writes also clock the registers, but PRG ROM remains
+ enabled during the write, producing a bus conflict.
+ The mapper therefore receives CPU data AND PRG ROM data.
+
+ Both registers are cleared on reset. The outer register
+ becomes locked when any of its lower six bits are set,
+ while the inner register remains writable.
+
  -------------------------------------------------*/
 
-u8 nes_maxi15_device::read_h(offs_t offset)
-{
-	LOG("Maxi 15 read_h, offset: %04x\n", offset);
+void nes_maxi15_device::update_register(offs_t offset, u8 data) {
+	if ((offset >= 0x7f80 && offset < 0x7fa0) || (offset >= 0x7fe8 && offset < 0x7ff8)) {
+		const int reg = BIT(offset, 6);
 
-	u8 temp = hi_access_rom(offset);
+		// The inner register remains writable. The outer register
+		// becomes locked when any of its lower six bits are set.
+		if (reg || !(m_reg[0] & 0x3f)) {
+			m_reg[reg] = data;
 
-	if ((offset >= 0x7f80 && offset < 0x7fa0) || (offset >= 0x7fe8 && offset < 0x7ff8))
-	{
-		int reg = BIT(offset, 6);
-		if (reg || !(m_reg[0] & 0x3f))    // inner banks always modifiable, outer banks locked once set
-		{
-			m_reg[reg] = temp;
+			const u8 mode = !BIT(m_reg[0], 6);
+			const u8 outer = m_reg[0] & (0x0e | mode);
 
-			u8 mode = !BIT(m_reg[0], 6);
-			u8 outer = m_reg[0] & (0x0e | mode);
 			prg32(outer | (m_reg[1] & !mode));
-			chr8(outer << 2 | ((m_reg[1] >> 4) & (7 >> mode)), CHRROM);
+			chr8((outer << 2) | ((m_reg[1] >> 4) & (7 >> mode)), CHRROM);
 			set_nt_mirroring(BIT(m_reg[0], 7) ? PPU_MIRROR_HORZ : PPU_MIRROR_VERT);
 		}
 	}
+}
 
-	return temp;
+u8 nes_maxi15_device::read_h(offs_t offset) {
+	LOG("Maxi 15 read_h, offset: %04x\n", offset);
+
+	// Reads return the current PRG ROM byte and also clock that
+	// byte into the applicable mapper register.
+	const u8 data = hi_access_rom(offset);
+
+	update_register(offset, data);
+
+	return data;
+}
+
+void nes_maxi15_device::write_h(offs_t offset, u8 data) {
+	LOG("Maxi 15 write_h, offset: %04x, data: %02x\n", offset, data);
+
+	// PRG ROM remains enabled during writes, producing a CPU/ROM
+	// bus conflict. The mapper sees the AND of both values.
+	data = account_bus_conflict(offset, data);
+
+	update_register(offset, data);
 }

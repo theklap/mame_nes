@@ -301,7 +301,7 @@ void nes_cart(device_slot_interface &device)
 	device.option_add_internal("unl_eh8813a",      NES_EH8813A);   // used by Dr. Mario II
 	device.option_add_internal("zemina",           NES_ZEMINA);    // mapper 190 - Magic Kid GooGoo
 // misc bootleg boards
-	device.option_add_internal("sc127",            NES_SC127);
+	//device.option_add_internal("sc127",            NES_SC127);
 	device.option_add_internal("mariobaby",        NES_MARIOBABY);
 	device.option_add_internal("asnicol",          NES_ASN);
 	device.option_add_internal("smb3pirate",       NES_SMB3PIRATE);

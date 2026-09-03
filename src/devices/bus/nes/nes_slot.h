@@ -194,8 +194,8 @@ public:
 	// reading and writing
 	virtual uint8_t read_l(offs_t offset);
 	virtual uint8_t read_m(offs_t offset);
-	virtual uint8_t read_h(offs_t offset) { return 0xff; }
-	virtual uint8_t read_ex(offs_t offset) { return 0xff; }
+	virtual uint8_t read_h(offs_t offset) { return get_open_bus(); }
+	virtual uint8_t read_ex(offs_t offset) { return get_open_bus(); }
 	virtual void write_l(offs_t offset, uint8_t data);
 	virtual void write_m(offs_t offset, uint8_t data);
 	virtual void write_h(offs_t offset, uint8_t data);
@@ -234,8 +234,8 @@ public:
 	void set_smd133_addr(int val) {  m_smd133_addr = val; }
 	void set_x1_005_alt(bool val) { m_x1_005_alt_mirroring = val; }
 	void set_bus_conflict(bool val) { m_bus_conflict = val; }
-	uint8_t get_open_bus();// { return m_open_bus; }
-	void set_open_bus(uint8_t val) { m_open_bus = val; }
+	uint8_t get_open_bus();
+	void set_fk23c_solder_pad(uint8_t value) { m_fk23c_solder_pad = value & 0x07; }
 
 	uint8_t *get_prg_base() { return m_prg; }
 	uint8_t *get_prgram_base() { return &m_prgram[0]; }
@@ -255,7 +255,14 @@ public:
 	uint32_t get_misc_rom_size() const { return m_misc_rom_size; }
 
 	virtual void ppu_latch(offs_t offset) {}
-	virtual void ppu_to_mapper(int scanline, unsigned dot, int ppu_tick) {}
+	virtual void ppu_to_mapper(int scanline, unsigned dot, int ppu_tick, uint16_t ppu_address) {}
+	virtual void ppu_bus_address(uint16_t address, uint64_t ppu_cycle, int ppu_tick, bool odd_frame) {}
+	virtual void ppu_odd_frame_skip() {}
+	virtual void mmc1_ppu_phase(bool upper_chr, uint16_t ppu_address) {}
+	virtual void mmc5_clock_ppu_read(uint16_t address) {}
+	virtual void mmc5_reset_scanline_irq_state() {}
+	virtual void mmc5_real_ppuctrl_write(uint8_t data) {}
+	virtual void mmc5_real_ppumask_write(uint8_t data) {}
 	
 	virtual void hblank_irq(int scanline, bool vblank, bool blanked) {}
 	virtual void scanline_irq(int scanline, bool vblank, bool blanked) {}
@@ -312,6 +319,7 @@ protected:
 	int m_outer_prg_size;
 	int m_outer_chr_size;
 	int m_smd133_addr;
+	uint8_t m_fk23c_solder_pad;
 
 	int m_mirroring;
 	bool m_pcb_ctrl_mirror, m_four_screen_vram, m_has_trainer;
@@ -321,7 +329,7 @@ protected:
 	bool m_prg_ram_declared;
 	bool m_prg_nvram_declared;
 private:
-	uint8_t m_open_bus;
+	//uint8_t m_open_bus;
 
 public:
 	// PRG
@@ -416,7 +424,7 @@ public:
 	virtual std::pair<std::error_condition, std::string> call_load() override;
 	virtual void call_unload() override;
 
-	virtual bool is_reset_on_load() const noexcept override { return true; }
+	virtual bool is_reset_on_load() const noexcept override { return false; }
 	virtual const char *image_interface() const noexcept override { return "nes_cart"; }
 	virtual const char *file_extensions() const noexcept override { return "nes,unf,unif"; }
 	virtual u32 unhashed_header_length() const noexcept override { return 16; }

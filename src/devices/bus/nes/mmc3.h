@@ -7,7 +7,6 @@
 
 #include "nxrom.h"
 
-
 // ======================> nes_txrom_device
 class m6502_device;
 class nes_txrom_device : public nes_nrom_device
@@ -23,10 +22,9 @@ public:
 	virtual void prg_cb(int start, int bank);
 	virtual void chr_cb(int start, int bank, int source);
 
-	//virtual void hblank_irq(int scanline, bool vblank, bool blanked) override;
-	virtual void ppu_to_mapper(int scanline, unsigned dot, int ppu_tick) override;	//called from ppu
-	void observe_ppu_a12(uint16_t ppu_addr, uint64_t cpu_cycles, int ppu_tick, bool m_odd_frame);		//called from ppu
-	void notify_ppu_odd_skip();
+	virtual void ppu_to_mapper(int scanline, unsigned dot, int ppu_tick, uint16_t ppu_address) override; //called from ppu
+	virtual void ppu_bus_address(uint16_t ppu_addr, uint64_t cpu_cycles, int ppu_tick, bool m_odd_frame) override; //called from ppu
+	virtual void ppu_odd_frame_skip() override;	//called from ppu
 	virtual void pcb_reset() override; 
 
 protected:
@@ -113,20 +111,7 @@ protected:
 	// Cached CPU pointer used for delayed IRQ queue/cancel and timing.
 	m6502_device* m_maincpu6502 = nullptr;
 	
-	// Debug-only location of the current PPU position.
-	// Used by the pathological $C001 logging block.
-	int m_scanline;
-	int m_dot;
-	
-	// Debug-only tracking for poorly understood repeated $C001 writes.
-	// NESdev notes this behavior is not fully emulated by most emulators;
-	// this lets us warn when $C001 is written without enough intervening IRQ clocks.
-	uint8_t m_mmc3_clocks_since_c001;
-	bool m_mmc3_seen_c001_recent;
-	
 	bool m_a12_low_seen = false;
-	bool m_c001_had_one_clock = false;
-	bool m_c001_pathology_pending = false;
 	int m_ppu_tick;
 	bool m_mmc3_odd_skip_a12_pending;
 };

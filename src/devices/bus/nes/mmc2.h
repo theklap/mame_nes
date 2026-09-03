@@ -42,11 +42,13 @@ public:
 	nes_fxrom_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock);
 
 	virtual void write_h(offs_t offset, uint8_t data) override;
+	virtual uint8_t read_m(offs_t offset) override;
+	virtual void write_m(offs_t offset, uint8_t data) override;
 
 	virtual void pcb_reset() override;
 	virtual void ppu_latch(offs_t offset) override;
+	
 };
-
 
 // device type definition
 DECLARE_DEVICE_TYPE(NES_PXROM, nes_pxrom_device)

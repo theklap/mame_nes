@@ -44,27 +44,36 @@ nes_hes_device::nes_hes_device(const machine_config &mconfig, const char *tag, d
 
 /*-------------------------------------------------
 
- Bootleg Board by HES (also used by others)
+HES NTD-8 multicart board
 
- Games: AV Hanafuda Club, AV Soccer, Papillon, Sidewinder,
- Total Funpack
+Games: HES 6-in-1, Mind Blower Pak, Total Funpak
 
- Actually, two variant: one for HES 6-in-1 with mirroring control
- and one for AV Soccer and others with hardwired mirroring
+This board has a switchable 32 KiB PRG-ROM bank at
+$8000-$FFFF and a switchable 8 KiB CHR-ROM bank at
+PPU $0000-$1FFF.
 
- iNES: mapper 113
+The control register is decoded throughout $4100-$41FF,
+$4300-$43FF and every subsequent odd-numbered page
+through $5F00-$5FFF.
 
- In MAME: Supported.
+Data bits 3-5 select the PRG-ROM bank. Data bits 0-2
+and 6 select the CHR-ROM bank. Data bit 7 controls
+nametable mirroring.
 
- -------------------------------------------------*/
+The board has no PRG-RAM and no bus conflicts.
 
-void nes_hes_device::write_l(offs_t offset, u8 data)
-{
+iNES: mapper 113
+
+In MAME: Supported.
+
+-------------------------------------------------*/
+
+void nes_hes_device::write_l(offs_t offset, u8 data) {
 	LOG("hes write_l, offset: %04x, data: %02x\n", offset, data);
 
-	offset += 0x100;
-	if (BIT(offset, 8)) // $41xx, $43xx, ... $5fxx
-	{
+	const offs_t address = offset + 0x4100;
+
+	if (BIT(address, 8)) {
 		prg32(BIT(data, 3, 3));
 		chr8(bitswap<4>(data, 6, 2, 1, 0), CHRROM);
 		set_nt_mirroring(BIT(data, 7) ? PPU_MIRROR_VERT : PPU_MIRROR_HORZ);

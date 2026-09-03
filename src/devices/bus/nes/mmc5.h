@@ -8,9 +8,6 @@
 #include "nxrom.h"
 
 #include "sound/mmc5snd.h"
-#include "sound/nes_apu.h"
-#include "video/ppu2c0x.h"  // this has to be included so that IRQ functions can access ppu2c0x_device::BOTTOM_VISIBLE_SCANLINE
-
 
 // ======================> nes_exrom_device
 class m6502_device;
@@ -24,25 +21,23 @@ public:
 	virtual uint8_t read_l(offs_t offset) override;
 	virtual uint8_t read_m(offs_t offset) override;
 	virtual uint8_t read_h(offs_t offset) override;
+	virtual uint8_t chr_r(offs_t offset) override;
+	virtual uint8_t nt_r(offs_t offset) override;
+	
 	virtual void write_l(offs_t offset, uint8_t data) override;
 	virtual void write_m(offs_t offset, uint8_t data) override;
 	virtual void write_h(offs_t offset, uint8_t data) override;
-
-	virtual uint8_t chr_r(offs_t offset) override;
-	virtual uint8_t nt_r(offs_t offset) override;
 	virtual void nt_w(offs_t offset, uint8_t data) override;
-
-	//virtual void hblank_irq(int scanline, bool vblank, bool blanked) override;
 	virtual void pcb_reset() override;
+	virtual void ppu_to_mapper(int scanline, unsigned dot, int ppu_tick, uint16_t ppu_address) override;
+	virtual void mmc5_clock_ppu_read(uint16_t ppu_addr_bus) override;
+	virtual void mmc5_reset_scanline_irq_state() override;
+	virtual void mmc5_real_ppuctrl_write(uint8_t data) override;
+	virtual void mmc5_real_ppumask_write(uint8_t data) override;
 	
-	virtual void ppu_to_mapper(int scanline, unsigned dot, int ppu_tick) override;
 	void mmc5_cpu_cycle();
 	void mmc5_end_frame();
-	void mmc5_clock_ppu_read(offs_t ppu_addr_bus, bool is_nt_fetch, bool is_at_fetch, bool is_bg_pattern, bool is_spr_pattern);
-	void mmc5_reset_scanline_irq_state();
 	void mmc5_recompute_ppu_latches();
-	void mmc5_real_ppuctrl_write(uint8_t data);
-	void mmc5_real_ppumask_write(uint8_t data);
 	bool mmc5_substitution_active();
 	bool mmc5_split_allowed();
 	bool mmc5_exattr_allowed();
@@ -62,10 +57,9 @@ protected:
 	inline uint8_t base_chr_r(int bank, uint32_t offset);
 	inline uint8_t split_chr_r(uint32_t offset);
 	inline uint8_t bg_ex1_chr_r(uint32_t offset);
-	inline bool in_split();
-	void mmc5_clock_irq_detector(offs_t ppu_addr_bus);
+	inline int current_bg_tile();
+	inline bool in_split(int render_tile);
 	void mmc5_set_in_frame();
-	void mmc5_cpu_clock();
 	
 	uint16_t 	m_irq_count;          		// $5203 IRQ scanline compare value
 	int			m_irq_enable;         		// $5204 bit 7 IRQ enable flag
@@ -98,10 +92,8 @@ protected:
 	uint8_t 	m_split_rev;           		// $5200 bit 6: split side; 0=left side, 1=right side
 	uint8_t 	m_split_ctrl;          		// $5200 bits 0-4: split start/stop tile column
 	uint8_t 	m_split_yst;           		// $5201 vertical split Y scroll
+	uint8_t 	m_split_y_counter;			// Vertical-split Y counter, loaded from $5201 at frame start
 	uint8_t 	m_split_bank;          		// $5202 vertical split 4K CHR bank
-
-	int      	m_vcount;             		// Current PPU scanline as reported to mapper
-	unsigned 	m_dot;                		// Current PPU dot/cycle as reported to mapper
 
 	bool 		irq_pending;              	// MMC5 IRQ pending flag, reported as $5204 bit 7
 	int  		scanline_cnt;             	// MMC5 internal scanline counter
@@ -122,10 +114,8 @@ protected:
 
 	uint8_t  	mmc5_match_count;     		// Consecutive identical $2xxx PPU read match count for scanline detector
 	uint16_t 	mmc5_last_ppu_addr;   		// Last PPU address seen by MMC5 scanline detector
-	bool     	m_rendering_active;   		// True when MMC5 considers rendering active for ExRAM write gating
 	int      	delay_irq;            		// Small deferred IRQ assertion delay used after scanline compare hit
 
-	//const char* m_last_phase;      			// Last PPU fetch phase label: NT/AT/PTL/PTH/SPR_PTL/SPR_PTH/etc.; do not save-state
 	// Last decoded PPU fetch phase. This is transient fetch context; do not save-state.
 	bool m_phase_nt;
 	bool m_phase_at;
@@ -137,9 +127,15 @@ protected:
 
 	uint8_t 	m_ram_hi_banks[4];     		// Resolved PRG-RAM bank number for each high CPU 8K slot $8000-$FFFF
 
-	required_device<ppu2c0x_device> m_ppu;
 	required_device<mmc5snd_device> m_sound;
 	
+	TIMER_CALLBACK_MEMBER(cpu_cycle_tick);
+
+	emu_timer *m_cpu_cycle_timer = nullptr;
+	
+	
+	uint16_t m_ppu_read_count;
+	bool m_ppu_fetch_locked;
 };
 
 

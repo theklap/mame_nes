@@ -21,7 +21,8 @@ public:
 
 	virtual void write_h(offs_t offset, u8 data) override;
 
-	void observe_ppu_a12(uint16_t ppu_addr, uint64_t ppu_cycles, int ppu_tick, bool odd_frame);
+	virtual void ppu_bus_address(uint16_t ppu_addr, uint64_t ppu_cycles, int ppu_tick, bool odd_frame) override;
+	virtual void ppu_to_mapper(int scanline, unsigned dot, int ppu_tick, uint16_t ppu_address) override;
 
 	virtual void pcb_reset() override;
 
@@ -48,6 +49,9 @@ private:
 	u8 m_irq_mode;
 	u8 m_irq_reset;
 	u8 m_irq_enable;
+	int delay_irq;
+	u64 m_irq_delay_cpu_cycle;
+	int m_irq_cpu_delay;
 
 	u8 m_mmc_prg_bank[3];
 
@@ -59,6 +63,8 @@ private:
 	bool m_a12_low_seen;
 
 	m6502_device *m_maincpu6502;
+	bool m_irq_force_clock;
+	
 };
 
 
@@ -72,6 +78,7 @@ public:
 
 	// device-level overrides
 	virtual void write_h(offs_t offset, u8 data) override;
+	virtual void pcb_reset() override;
 
 protected:
 	virtual void set_chr() override;

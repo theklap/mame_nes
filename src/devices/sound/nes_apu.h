@@ -15,7 +15,7 @@
 
 class cpu_device;
 class m6502_device;
-class nes_exrom_device;
+//class nes_exrom_device;
 class ppu2c0x_device;
 
 class nesapu_device : public device_t, public device_sound_interface
@@ -224,7 +224,7 @@ private:
 	cpu_device     *m_maincpu_dev;
 	m6502_device   *m_maincpu6502;
 	ppu2c0x_device *m_ppu_dev;
-	nes_exrom_device *m_mmc5;
+	//nes_exrom_device *m_mmc5;
 
 	//============================================================
 	//  Stream / mixer

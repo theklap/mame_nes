@@ -39,18 +39,18 @@ public:
 class nes_maxi15_device : public nes_nrom_device
 {
 public:
-	// construction/destruction
 	nes_maxi15_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock);
 
 	virtual u8 read_h(offs_t offset) override;
-
+	virtual void write_h(offs_t offset, u8 data) override;
 	virtual void pcb_reset() override;
 
 protected:
-	// device-level overrides
 	virtual void device_start() override;
 
 private:
+	void update_register(offs_t offset, u8 data);
+
 	u8 m_reg[2];
 };
 

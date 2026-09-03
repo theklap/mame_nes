@@ -28,7 +28,7 @@
 //-------------------------------------------------
 
 DEFINE_DEVICE_TYPE(NES_PXROM, nes_pxrom_device, "nes_pxrom", "NES Cart PxROM (MMC-2) PCB")
-DEFINE_DEVICE_TYPE(NES_FXROM, nes_fxrom_device, "nes_fxrom", "NES Cart FxROM (MMC-2) PCB")
+DEFINE_DEVICE_TYPE(NES_FXROM, nes_fxrom_device, "nes_fxrom", "NES Cart FxROM (MMC-4) PCB")
 
 
 nes_pxrom_device::nes_pxrom_device(const machine_config &mconfig, device_type type, const char *tag, device_t *owner, uint32_t clock)
@@ -45,8 +45,6 @@ nes_fxrom_device::nes_fxrom_device(const machine_config &mconfig, const char *ta
 	: nes_pxrom_device(mconfig, NES_FXROM, tag, owner, clock)
 {
 }
-
-
 
 void nes_pxrom_device::device_start()
 {
@@ -87,17 +85,14 @@ void nes_fxrom_device::pcb_reset()
 	m_reg[2] = 0;
 	m_reg[3] = 0;
 
-	// MMC4 powers up with both latches in the FE state
+	// Initialize both latch selectors to FE.
 	m_latch1 = 0xfe;
 	m_latch2 = 0xfe;
 
-	// Apply the active 4K banks directly based on latch state
+	// Apply the banks selected by the initialized latch state.
 	chr4_0(m_reg[1], CHRROM);
 	chr4_4(m_reg[3], CHRROM);
 }
-
-
-
 
 /*-------------------------------------------------
  mapper specific handlers
@@ -151,22 +146,22 @@ void nes_pxrom_device::pxrom_write(offs_t offset, uint8_t data)
 			prg8_89(data);
 			break;
 		case 0x3000:
-			m_reg[0] = data;
+			m_reg[0] = data & 0x1f;
 			if (m_latch1 == 0xfd)
 				chr4_0(m_reg[0], CHRROM);
 			break;
 		case 0x4000:
-			m_reg[1] = data;
+			m_reg[1] = data & 0x1f;
 			if (m_latch1 == 0xfe)
 				chr4_0(m_reg[1], CHRROM);
 			break;
 		case 0x5000:
-			m_reg[2] = data;
+			m_reg[2] = data & 0x1f;
 			if (m_latch2 == 0xfd)
 				chr4_4(m_reg[2], CHRROM);
 			break;
 		case 0x6000:
-			m_reg[3] = data;
+			m_reg[3] = data & 0x1f;
 			if (m_latch2 == 0xfe)
 				chr4_4(m_reg[3], CHRROM);
 			break;
@@ -185,8 +180,9 @@ void nes_pxrom_device::pxrom_write(offs_t offset, uint8_t data)
 
  Games: Famicom Wars, Fire Emblem, Fire Emblem Gaiden
 
- This is a small hardware variants of MMC2 (additional
- prg bankswitch line)
+ This is a hardware variant of MMC2 with a
+ 16 KiB switchable PRG-ROM bank, a fixed 16 KiB
+ PRG-ROM bank, and PRG-RAM support.
 
  iNES: mapper 10
 
@@ -194,43 +190,45 @@ void nes_pxrom_device::pxrom_write(offs_t offset, uint8_t data)
 
  -------------------------------------------------*/
 
-void nes_fxrom_device::ppu_latch(offs_t offset)
-{
-    offset &= 0x3fff;
+void nes_fxrom_device::ppu_latch(offs_t offset) {
+	offset &= 0x1fff;
 
-    // MMC4: ranged on both sides
-    if ((offset & 0x3ff8) == 0x0fd8)
-    {
-        m_latch1 = 0xfd;
-        chr4_0(m_reg[0], CHRROM);
-    }
-    else if ((offset & 0x3ff8) == 0x0fe8)
-    {
-        m_latch1 = 0xfe;
-        chr4_0(m_reg[1], CHRROM);
-    }
-    else if ((offset & 0x3ff8) == 0x1fd8)
-    {
-        m_latch2 = 0xfd;
-        chr4_4(m_reg[2], CHRROM);
-    }
-    else if ((offset & 0x3ff8) == 0x1fe8)
-    {
-        m_latch2 = 0xfe;
-        chr4_4(m_reg[3], CHRROM);
-    }
+	if ((offset & 0x1ff0) == 0x0fd0) {
+		m_latch1 = 0xfd;
+		chr4_0(m_reg[0], CHRROM);
+	}
+	else if ((offset & 0x1ff0) == 0x0fe0) {
+		m_latch1 = 0xfe;
+		chr4_0(m_reg[1], CHRROM);
+	}
+	else if ((offset & 0x1ff0) == 0x1fd0) {
+		m_latch2 = 0xfd;
+		chr4_4(m_reg[2], CHRROM);
+	}
+	else if ((offset & 0x1ff0) == 0x1fe0) {
+		m_latch2 = 0xfe;
+		chr4_4(m_reg[3], CHRROM);
+	}
 }
 
-void nes_fxrom_device::write_h(offs_t offset, uint8_t data)
-{
+void nes_fxrom_device::write_h(offs_t offset, uint8_t data) {
 	LOG("fxrom write_h, offset: %04x, data: %02x\n", offset, data);
-	switch (offset & 0x7000)
-	{
+
+	switch (offset & 0x7000) {
 		case 0x2000:
-			prg16_89ab(data);
+			prg16_89ab(data & 0x0f);
 			break;
+
 		default:
 			pxrom_write(offset, data);
 			break;
 	}
+}
+
+uint8_t nes_fxrom_device::read_m(offs_t offset) {
+	return device_nes_cart_interface::read_m(offset);
+}
+
+void nes_fxrom_device::write_m(offs_t offset, uint8_t data) {
+	device_nes_cart_interface::write_m(offset, data);
 }

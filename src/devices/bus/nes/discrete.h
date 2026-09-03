@@ -55,6 +55,7 @@ public:
 	nes_74x161x138_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock);
 
 	virtual void write_m(offs_t offset, u8 data) override;
+	virtual void write_h(offs_t offset, u8 data) override;
 };
 
 

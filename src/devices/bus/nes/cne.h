@@ -25,13 +25,20 @@ public:
 class nes_cne_fsb_device : public nes_nrom_device
 {
 public:
-	// construction/destruction
 	nes_cne_fsb_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock);
 
 	virtual u8 read_m(offs_t offset) override;
 	virtual void write_m(offs_t offset, u8 data) override;
+	virtual u8 read_h(offs_t offset) override;
 
 	virtual void pcb_reset() override;
+
+protected:
+	virtual void device_start() override;
+
+private:
+	u8 m_prg_reg[4];
+	u8 m_chr_reg[4];
 };
 
 

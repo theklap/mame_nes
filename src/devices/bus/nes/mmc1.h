@@ -19,7 +19,7 @@ public:
 	virtual u8 read_m(offs_t offset) override;
 	virtual void write_m(offs_t offset, u8 data) override;
 	virtual void write_h(offs_t offset, u8 data) override;
-	virtual void mmc1_ppu_phase(bool upper_chr, uint16_t ppu_addr);
+	virtual void mmc1_ppu_phase(bool upper_chr, uint16_t ppu_address) override;
 	virtual void pcb_reset() override;
 	
 protected:
@@ -38,7 +38,7 @@ protected:
 	virtual u8 prgram_bank() const;
 	
 	u8 mmc1_active_chr_reg() const;
-	bool m_powered;
+	bool m_powered = false;
 	bool m_mmc1_upper_chr;
 	uint16_t m_mmc1_ppu_addr;
 	u8 m_reg[4];
@@ -69,15 +69,9 @@ class nes_snrom_device : public nes_sxrom_device
 public:
 	nes_snrom_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock);
 
-	virtual u8 read_m(offs_t offset) override;
-	virtual void write_m(offs_t offset, u8 data) override;
-
 protected:
-	//virtual void device_start() override;
-	virtual void set_prg() override;
 	virtual void set_chr() override;
 	virtual bool prgram_enabled() const override;
-	virtual u8 prgram_bank() const override;
 };
 
 
@@ -86,12 +80,13 @@ protected:
 class nes_sorom_device : public nes_sxrom_device
 {
 public:
-	// construction/destruction
 	nes_sorom_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock);
 
 	virtual u8 read_m(offs_t offset) override;
-	virtual void set_chr() override;
 	virtual void write_m(offs_t offset, u8 data) override;
+
+protected:
+	virtual void set_chr() override;
 };
 
 // ======================> nes_surom_device
@@ -115,10 +110,12 @@ class nes_szrom_device : public nes_sxrom_device
 public:
 	nes_szrom_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock);
 
-protected:
-	virtual u8 prgram_bank() const override;
-	virtual void write_m(offs_t offset, u8 data) override;
 	virtual u8 read_m(offs_t offset) override;
+	virtual void write_m(offs_t offset, u8 data) override;
+
+protected:
+	virtual void set_chr() override;
+	virtual u8 prgram_bank() const override;
 };
 
 

@@ -26,7 +26,7 @@ public:
 	// reading and writing
 	virtual uint8_t read(offs_t offset);
 
-	uint8_t *get_cart_base() { return m_rom; }
+	virtual uint8_t *get_cart_base() { return m_rom; }
 	void set_cart_size(uint32_t size) { m_rom_size = size; m_rom_mask = (size / 0x4000) - 1; }
 	virtual void write_prg(uint32_t offset, uint8_t data) { }
 
@@ -68,12 +68,11 @@ public:
 
 	virtual bool is_reset_on_load() const noexcept override { return true; }
 	virtual const char *image_interface() const noexcept override { return "ade_cart"; }
-	virtual const char *file_extensions() const noexcept override { return "nes,bin"; }
+	virtual const char *file_extensions() const noexcept override { return "nes"; }
 
 	// device_slot_interface implementation
 	virtual std::string get_default_card_software(get_default_card_software_hook &hook) const override;
 
-	uint8_t read(offs_t offset);
 	void write_prg(uint32_t offset, uint8_t data) { if (m_cart) m_cart->write_prg(offset, data); }
 
 protected:
@@ -104,7 +103,7 @@ public:
 
 	// optional information overrides
 	virtual const tiny_rom_entry *device_rom_region() const override;
-	virtual uint8_t* get_cart_base();
+	virtual uint8_t *get_cart_base() override;
 	virtual void write_prg(uint32_t offset, uint8_t data) override;
 
 protected:
@@ -114,7 +113,6 @@ protected:
 	virtual void device_start() override;
 	virtual void device_reset() override;
 	
-	bool m_firehawk_mirroring;
 };
 
 

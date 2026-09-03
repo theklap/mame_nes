@@ -92,12 +92,12 @@ void nes_bmc_jy820845c_device::device_start()
 	save_item(NAME(m_mode));
 }
 
-void nes_bmc_jy820845c_device::pcb_reset()
-{
-	nes_sxrom_device::pcb_reset();
-
+void nes_bmc_jy820845c_device::pcb_reset() {
 	m_latch0 = 0;
 	m_mode = 0;
+
+	nes_sxrom_device::pcb_reset();
+
 	update_banks();
 }
 
@@ -165,25 +165,41 @@ void nes_txc_22110_device::pcb_reset()
 
 /*-------------------------------------------------
 
- UNL-NINJARYU
+UNL-NINJARYU
 
- Games: Ninja Ryukenden Chinese
+Game: Ninja Ryukenden Chinese
 
- This board was previously assigned to mapper 111. It has
- registers akin to MMC1 but without the need to write to
- them serially. The one existing game has 256K CHR, so this
- must have at least 1 more bit for CHR banking. Other differences?
+This board provides four parallel registers resembling
+the internal MMC1 registers. Writes do not use the MMC1
+five-bit serial protocol.
 
- In MAME: Preliminary supported.
+$8000-$9FFF: Control
+$A000-$BFFF: CHR bank 0
+$C000-$DFFF: CHR bank 1
+$E000-$FFFF: PRG bank and PRG-RAM disable
 
- -------------------------------------------------*/
+The board supports 256 KiB of PRG-ROM and 256 KiB of
+CHR-ROM. D7 reset behavior has not been verified.
 
-void nes_ninjaryu_device::write_h(offs_t offset, u8 data)
-{
+The board was formerly assigned to iNES mapper 111.
+Mapper 111 is now assigned to GTROM, so this board is
+currently selected through the MAME software list only.
+
+D7 reset behavior has not been verified.
+
+In MAME: Supported.
+
+-------------------------------------------------*/
+
+void nes_ninjaryu_device::write_h(offs_t offset, u8 data) {
 	LOG("unl_ninjaryu write_h, offset: %04x, data: %02x\n", offset, data);
-	u8 reg = BIT(offset, 13, 2);
-	m_reg[reg] = data;
-	update_regs(reg);
+
+	if (!BIT(data, 7)) {
+		const u8 reg = BIT(offset, 13, 2);
+
+		m_reg[reg] = data;
+		update_regs(reg);
+	}
 }
 
 
@@ -197,9 +213,19 @@ void nes_ninjaryu_device::write_h(offs_t offset, u8 data)
 
  BMC-JY012005
 
- Games: 1998 Super HiK 8 in 1 (JY-021B)
+ Game: 1998 Super HiK 8 in 1 (JY-021B)
 
- MMC1 clone with banking for multigame menu.
+ This board combines an MMC1-compatible mapper with
+ an outer banking register written throughout
+ $6000-$7FFF.
+
+ Outer register bits 2-0 select the CHR-ROM region.
+ Bit 6 selects the PRG-ROM banking mode. When clear,
+ bits 2-1 select a 256 KiB PRG-ROM region and bit 0
+ is ignored. When set, bits 2-0 select a 128 KiB
+ PRG-ROM region.
+
+ Bit 7 locks the outer register until reset.
 
  NES 2.0: mapper 404
 
@@ -207,23 +233,22 @@ void nes_ninjaryu_device::write_h(offs_t offset, u8 data)
 
  -------------------------------------------------*/
 
-void nes_bmc_jy012005_device::set_prg()
-{
-	u8 mode = !BIT(m_latch0, 6);
-	nes_sxrom_device::set_prg((m_latch0 & 0x07 & ~mode) << 3, mode << 3 | 0x07);
+void nes_bmc_jy012005_device::set_prg() {
+	const u8 mode = !BIT(m_latch0, 6);
+	const int prg_base = (m_latch0 & 0x07 & ~mode) << 3;
+	const int prg_mask = (mode << 3) | 0x07;
+
+	nes_sxrom_device::set_prg(prg_base, prg_mask);
 }
 
-void nes_bmc_jy012005_device::set_chr()
-{
+void nes_bmc_jy012005_device::set_chr() {
 	nes_sxrom_device::set_chr((m_latch0 & 0x07) << 5, 0x1f);
 }
 
-void nes_bmc_jy012005_device::write_m(offs_t offset, u8 data)
-{
+void nes_bmc_jy012005_device::write_m(offs_t offset, u8 data) {
 	LOG("bmc_jy012005 write_m, offset: %04x, data: %02x\n", offset, data);
 
-	if (!BIT(m_latch0, 7))    // outer bank lock
-	{
+	if (!BIT(m_latch0, 7)) {
 		m_latch0 = data;
 		set_prg();
 		set_chr();
@@ -234,9 +259,33 @@ void nes_bmc_jy012005_device::write_m(offs_t offset, u8 data)
 
  BMC-JY820845C
 
- Games: 7 in 1 1993 Chess Series (JY-015)
+ Game: 7 in 1 1993 Chess Series (JY-015)
 
- MMC1 clone with banking for multigame menu.
+ This board combines an MMC1-compatible mapper with
+ a PAL providing outer banking and an optional
+ MHROM-compatible banking mode.
+
+ The outer register is selected by writes throughout
+ $7000-$7FFF. Its value comes from CPU address bits
+ 3-0 rather than the written data:
+
+ A3:    Outer-register lock
+ A2-A1: Outer PRG-ROM and CHR-ROM bank
+ A2-A1: 0-2 select MHROM mode
+ A2-A1: 3 selects MMC1 mode
+ A0:    Additional PRG-ROM bank bit in MHROM mode
+
+ In MHROM mode, writes throughout $8000-$FFFF latch
+ data bits 4, 1 and 0 for direct PRG-ROM and CHR-ROM
+ banking.
+
+ In MMC1 mode, writes throughout $8000-$FFFF are
+ forwarded to the MMC1-compatible serial registers.
+ Nametable mirroring is therefore controlled by the
+ MMC1 while running the included MMC1 games.
+
+ The outer register overlaps 8 KiB of WRAM at
+ $6000-$7FFF.
 
  NES 2.0: mapper 550
 
@@ -244,62 +293,93 @@ void nes_bmc_jy012005_device::write_m(offs_t offset, u8 data)
 
  -------------------------------------------------*/
 
-void nes_bmc_jy820845c_device::update_banks()    // used by menu and MHROM games
-{
-	prg32((m_mode & 0x07) << 1 | BIT(m_latch0, 4));
-	chr8((m_mode & 0x06) << 1 | (m_latch0 & 0x03), CHRROM);
-}
-
-void nes_bmc_jy820845c_device::write_m(offs_t offset, u8 data)
-{
-	LOG("bmc_jy820845c write_m, offset: %04x, data: %02x\n", offset, data);
-
-	nes_sxrom_device::write_m(offset, data);    // register overlaid on WRAM
-
-	if (offset >= 0x1000 && !BIT(m_mode, 3))
-	{
-		m_mode = offset & 0x0f;
-		if ((m_mode & 0x06) == 0x06)        // MMC1 mode
-		{
-			set_prg();
-			set_chr();
-		}
-		else
-			update_banks();
+void nes_bmc_jy820845c_device::set_prg() {
+	if ((m_mode & 0x06) == 0x06) {
+		nes_sxrom_device::set_prg(0x18, 0x07);
+	}
+	else {
+		prg32(((m_mode & 0x07) << 1) | BIT(m_latch0, 4));
 	}
 }
 
-void nes_bmc_jy820845c_device::write_h(offs_t offset, u8 data)
-{
+void nes_bmc_jy820845c_device::set_chr() {
+	if ((m_mode & 0x06) == 0x06) {
+		nes_sxrom_device::set_chr(0x18, 0x07);
+	}
+	else {
+		chr8(((m_mode & 0x06) << 1) | (m_latch0 & 0x03), CHRROM);
+	}
+}
+
+void nes_bmc_jy820845c_device::update_banks() {
+	const u8 prg_bank = ((m_mode & 0x07) << 1) | BIT(m_latch0, 4);
+	const u8 chr_bank = ((m_mode & 0x06) << 1) | (m_latch0 & 0x03);
+
+	prg32(prg_bank);
+	chr8(chr_bank, CHRROM);
+}
+
+void nes_bmc_jy820845c_device::write_m(offs_t offset, u8 data) {
+	LOG("bmc_jy820845c write_m, offset: %04x, data: %02x\n", offset, data);
+
+	nes_sxrom_device::write_m(offset, data);
+
+	if (offset >= 0x1000 && !BIT(m_mode, 3)) {
+		m_mode = offset & 0x0f;
+
+		if ((m_mode & 0x06) == 0x06) {
+			set_prg();
+			set_chr();
+		}
+		else {
+			update_banks();
+		}
+	}
+}
+
+void nes_bmc_jy820845c_device::write_h(offs_t offset, u8 data) {
 	LOG("bmc_jy820845c write_h, offset: %04x, data: %02x\n", offset, data);
 
 	m_latch0 = data;
 
-	if ((m_mode & 0x06) == 0x06)
-		nes_sxrom_device::write_h(offset, data);
-	else
+	nes_sxrom_device::write_h(offset, data);
+
+	if ((m_mode & 0x06) != 0x06) {
 		update_banks();
+	}
 }
 
 /*-------------------------------------------------
 
  FARID_SLROM_8-IN-1
 
- Games: 8 in 1
+ Game: 8 in 1
 
- MMC1 clone with banking for multigame menu.
+ This MMC1 clone replaces PRG-RAM at $6000-$7FFF
+ with a write-only outer bank register.
+
+ Outer register bits 4-6 select a 128 KiB PRG-ROM
+ and CHR-ROM region. Bit 3 locks the register until
+ reset. Writes are accepted only while the MMC1
+ PRG-RAM enable output is active.
+
+ The outer register is cleared on warm and cold reset.
 
  NES 2.0: mapper 323
+ UNIF: FARID_SLROM_8-IN-1
 
  In MAME: Supported.
 
  -------------------------------------------------*/
 
-void nes_farid_slrom_device::write_m(offs_t offset, u8 data)
-{
+void nes_farid_slrom_device::write_m(offs_t offset, u8 data) {
 	LOG("farid_slrom write_m, offset: %04x, data: %02x\n", offset, data);
-	if (!BIT(m_reg[3], 4) && !BIT(m_outer, 3))    // MMC1 WRAM enabled and outer bank not locked
+
+	if (!BIT(m_reg[3], 4) && !BIT(m_outer, 3)) {
 		m_outer = data;
+		set_prg();
+		set_chr();
+	}
 }
 
 /*-------------------------------------------------
@@ -318,20 +398,22 @@ void nes_farid_slrom_device::write_m(offs_t offset, u8 data)
 
 /*-------------------------------------------------
 
- BMC-SRPG-5IN1 (PCB has no distinguishing label)
+ BMC-SRPG-5IN1
 
- Games: Super RPG 5 in 1 CH501
+ Game: Super RPG 5 in 1 CH501
 
- MMC1 clone with banking for multigame menu. Note: This
- game does not soft reset properly on real hardware.
+ This MMC1 clone contains an additional four-bit serial
+ shift register written through $5000-$5FFF. After four
+ writes, the completed value selects the outer PRG-ROM
+ bank and affects PRG-RAM banking.
 
- The interesting feature of this board is that it has a
- serially written 4-bit shift register that selects the
- outer game bank (meaning it has two shift registers,
- since it also clones the MMC1's). The MSB (bit 3) seems
- to indicate menu mode (0) or game mode (1), but it's not
- clear if/how this is used. Is it a lock? We currently
- don't use the MSB nor allow it to be read back.
+ The cartridge contains eight switchable 8 KiB banks of
+ battery-backed PRG-RAM at $6000-$7FFF. MMC1 PRG register
+ bit 4 controls whether the selected RAM bank is enabled.
+
+ Outer register bit 3 is stored but its hardware function
+ has not been verified. The game does not soft-reset
+ properly on the original cartridge.
 
  NES 2.0: mapper 543
 
@@ -339,54 +421,78 @@ void nes_farid_slrom_device::write_m(offs_t offset, u8 data)
 
  -------------------------------------------------*/
 
-void nes_srpg5in1_device::write_l(offs_t offset, u8 data)
-{
+void nes_srpg5in1_device::write_l(offs_t offset, u8 data) {
 	LOG("srpg5in1 write_l, offset: %04x, data: %02x\n", offset, data);
 
 	offset += 0x100;
-	if (offset >= 0x1000)
-	{
-		m_outer_latch = (data & 0x08) | m_outer_latch >> 1;
+
+	if (offset >= 0x1000) {
+		m_outer_latch = (data & 0x08) | (m_outer_latch >> 1);
 		m_outer_count = (m_outer_count + 1) & 0x03;
-		if (!m_outer_count)
-		{
+
+		if (!m_outer_count) {
 			m_outer = m_outer_latch;
 			set_prg();
 		}
 	}
 }
 
-void nes_srpg5in1_device::write_m(offs_t offset, u8 data)
-{
+void nes_srpg5in1_device::write_m(offs_t offset, u8 data) {
 	LOG("srpg5in1 write_m, offset: %04x, data: %02x\n", offset, data);
 
-	u8 bank = BIT(m_outer, 1) ? bitswap<3>(m_outer, 1, 2, 0) : (m_outer & 1) << 1 | BIT(m_reg[1], 3);
+	const u8 bank = BIT(m_outer, 1)
+			? bitswap<3>(m_outer, 1, 2, 0)
+			: ((m_outer & 0x01) << 1) | BIT(m_reg[1], 3);
 
-	if (!BIT(m_reg[3], 4))  // WRAM enabled
+	if (!BIT(m_reg[3], 4) && !m_battery.empty()) {
 		m_battery[((bank * 0x2000) + offset) & (m_battery.size() - 1)] = data;
+	}
 }
 
-u8 nes_srpg5in1_device::read_m(offs_t offset)
-{
+u8 nes_srpg5in1_device::read_m(offs_t offset) {
 	LOG("srpg5in1 read_m, offset: %04x\n", offset);
 
-	u8 bank = BIT(m_outer, 1) ? bitswap<3>(m_outer, 1, 2, 0) : (m_outer & 1) << 1 | BIT(m_reg[1], 3);
+	const u8 bank = BIT(m_outer, 1)
+			? bitswap<3>(m_outer, 1, 2, 0)
+			: ((m_outer & 0x01) << 1) | BIT(m_reg[1], 3);
 
-	if (!BIT(m_reg[3], 4))  // WRAM enabled
+	if (!BIT(m_reg[3], 4) && !m_battery.empty()) {
 		return m_battery[((bank * 0x2000) + offset) & (m_battery.size() - 1)];
+	}
 
 	return get_open_bus();
 }
 
 /*-------------------------------------------------
 
- TXC 01-22110-000 Board
+ TXC 01-22110-000
 
- Games: 2 in 1 Uzi Lightgun (MGC-002)
+ Game: 2 in 1 Uzi Lightgun (MGC-002)
 
- This board has an MMC1 clone for Operation Wolf and
- otherwise is mostly compatible with mapper 70 for
- Bandai's Space Shadow.
+ This board supports two banking modes. Space Shadow
+ and the menu use mapper-70-compatible direct banking,
+ while Operation Wolf uses an MMC1-compatible mapper.
+
+ Writes throughout $4100-$41FF select the operating
+ mode. Bit 0 selects MMC1 mode when set. In direct
+ banking mode, bit 1 selects the 128 KiB PRG-ROM
+ region.
+
+ In direct banking mode, writes throughout
+ $8000-$FFFF use data bits 5-4 to select a switchable
+ 16 KiB PRG-ROM bank and bits 3-0 to select an 8 KiB
+ CHR-ROM bank. The final PRG-ROM bank within the
+ selected 128 KiB region remains fixed at $C000-$FFFF.
+
+ MMC1 mode uses the upper 128 KiB of PRG-ROM and
+ the upper 128 KiB of CHR-ROM.
+
+ Nametable mirroring is hardwired vertically in both
+ modes.
+
+ The cartridge requires the Bandai Hyper Shot
+ lightgun connected through the Famicom expansion
+ port.
 
  NES 2.0: mapper 297
 
@@ -394,38 +500,37 @@ u8 nes_srpg5in1_device::read_m(offs_t offset)
 
  -------------------------------------------------*/
 
-void nes_txc_22110_device::update_banks()    // used by menu and Space Shadow
-{
-	u8 outer = (m_mode & 0x02) << 1;
+void nes_txc_22110_device::update_banks() {
+	const u8 outer = (m_mode & 0x02) << 1;
+
 	prg16_89ab(outer | BIT(m_latch0, 4, 2));
-	prg16_cdef(outer | 3);
+	prg16_cdef(outer | 0x03);
 	chr8(m_latch0 & 0x0f, CHRROM);
 }
 
-void nes_txc_22110_device::write_l(offs_t offset, u8 data)
-{
+void nes_txc_22110_device::write_l(offs_t offset, u8 data) {
 	LOG("TXC 22110 write_l, offset: %04x, data: %02x\n", offset, data);
-	if (offset < 0x100)        // $4100 - $41ff
-	{
+
+	if (offset < 0x100) {
 		m_mode = data;
-		if (m_mode & 1)    // MMC1 mode
-		{
+
+		if (BIT(m_mode, 0)) {
 			set_prg();
 			set_chr();
 		}
-		else
+		else {
 			update_banks();
+		}
 	}
 }
 
-void nes_txc_22110_device::write_h(offs_t offset, u8 data)
-{
+void nes_txc_22110_device::write_h(offs_t offset, u8 data) {
 	LOG("TXC 22110 write_h, offset: %04x, data: %02x\n", offset, data);
 
-	if (m_mode & 1)
+	if (BIT(m_mode, 0)) {
 		nes_sxrom_device::write_h(offset, data);
-	else
-	{
+	}
+	else {
 		m_latch0 = data;
 		update_banks();
 	}

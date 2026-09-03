@@ -7,7 +7,6 @@
 
 #include "nxrom.h"
 
-
 // ======================> nes_jy_typea_device
 
 class nes_jy_typea_device : public nes_nrom_device
@@ -19,12 +18,14 @@ public:
 	virtual uint8_t read_l(offs_t offset) override;
 	virtual uint8_t read_m(offs_t offset) override;
 	virtual void write_l(offs_t offset, uint8_t data) override;
+	virtual void write_m(offs_t offset, uint8_t data) override;
 	virtual void write_h(offs_t offset, uint8_t data) override;
 
 	virtual uint8_t chr_r(offs_t offset) override;
 	virtual uint8_t nt_r(offs_t offset) override;
 
-	virtual void scanline_irq(int scanline, bool vblank, bool blanked) override;
+	virtual void ppu_to_mapper(int scanline, unsigned dot, int ppu_tick, uint16_t ppu_address) override;
+	virtual void ppu_bus_address(uint16_t address, uint64_t ppu_cycle, int ppu_tick, bool odd_frame) override;
 	virtual void pcb_reset() override;
 
 protected:
@@ -32,6 +33,7 @@ protected:
 
 	// device-level overrides
 	virtual void device_start() override;
+	virtual ioport_constructor device_input_ports() const override;
 
 	TIMER_CALLBACK_MEMBER(irq_timer_tick);
 
@@ -44,14 +46,13 @@ protected:
 	inline uint8_t unscramble(uint8_t bank);
 
 	uint8_t m_mul[2];
-	uint8_t m_latch;
+	uint8_t m_accumulator;
+	uint8_t m_test;
 	uint8_t m_reg[4];
-	uint8_t m_chr_latch[2];   // type C uses a more complex CHR 4K mode, and these vars are only changed for those games
+	uint8_t m_chr_latch[2];
 	uint8_t m_mmc_prg_bank[4];
 	uint16_t m_mmc_nt_bank[4];
 	uint16_t m_mmc_vrom_bank[8];
-	uint16_t m_extra_chr_bank;
-	uint16_t m_extra_chr_mask;
 	int m_bank_6000;
 
 	uint8_t m_irq_mode;
@@ -60,12 +61,16 @@ protected:
 	uint8_t m_irq_prescale_mask;
 	uint8_t m_irq_flip;
 	int m_irq_enable;
-	int m_irq_up, m_irq_down;
+	int m_irq_up;
+	int m_irq_down;
+	bool m_irq_last_a12;
+	int m_irq_delay;
 
 	emu_timer *irq_timer;
 	attotime timer_freq;
-};
 
+	required_ioport m_dips;
+};
 
 // ======================> nes_jy_typeb_device
 
@@ -96,7 +101,6 @@ protected:
 	void update_mirror_typec();
 	virtual void update_mirror() override { update_mirror_typec(); }
 };
-
 
 // device type definition
 DECLARE_DEVICE_TYPE(NES_JY_TYPEA, nes_jy_typea_device)

@@ -30,14 +30,13 @@ public:
 
 	virtual u8 read_m(offs_t offset) override;
 	virtual void write_m(offs_t offset, u8 data) override;
-
+	virtual void set_prg(int prg_base, int prg_mask) override;
+	virtual void set_chr(u8 chr, int chr_base, int chr_mask) override;
 	virtual void pcb_reset() override;
 
 protected:
 	// device-level overrides
 	virtual void device_start() override;
-
-	virtual void chr_cb(int start, int bank, int source) override;
 
 private:
 	u8 m_reg;
@@ -93,6 +92,7 @@ public:
 
 	virtual void write_m(offs_t offset, u8 data) override;
 	virtual void prg_cb(int start, int bank) override;
+	virtual void chr_cb(int start, int bank, int source) override;
 
 	virtual void pcb_reset() override;
 
@@ -260,7 +260,7 @@ public:
 protected:
 	// device-level overrides
 	virtual void device_start() override;
-
+	void update_protection();
 	virtual void set_prg(int prg_base, int prg_mask) override;
 
 private:
@@ -276,9 +276,6 @@ class nes_h2288_device : public nes_txrom_device
 public:
 	// construction/destruction
 	nes_h2288_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock);
-
-// FIXME: This is a hack and should be removed once open bus behavior is properly working. UMK3 depends on an open bus read (F51F: lda $5f74) at bootup.
-	virtual u8 read_l(offs_t offset) override { return 0x5f; }
 
 	virtual void write_l(offs_t offset, u8 data) override;
 	virtual void write_h(offs_t offset, u8 data) override;
@@ -323,17 +320,15 @@ private:
 
 // ======================> nes_txc_tw_device
 
-class nes_txc_tw_device : public nes_txrom_device
-{
+class nes_txc_tw_device : public nes_txrom_device {
 public:
-	// construction/destruction
 	nes_txc_tw_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock);
 
+	virtual void write_ex(offs_t offset, uint8_t data) override { write_l(offset, data); }
 	virtual void write_l(offs_t offset, uint8_t data) override;
-	virtual void write_m(offs_t offset, uint8_t data) override { write_l(offset & 0xff, data); }   // offset does not really count for this mapper }
+	virtual void write_m(offs_t offset, uint8_t data) override { write_l(offset, data); }
 	virtual void prg_cb(int start, int bank) override;
 };
-
 
 // ======================> nes_kof97_device
 
@@ -346,30 +341,31 @@ public:
 	virtual void write_h(offs_t offset, uint8_t data) override;
 };
 
-
 // ======================> nes_kof96_device
 
-class nes_kof96_device : public nes_txrom_device
-{
+class nes_kof96_device : public nes_txrom_device {
 public:
-	// construction/destruction
 	nes_kof96_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock);
 
 	virtual u8 read_l(offs_t offset) override;
 	virtual void write_l(offs_t offset, u8 data) override;
+	virtual void write_m(offs_t offset, u8 data) override;
+	virtual void write_h(offs_t offset, u8 data) override;
 	virtual void prg_cb(int start, int bank) override;
 	virtual void chr_cb(int start, int bank, int source) override;
 
 	virtual void pcb_reset() override;
 
 protected:
-	// device-level overrides
 	virtual void device_start() override;
 
 private:
+	void update_kof96_prg();
+
+	u8 m_outer;
+	u8 m_prot;
 	bool m_mmc3_mode;
 };
-
 
 // ======================> nes_sf3_device
 
@@ -410,6 +406,8 @@ public:
 
 	virtual uint8_t read_l(offs_t offset) override;
 	virtual void write_l(offs_t offset, uint8_t data) override;
+	virtual uint8_t read_m(offs_t offset) override;
+	virtual void write_m(offs_t offset, uint8_t data) override;
 	virtual void prg_cb(int start, int bank) override;
 
 	virtual void pcb_reset() override;
@@ -420,6 +418,24 @@ protected:
 
 private:
 	uint8_t m_reg[5];
+	static constexpr u8 gouder_conv_table[256] = {
+		0x59,0x59,0x59,0x59,0x59,0x59,0x59,0x59,0x59,0x49,0x19,0x09,0x59,0x49,0x19,0x09,
+		0x59,0x59,0x59,0x59,0x59,0x59,0x59,0x59,0x51,0x41,0x11,0x01,0x51,0x41,0x11,0x01,
+		0x59,0x59,0x59,0x59,0x59,0x59,0x59,0x59,0x59,0x49,0x19,0x09,0x59,0x49,0x19,0x09,
+		0x59,0x59,0x59,0x59,0x59,0x59,0x59,0x59,0x51,0x41,0x11,0x01,0x51,0x41,0x11,0x01,
+		0x00,0x10,0x40,0x50,0x00,0x10,0x40,0x50,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+		0x08,0x18,0x48,0x58,0x08,0x18,0x48,0x58,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+		0x00,0x10,0x40,0x50,0x00,0x10,0x40,0x50,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+		0x08,0x18,0x48,0x58,0x08,0x18,0x48,0x58,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+		0x59,0x59,0x59,0x59,0x59,0x59,0x59,0x59,0x58,0x48,0x18,0x08,0x58,0x48,0x18,0x08,
+		0x59,0x59,0x59,0x59,0x59,0x59,0x59,0x59,0x50,0x40,0x10,0x00,0x50,0x40,0x10,0x00,
+		0x59,0x59,0x59,0x59,0x59,0x59,0x59,0x59,0x58,0x48,0x18,0x08,0x58,0x48,0x18,0x08,
+		0x59,0x59,0x59,0x59,0x59,0x59,0x59,0x59,0x50,0x40,0x10,0x00,0x50,0x40,0x10,0x00,
+		0x01,0x11,0x41,0x51,0x01,0x11,0x41,0x51,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+		0x09,0x19,0x49,0x59,0x09,0x19,0x49,0x59,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+		0x01,0x11,0x41,0x51,0x01,0x11,0x41,0x51,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+		0x09,0x19,0x49,0x59,0x09,0x19,0x49,0x59,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00
+	};
 };
 
 
@@ -552,46 +568,58 @@ public:
 	virtual void pcb_reset() override;
 };
 
-
 // ======================> nes_fk23c_device
 
-class nes_fk23c_device : public nes_txrom_device
-{
+class nes_fk23c_device : public nes_txrom_device {
 public:
-	// construction/destruction
 	nes_fk23c_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock);
 
+	virtual uint8_t read_ex(offs_t offset) override;
+	virtual uint8_t read_l(offs_t offset) override;
+	virtual uint8_t read_m(offs_t offset) override;
+	virtual void write_ex(offs_t offset, uint8_t data) override;
 	virtual void write_l(offs_t offset, uint8_t data) override;
+	virtual void write_m(offs_t offset, uint8_t data) override;
 	virtual void write_h(offs_t offset, uint8_t data) override;
-	virtual void prg_cb(int start, int bank) override;
-	virtual void chr_cb(int start, int bank, int source) override;
 
 	virtual void pcb_reset() override;
 
 protected:
 	nes_fk23c_device(const machine_config &mconfig, device_type type, const char *tag, device_t *owner, uint32_t clock);
 
-	// device-level overrides
 	virtual void device_start() override;
 
+	uint8_t fk23c_ram_r(uint8_t bank, offs_t offset);
+	void fk23c_ram_w(uint8_t bank, offs_t offset, uint8_t data);
+	void fk23c_set_mirror();
 	void fk23c_set_prg();
 	void fk23c_set_chr();
-	uint8_t m_reg[8];
-	uint8_t m_mmc_cmd1;
-};
+	void fk23c_update_state();
+	void fk23c_write_low(uint16_t address, uint8_t data);
+	virtual ioport_constructor device_input_ports() const override;
 
+	required_ioport m_solder_pad;
+	uint8_t m_reg[8]{};
+	uint8_t m_mmc_cmd1 = 0;
+	uint8_t m_wram_bank = 0;
+
+	bool m_ram_in_first_chr = false;
+	bool m_single_screen_mirroring = false;
+	bool m_fk23_registers_enabled = false;
+	bool m_wram_config_enabled = false;
+	bool m_wram_enabled = false;
+	bool m_wram_write_protected = false;
+	bool m_powered = false;
+};
 
 // ======================> nes_fk23ca_device
 
-class nes_fk23ca_device : public nes_fk23c_device
-{
+class nes_fk23ca_device : public nes_fk23c_device {
 public:
-	// construction/destruction
 	nes_fk23ca_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock);
 
 	virtual void pcb_reset() override;
 };
-
 
 // ======================> nes_nt639_device
 
@@ -1152,6 +1180,7 @@ public:
 protected:
 	// device-level overrides
 	virtual void device_start() override;
+	virtual void prg_cb(int start, int bank) override;
 
 private:
 	u8 m_reg[2];

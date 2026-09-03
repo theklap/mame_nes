@@ -30,7 +30,7 @@
 #include "nes_apu.h"
 #include "video/ppu2c0x.h"
 #include "cpu/m6502/m6502.h"
-#include "bus/nes/mmc5.h"
+//#include "bus/nes/mmc5.h"
 
 DEFINE_DEVICE_TYPE(NES_APU,  nesapu_device,  "nesapu",  "RP2A0X APU")
 DEFINE_DEVICE_TYPE(APU_2A03, apu2a03_device, "apu2a03", "RP2A03 APU")
@@ -42,7 +42,7 @@ nesapu_device::nesapu_device(const machine_config &mconfig, device_type type, co
 	, m_maincpu_dev(nullptr)
 	, m_maincpu6502(nullptr)
 	, m_ppu_dev(nullptr)
-	, m_mmc5(nullptr)
+	//, m_mmc5(nullptr)
 	, m_stream(nullptr)
 	, m_irq_handler(*this)
 	, m_mem_read_cb(*this, 0x00)
@@ -62,7 +62,7 @@ apu2a03_device::apu2a03_device(const machine_config& mconfig, const char* tag, d
 
 void nesapu_device::device_stop()
 {
-	osd_printf_info("\n[NES APU STATS]\n");
+	/*osd_printf_info("\n[NES APU STATS]\n");
 	osd_printf_info("\tTest L [APU Delta Modulation Channel] Detected = %d\n", detect_test_l);
 	osd_printf_info("\tTest M [APU Delta Modulation Channel] Detected = %d\n", detect_test_m);
 	osd_printf_info("\tExplicit DMA Abort Detected: Case 0 = %d\n", detect_abort_0);
@@ -71,6 +71,7 @@ void nesapu_device::device_stop()
 	osd_printf_info("\tImplicit DMA Abort Detected: Case -8 or -9 = %d\n", detect_abort_8_9);
 	osd_printf_info("\tAudio FIFO overflows = %llu\n", (unsigned long long)m_audio_fifo_overflows);
 	osd_printf_info("\tAudio FIFO underflows = %llu\n", (unsigned long long)m_audio_fifo_underflows);
+	*/
 }
 
 //-------------------------------------------------
@@ -113,7 +114,7 @@ void nesapu_device::device_start()
 	m_maincpu_dev = machine().root_device().subdevice<cpu_device>("maincpu");
 	m_maincpu6502 = machine().root_device().subdevice<m6502_device>("maincpu");
 	m_ppu_dev = machine().root_device().subdevice<ppu2c0x_device>("ppu");
-	m_mmc5 = machine().root_device().subdevice<nes_exrom_device>("nes_slot:exrom");
+	//m_mmc5 = machine().root_device().subdevice<nes_exrom_device>("nes_slot:exrom");
 	pal_cpu_ppu = 0;
 	// --------------------------------------------------
 	// Deterministic startup initialization.
@@ -1112,9 +1113,9 @@ void nesapu_device::tick_apu()
 	// MMC5 has extra per-CPU-cycle behavior that must be serviced before the
 	// normal APU/DMC/OAM DMA handling below. After that, run the shared APU tick
 	// and stop here.
-	if (m_mmc5) {
-		m_mmc5->mmc5_cpu_cycle();
-	}
+	//if (m_mmc5) {
+		//m_mmc5->mmc5_cpu_cycle();
+	//}
 
 	// Track the interval until the DMC sample buffer becomes empty, and then
 	// how many CPU cycles have elapsed since it became empty.

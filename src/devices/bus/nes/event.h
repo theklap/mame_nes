@@ -16,7 +16,7 @@ class nes_event_device : public nes_sxrom_device
 public:
 	// construction/destruction
 	nes_event_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock);
-
+	
 	virtual void pcb_reset() override;
 
 protected:
@@ -26,6 +26,7 @@ protected:
 
 	virtual void set_prg() override;
 	virtual void set_chr() override;
+	virtual void update_regs(int reg) override;
 
 	TIMER_CALLBACK_MEMBER(event_tick);
 
@@ -52,6 +53,7 @@ public:
 	virtual u8 read_m(offs_t offset) override;
 	virtual void write_m(offs_t offset, u8 data) override;
 	virtual void chr_cb(int start, int bank, int source) override;
+	
 
 	virtual void pcb_reset() override;
 

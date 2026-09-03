@@ -142,7 +142,7 @@ protected:
 	virtual void device_add_mconfig(machine_config &config) override;
 
 private:
-	int m_exp_active;
+	bool m_exp_active = false;
 	required_device<nes_kstudio_slot_device> m_subslot;
 	required_ioport m_mic_ipt;
 };

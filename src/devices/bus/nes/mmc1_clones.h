@@ -49,8 +49,8 @@ protected:
 	// device-level overrides
 	virtual void device_start() override;
 
-	virtual void set_prg() override { nes_sxrom_device::set_prg(0x18, 0x07); }
-	virtual void set_chr() override { nes_sxrom_device::set_chr(0x18, 0x07); }
+	virtual void set_prg() override;
+	virtual void set_chr() override;
 
 private:
 	void update_banks();

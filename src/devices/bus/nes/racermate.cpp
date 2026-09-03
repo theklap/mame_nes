@@ -10,8 +10,10 @@
 
  TODO:
  - save VRAM
- - emulate the bike controller?
  - emulate battery-backed CHR RAM protection/open bus behavior
+
+ The RacerMate CompuTrainer interface is emulated separately by the
+ NES controller-port devices in racermate_ctrl.cpp.
 
  ***********************************************************************************************************/
 
@@ -203,7 +205,7 @@ void nes_racermate_device::clock_irq_counter()
 }
 
 
-void nes_racermate_device::ppu_to_mapper(int scanline, unsigned dot, int ppu_tick)
+void nes_racermate_device::ppu_to_mapper(int scanline, unsigned dot, int ppu_tick, uint16_t ppu_address)
 {
 	if (m_irq_delay > 0)
 	{

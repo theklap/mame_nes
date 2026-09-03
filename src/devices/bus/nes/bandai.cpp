@@ -22,17 +22,13 @@
  * Bandai Karaoke Studio [mapper 188] is emulated in a separate source file
    to implement also the subslot and the mic inputs
 
-
- TODO:
- - investigate why EEPROM does not work
- - add support to the PPU for the code necessary to Oeka Kids games (also needed by UNL-DANCE2000 PCB)
- - check the cause for the flickering in Famicom Jump 2
-
  ***********************************************************************************************************/
 
 
 #include "emu.h"
 #include "bandai.h"
+
+#include "cpu/m6502/m6502.h"
 
 #define LOG_UNHANDLED (1U << 1)
 
@@ -58,12 +54,21 @@ DEFINE_DEVICE_TYPE(NES_FJUMP2,        nes_fjump2_device,        "nes_fjump2",   
 
 
 nes_oekakids_device::nes_oekakids_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock)
-	: nes_nrom_device(mconfig, NES_OEKAKIDS, tag, owner, clock), m_reg(0), m_latch(0)
+	: nes_nrom_device(mconfig, NES_OEKAKIDS, tag, owner, clock),
+	m_reg(0),
+	m_latch(0),
+	m_latch_clock(false)
 {
 }
 
 nes_fcg_device::nes_fcg_device(const machine_config &mconfig, device_type type, const char *tag, device_t *owner, uint32_t clock)
-	: nes_nrom_device(mconfig, type, tag, owner, clock), m_irq_count(0), m_irq_enable(0), irq_timer(nullptr)
+	: nes_nrom_device(mconfig, type, tag, owner, clock),
+	m_irq_count(0),
+	m_irq_latch(0),
+	m_irq_enable(0),
+	m_irq_delay(0),
+	irq_timer(nullptr),
+	m_maincpu6502(nullptr)
 {
 }
 
@@ -83,7 +88,9 @@ nes_lz93d50_device::nes_lz93d50_device(const machine_config &mconfig, const char
 }
 
 nes_lz93d50_24c01_device::nes_lz93d50_24c01_device(const machine_config &mconfig, device_type type, const char *tag, device_t *owner, uint32_t clock)
-	: nes_lz93d50_device(mconfig, type, tag, owner, clock), m_i2cmem(*this, "i2cmem"), m_i2c_dir(0)
+	: nes_lz93d50_device(mconfig, type, tag, owner, clock),
+	m_i2cmem(*this, "i2cmem"),
+	m_i2c_dir(1)
 {
 }
 
@@ -98,36 +105,42 @@ nes_lz93d50_24c02_device::nes_lz93d50_24c02_device(const machine_config &mconfig
 }
 
 nes_fjump2_device::nes_fjump2_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock)
-	: nes_lz93d50_device(mconfig, NES_FJUMP2, tag, owner, clock)
+	: nes_lz93d50_device(mconfig, NES_FJUMP2, tag, owner, clock),
+	m_prg_outer_select(0),
+	m_wram_enable(false)
 {
 }
-
-
 
 void nes_oekakids_device::device_start()
 {
 	common_start();
 	save_item(NAME(m_latch));
 	save_item(NAME(m_reg));
+	save_item(NAME(m_latch_clock));
 }
 
 void nes_oekakids_device::pcb_reset()
 {
-	prg32(0);
-	chr4_0(0, CHRRAM);
-	chr4_4(3, CHRRAM);
-	m_latch = 0;
 	m_reg = 0;
+	m_latch = 0;
+	m_latch_clock = false;
+
+	prg32(0);
+	set_nt_mirroring(PPU_MIRROR_VERT);
+	update_chr();
 }
 
 void nes_fcg_device::device_start()
 {
 	common_start();
+	m_maincpu6502 = machine().root_device().subdevice<m6502_device>("maincpu");
 	irq_timer = timer_alloc(FUNC(nes_fcg_device::irq_timer_tick), this);
 	irq_timer->adjust(attotime::zero, 0, clocks_to_attotime(1));
 
 	save_item(NAME(m_irq_enable));
 	save_item(NAME(m_irq_count));
+	save_item(NAME(m_irq_latch));
+	save_item(NAME(m_irq_delay));
 }
 
 void nes_fcg_device::pcb_reset()
@@ -138,16 +151,26 @@ void nes_fcg_device::pcb_reset()
 
 	m_irq_enable = 0;
 	m_irq_count = 0;
+	m_irq_latch = 0;
+	m_irq_delay = 0;
+
+	if (m_maincpu6502)
+		m_maincpu6502->cancel_delayed_mapper_irq();
+
+	set_irq_line(CLEAR_LINE);
 }
 
 void nes_lz93d50_24c01_device::device_start()
 {
 	common_start();
+	m_maincpu6502 = machine().root_device().subdevice<m6502_device>("maincpu");
 	irq_timer = timer_alloc(FUNC(nes_lz93d50_24c01_device::irq_timer_tick), this);
 	irq_timer->adjust(attotime::zero, 0, clocks_to_attotime(1));
 
 	save_item(NAME(m_irq_enable));
 	save_item(NAME(m_irq_count));
+	save_item(NAME(m_irq_latch));
+	save_item(NAME(m_irq_delay));
 	save_item(NAME(m_i2c_dir));
 }
 
@@ -159,28 +182,52 @@ void nes_lz93d50_24c01_device::pcb_reset()
 
 	m_irq_enable = 0;
 	m_irq_count = 0;
-	m_i2c_dir = 0;
+	m_irq_latch = 0;
+	m_irq_delay = 0;
+	m_i2c_dir = 1;
+	m_i2cmem->write_sda(1);
+	m_i2cmem->write_scl(1);
+
+	if (m_maincpu6502)
+		m_maincpu6502->cancel_delayed_mapper_irq();
+
+	set_irq_line(CLEAR_LINE);
 }
 
 void nes_fjump2_device::device_start()
 {
 	common_start();
+	m_maincpu6502 = machine().root_device().subdevice<m6502_device>("maincpu");
 	irq_timer = timer_alloc(FUNC(nes_fjump2_device::irq_timer_tick), this);
 	irq_timer->adjust(attotime::zero, 0, clocks_to_attotime(1));
 
+	save_item(NAME(m_irq_enable));
+	save_item(NAME(m_irq_count));
+	save_item(NAME(m_irq_latch));
+	save_item(NAME(m_irq_delay));
 	save_item(NAME(m_reg));
+	save_item(NAME(m_prg_outer_select));
+	save_item(NAME(m_wram_enable));
 }
 
 void nes_fjump2_device::pcb_reset()
 {
 	chr8(0, CHRRAM);
+
 	memset(m_reg, 0, sizeof(m_reg));
+	m_prg_outer_select = 0;
+	m_wram_enable = false;
+
 	set_prg();
 
 	m_irq_enable = 0;
+	m_irq_count = 0;
+	m_irq_latch = 0;
+	m_irq_delay = 0;
+
+	m_maincpu6502->cancel_delayed_mapper_irq();
+	set_irq_line(CLEAR_LINE);
 }
-
-
 
 /*-------------------------------------------------
  mapper specific handlers
@@ -190,90 +237,93 @@ void nes_fjump2_device::pcb_reset()
 
  Bandai Oeka Kids board emulation
 
- Games: Oeka Kids - Anpanman no Hiragana Daisuki, Oeka
- Kids - Anpanman to Oekaki Shiyou!!
+ Games:
+ - Oeka Kids: Anpanman no Hiragana Daisuki
+ - Oeka Kids: Anpanman to Oekaki Shiyou!!
 
- This board can swap CHR whenever a PPU address line is
- changed and we still do not emulate this.
+ The board uses a 74161 for 32 KiB PRG-ROM banking,
+ a 7474 for the two-bit CHR-RAM latch, and a 7402 to
+ generate the latch clock.
+
+ The latch clock is:
+
+     PPU A13 AND NOT PPU A12
+
+ A rising edge occurs when the PPU leaves pattern-table
+ space and begins a nametable fetch in $2000-$2FFF.
+ PPU A8-A9 are captured on that edge.
+
+ PPU $0000-$0FFF:
+     CHR bank = written D2 plus latched PPU A9-A8
+
+ PPU $1000-$1FFF:
+     CHR bank = written D2 plus fixed low bits %11
+
+ Written D1-D0 select the 32 KiB PRG-ROM bank.
+ Writes are subject to PRG-ROM bus conflicts.
+
+ The Oeka Kids tablet is emulated separately as a
+ Famicom expansion-port controller.
 
  iNES: mapper 96
 
- In MAME: Preliminary Support.
+ In MAME: Supported
 
  -------------------------------------------------*/
 
+void nes_oekakids_device::ppu_to_mapper(int scanline, unsigned dot, int ppu_tick, uint16_t ppu_address) {
+	const bool latch_clock = BIT(ppu_address, 13) && !BIT(ppu_address, 12);
 
-void nes_oekakids_device::nt_w(offs_t offset, uint8_t data)
-{
-#if 0
-	if (!(offset & 0x1000) && (offset & 0x3ff) < 0x3c0)
-	{
-		m_latch = BIT(offset, 8, 2);
-		chr4_0(m_reg | m_latch, CHRRAM);
+	if (latch_clock && !m_latch_clock) {
+		m_latch = BIT(ppu_address, 8, 2);
+		update_chr();
 	}
-#endif
 
-	device_nes_cart_interface::nt_w(offset, data);
+	m_latch_clock = latch_clock;
 }
 
-uint8_t nes_oekakids_device::nt_r(offs_t offset)
-{
-#if 0
-	if (!(offset & 0x1000) && (offset & 0x3ff) < 0x3c0)
-	{
-		m_latch = BIT(offset, 8, 2);
-		chr4_0(m_reg | m_latch, CHRRAM);
-	}
-#endif
-
-	return device_nes_cart_interface::nt_r(offset);
-}
-
-void nes_oekakids_device::update_chr()
-{
+void nes_oekakids_device::update_chr() {
 	chr4_0(m_reg | m_latch, CHRRAM);
 	chr4_4(m_reg | 0x03, CHRRAM);
 }
 
-// this only monitors accesses to $2007 while we would need to monitor accesses to $2006...
-void nes_oekakids_device::ppu_latch(offs_t offset)
-{
-#if 0
-	if ((offset & 0x3000) == 0x2000)
-	{
-		m_latch = BIT(offset, 8, 2);
-		update_chr();
-	}
-#endif
-}
-
-void nes_oekakids_device::write_h(offs_t offset, uint8_t data)
-{
+void nes_oekakids_device::write_h(offs_t offset, uint8_t data) {
 	LOG("oeka kids write_h, offset: %04x, data: %02x\n", offset, data);
 
+	data = account_bus_conflict(offset, data);
+
 	prg32(data & 0x03);
+
 	m_reg = data & 0x04;
 	update_chr();
 }
 
 /*-------------------------------------------------
 
- Bandai FCG / LZ93D50 boards emulation
+ Bandai FCG / LZ93D50 board emulation
 
- There are several variants: plain board with or without SRAM,
- board + 24C01 EEPROM, board + 24C02 EEPROM, board + Barcode
- Reader (DATACH).
- We currently only emulate the base hardware.
+ The original FCG-1/FCG-2 ASIC decodes its registers
+ throughout CPU $6000-$7FFF. Its IRQ latch registers
+ directly modify the active IRQ counter.
 
- Games: Crayon Shin-Chan - Ora to Poi Poi, Dragon Ball Z Gaiden,
- Dragon Ball Z II & III, Rokudenashi Blues, SD Gundam
- Gaiden - KGM2, Dragon Ball Z, Magical Taruruuto-kun, SD Gundam
- Gaiden [with EEPROM], Dragon Ball, Dragon Ball 3, Famicom Jump,
- Famicom Jump II [no EEPROM], Datach Games
+ The later LZ93D50 ASIC decodes its registers throughout
+ CPU $8000-$FFFF. Registers $800B-$800C modify an IRQ
+ latch that is copied into the active counter by a write
+ to $800A.
 
- At the moment, we don't support EEPROM I/O
+ Board variants may contain SRAM, a 24C01 EEPROM, a
+ 24C02 EEPROM, or the Datach barcode reader and subslot.
+ The EEPROM SDA input is returned on CPU D4 during reads
+ from $6000-$7FFF. All other undriven bits retain CPU
+ open bus.
 
- iNES: mappers 16, 153 (see below), 157 & 159
+ Famicom Jump II uses an LZ93D50 with 8 KiB of
+ battery-backed WRAM and repurposes the first four CHR
+ register outputs as its outer PRG-ROM bank control.
+
+ Datach hardware is implemented in a separate source file.
+
+ iNES: mappers 16, 153, 157 and 159
 
  In MAME: Supported
 
@@ -281,25 +331,77 @@ void nes_oekakids_device::write_h(offs_t offset, uint8_t data)
 
 TIMER_CALLBACK_MEMBER(nes_fcg_device::irq_timer_tick)
 {
-	if (m_irq_enable)
-	{
-		// 16bit counter, IRQ fired when the counter goes from 1 to 0
-		// after firing, the counter is *not* reloaded, but next clock
-		// counter wraps around from 0 to 0xffff
-		if (!m_irq_count)
-			m_irq_count = 0xffff;
-		else
-			m_irq_count--;
+	if (!m_irq_enable)
+		return;
 
-		if (!m_irq_count)
-		{
-			set_irq_line(ASSERT_LINE);
-			m_irq_enable = 0;
-		}
+	if (m_irq_count)
+		m_irq_count--;
+
+	if (!m_irq_count)
+	{
+		m_irq_enable = 0;
+		m_irq_delay = 2;
+	}
+}
+
+void nes_fcg_device::ppu_to_mapper(int scanline, unsigned dot, int ppu_tick, uint16_t ppu_address)
+{
+	if (m_irq_delay > 0)
+	{
+		m_irq_delay--;
+
+		if (!m_irq_delay)
+			m_maincpu6502->queue_delayed_mapper_irq(2);
 	}
 }
 
 void nes_fcg_device::fcg_write(offs_t offset, uint8_t data)
+{
+	LOG("fcg_write, offset: %04x, data: %02x\n", offset, data);
+
+	switch (offset & 0x0f)
+	{
+		case 0: case 1: case 2: case 3:
+		case 4: case 5: case 6: case 7:
+			chr1_x(offset & 0x07, data, m_chr_source);
+			break;
+		case 8:
+			prg16_89ab(data);
+			break;
+		case 9:
+			switch (data & 0x03)
+			{
+				case 0: set_nt_mirroring(PPU_MIRROR_VERT); break;
+				case 1: set_nt_mirroring(PPU_MIRROR_HORZ); break;
+				case 2: set_nt_mirroring(PPU_MIRROR_LOW); break;
+				case 3: set_nt_mirroring(PPU_MIRROR_HIGH); break;
+			}
+			break;
+		case 0x0a:
+			m_irq_enable = data & 0x01;
+			m_irq_delay = 0;
+			m_maincpu6502->cancel_delayed_mapper_irq();
+			set_irq_line(CLEAR_LINE);
+
+			if (m_irq_enable && !m_irq_count)
+			{
+				m_irq_delay = 2;
+				m_irq_enable = 0;
+			}
+			break;
+		case 0x0b:
+			m_irq_count = (m_irq_count & 0xff00) | data;
+			break;
+		case 0x0c:
+			m_irq_count = (m_irq_count & 0x00ff) | (data << 8);
+			break;
+		default:
+			LOGMASKED(LOG_UNHANDLED, "fcg_write uncaught write, offset: %04x, data: %02x\n", offset, data);
+			break;
+	}
+}
+
+void nes_lz93d50_device::fcg_write(offs_t offset, uint8_t data)
 {
 	LOG("lz93d50_write, offset: %04x, data: %02x\n", offset, data);
 
@@ -322,14 +424,24 @@ void nes_fcg_device::fcg_write(offs_t offset, uint8_t data)
 			}
 			break;
 		case 0x0a:
-			m_irq_enable = data & 0x01;
+			m_irq_enable = BIT(data, 0);
+			m_irq_count = m_irq_latch;
+			m_irq_delay = 0;
+
+			m_maincpu6502->cancel_delayed_mapper_irq();
 			set_irq_line(CLEAR_LINE);
+
+			if (m_irq_enable && !m_irq_count)
+			{
+				m_irq_enable = 0;
+				m_irq_delay = 2;
+			}
 			break;
 		case 0x0b:
-			m_irq_count = (m_irq_count & 0xff00) | data;
+			m_irq_latch = (m_irq_latch & 0xff00) | data;
 			break;
 		case 0x0c:
-			m_irq_count = (m_irq_count & 0x00ff) | (data << 8);
+			m_irq_latch = (m_irq_latch & 0x00ff) | (data << 8);
 			break;
 		default:
 			LOGMASKED(LOG_UNHANDLED, "lz93d50_write uncaught write, offset: %04x, data: %02x\n", offset, data);
@@ -339,7 +451,7 @@ void nes_fcg_device::fcg_write(offs_t offset, uint8_t data)
 
 void nes_fcg_device::write_m(offs_t offset, uint8_t data)
 {
-	LOG("lz93d50 write_m, offset: %04x, data: %02x\n", offset, data);
+	LOG("fcg write_m, offset: %04x, data: %02x\n", offset, data);
 
 	if (m_battery.empty() && m_prgram.empty())
 		fcg_write(offset & 0x0f, data);
@@ -359,10 +471,21 @@ void nes_lz93d50_24c01_device::write_h(offs_t offset, uint8_t data)
 	switch (offset & 0x0f)
 	{
 		case 0x0d:
-			m_i2cmem->write_scl(BIT(data, 5));
-			m_i2cmem->write_sda(BIT(data, 6));
+			/*
+			    EEPROM control:
+
+			        bit 7 = read direction / release SDA
+			        bit 6 = SDA output when writing
+			        bit 5 = SCL
+
+			    I2C SDA is open-drain.  When the mapper is reading from
+			    EEPROM, it must release SDA so the EEPROM can drive it.
+			*/
 			m_i2c_dir = BIT(data, 7);
+			m_i2cmem->write_sda(m_i2c_dir ? 1 : BIT(data, 6));
+			m_i2cmem->write_scl(BIT(data, 5));
 			break;
+
 		default:
 			fcg_write(offset & 0x0f, data);
 			break;
@@ -372,10 +495,9 @@ void nes_lz93d50_24c01_device::write_h(offs_t offset, uint8_t data)
 uint8_t nes_lz93d50_24c01_device::read_m(offs_t offset)
 {
 	LOG("lz93d50 EEPROM read, offset: %04x\n", offset);
-	if (m_i2c_dir)
-		return (m_i2cmem->read_sda() & 1) << 4;
-	else
-		return 0;
+
+	return (get_open_bus() & 0xef)
+			| (m_i2c_dir ? ((m_i2cmem->read_sda() & 1) << 4) : 0x00);
 }
 
 //-------------------------------------------------
@@ -395,27 +517,45 @@ void nes_lz93d50_24c02_device::device_add_mconfig(machine_config &config)
 
 /*-------------------------------------------------
 
- Bandai BANDAI-JUMP2 boards emulation
+ Bandai BANDAI-JUMP2 board emulation
 
- This is a variant of LZ93D50, with SRAM and no EEPROM
- The board is only used by Famicom Jump II, which
- has no CHR and 512K of PRG, so it is not completely
- clear if the CHR regs of LZ93D50 (i.e. offset & 0xf < 8)
- would switch also CHR or if they are only used to select
- upper 256K of PRG
+ This LZ93D50 variant contains 8 KiB of battery-backed
+ WRAM and 8 KiB of unbanked CHR RAM.
 
- iNES: mappers 153
+ Registers $8000-$8003 contain four copies of the outer
+ 256 KiB PRG-ROM bank bit. PPU A10-A11 select which one
+ of these four register outputs drives the PRG bank line.
+ Software must therefore write the same value to all four
+ registers to prevent PRG banking from changing as the
+ PPU renders.
+
+ Registers $8004-$8007 are disabled because the ASIC's
+ PPU A12 and A13 inputs are grounded on this board.
+
+ $8008 selects the switchable 16 KiB PRG bank within the
+ selected 256 KiB outer bank. $800D bit 5 enables WRAM.
+
+ iNES: mapper 153
 
  In MAME: Supported
 
  -------------------------------------------------*/
+void nes_fjump2_device::ppu_to_mapper(int scanline, unsigned dot, int ppu_tick, uint16_t ppu_address)
+{
+	nes_fcg_device::ppu_to_mapper(scanline, dot, ppu_tick, ppu_address);
+
+	const uint8_t prg_outer_select = BIT(ppu_address, 10, 2);
+
+	if (m_prg_outer_select != prg_outer_select)
+	{
+		m_prg_outer_select = prg_outer_select;
+		set_prg();
+	}
+}
 
 void nes_fjump2_device::set_prg()
 {
-	uint8_t prg_base = 0;
-
-	for (int i = 0; i < 4; i++)
-		prg_base |= (m_reg[i] << 4);
+	const uint8_t prg_base = m_reg[m_prg_outer_select] << 4;
 
 	prg16_89ab(prg_base | m_reg[4]);
 	prg16_cdef(prg_base | 0x0f);
@@ -424,13 +564,19 @@ void nes_fjump2_device::set_prg()
 uint8_t nes_fjump2_device::read_m(offs_t offset)
 {
 	LOG("fjump2 read_m, offset: %04x\n", offset);
+
+	if (!m_wram_enable)
+		return get_open_bus();
+
 	return m_battery[offset & (m_battery.size() - 1)];
 }
 
 void nes_fjump2_device::write_m(offs_t offset, uint8_t data)
 {
 	LOG("fjump2 write_m, offset: %04x, data: %02x\n", offset, data);
-	m_battery[offset & (m_battery.size() - 1)] = data;
+
+	if (m_wram_enable)
+		m_battery[offset & (m_battery.size() - 1)] = data;
 }
 
 void nes_fjump2_device::write_h(offs_t offset, uint8_t data)
@@ -439,17 +585,38 @@ void nes_fjump2_device::write_h(offs_t offset, uint8_t data)
 
 	switch (offset & 0x0f)
 	{
-		case 0: case 1: case 2: case 3:
-			m_reg[offset & 0x0f] = BIT(data,0);
-			set_prg();
+		case 0:
+		case 1:
+		case 2:
+		case 3:
+		{
+			const uint8_t reg = offset & 0x03;
+
+			m_reg[reg] = BIT(data, 0);
+
+			if (reg == m_prg_outer_select)
+				set_prg();
+
 			break;
-		case 4: case 5: case 6: case 7:
-			// these have been verified to be disabled in this board
+		}
+
+		case 4:
+		case 5:
+		case 6:
+		case 7:
+			// PPU A12 and A13 are grounded, so these registers
+			// cannot be selected on this board.
 			break;
+
 		case 8:
 			m_reg[4] = data & 0x0f;
 			set_prg();
 			break;
+
+		case 0x0d:
+			m_wram_enable = BIT(data, 5);
+			break;
+
 		default:
 			fcg_write(offset & 0x0f, data);
 			break;

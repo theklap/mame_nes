@@ -11,7 +11,7 @@
 #include "emu.h"
 #include "m6502.h"
 #include "m6502d.h"
-#include "bus/nes/mmc5.h"
+//#include "bus/nes/mmc5.h"
 
 DEFINE_DEVICE_TYPE(M6502, m6502_device, "m6502", "MOS Technology 6502")
 DEFINE_DEVICE_TYPE(M6512, m6512_device, "m6512", "MOS Technology 6512")
@@ -29,6 +29,9 @@ m6512_device::m6512_device(const machine_config &mconfig, const char *tag, devic
 m6502_device::m6502_device(const machine_config &mconfig, device_type type, const char *tag, device_t *owner, uint32_t clock) :
 	cpu_device(mconfig, type, tag, owner, clock),
 	sync_w(*this),
+	m_mmc5_reset_scanline_irq(*this),
+	m_mmc5_ppuctrl_write(*this),
+	m_mmc5_ppumask_write(*this),
 	program_config("program", ENDIANNESS_LITTLE, 8, 16),
 	sprogram_config("decrypted_opcodes", ENDIANNESS_LITTLE, 8, 16),
 	mintf(nullptr),
@@ -130,7 +133,7 @@ void m6502_device::init()
 	save_item(NAME(need_irq));
 	save_item(NAME(prevReadAddress));
 	save_item(NAME(m_exram_control));
-	save_item(NAME(is_mmc5));
+	//save_item(NAME(is_mmc5));
 	save_item(NAME(m_open_bus_ranges));
 	save_item(NAME(m_ob_count));
 	save_item(NAME(nmi_cpu_cycle));
@@ -205,8 +208,8 @@ void m6502_device::init()
 	need_irq = false;
 	prevReadAddress = 0x0000;
 	m_exram_control = 0;
-	is_mmc5 = false;
-	m_mmc5 = nullptr;
+	//is_mmc5 = false;
+	//m_mmc5 = nullptr;
 	std::fill(std::begin(m_open_bus_ranges), std::end(m_open_bus_ranges), 0);
 	m_ob_count = 0;
 	nmi_cpu_cycle = 0;
@@ -980,8 +983,9 @@ void m6502_device::prefetch_end_noirq()
 
 uint8_t m6502_device::read(uint16_t adr)
 {
-	if (is_mmc5 && m_mmc5 && (adr == 0xfffa || adr == 0xfffb))
-		m_mmc5->mmc5_reset_scanline_irq_state();
+	if ((adr == 0xfffa || adr == 0xfffb) && !m_mmc5_reset_scanline_irq.isnull()) {
+		m_mmc5_reset_scanline_irq();
+	}
 	
 	adr_bus = adr;
 	prevReadAddress = adr;
@@ -1015,7 +1019,7 @@ uint8_t m6502_device::read(uint16_t adr)
 	// --- OPEN BUS CHECK ---
 	if (is_open_bus_address(adr))
 	{
-		logerror("OPENBUS READ addr=%04X value=%02X\n", adr, cpu_external_bus);
+		logerror("OPENBUS DATA: PC=%04X IR=%02X address=%04X value=%02X\n", PC, IR, adr, cpu_external_bus);
 		cpu_data_bus = cpu_external_bus;
 		return cpu_data_bus;
 	}
@@ -1042,8 +1046,9 @@ uint8_t m6502_device::read(uint16_t adr)
 
 uint8_t m6502_device::read_9(uint16_t adr)
 {
-	if (is_mmc5 && m_mmc5 && (adr == 0xfffa || adr == 0xfffb))
-		m_mmc5->mmc5_reset_scanline_irq_state();
+	if ((adr == 0xfffa || adr == 0xfffb) && !m_mmc5_reset_scanline_irq.isnull()) {
+		m_mmc5_reset_scanline_irq();
+	}
 	
 	adr_bus = adr;
 	prevReadAddress = adr;
@@ -1075,7 +1080,7 @@ uint8_t m6502_device::read_9(uint16_t adr)
 
 	if (is_open_bus_address(adr))
 	{
-		logerror("OPENBUS READ addr=%04X value=%02X\n", adr, cpu_external_bus);
+		logerror("OPENBUS DATA: PC=%04X IR=%02X address=%04X value=%02X\n", PC, IR, adr, cpu_external_bus);
 		cpu_data_bus = cpu_external_bus;
 		return cpu_data_bus;
 	}
@@ -1099,11 +1104,14 @@ uint8_t m6502_device::read_9(uint16_t adr)
 
 	
 void m6502_device::write(uint16_t adr, uint8_t val) {
-	if (is_mmc5 && m_mmc5 && (adr == 0x2000 || adr == 0x2001)) {
-		if (adr == 0x2000)
-			m_mmc5->mmc5_real_ppuctrl_write(val);
-		else
-			m_mmc5->mmc5_real_ppumask_write(val);
+	if (adr == 0x2000 && !m_mmc5_ppuctrl_write.isnull()) {
+		m_mmc5_ppuctrl_write(val);
+	}
+	else if (adr == 0x2001 && !m_mmc5_ppumask_write.isnull()) {
+		m_mmc5_ppumask_write(val);
+	}
+	else if (adr == 0x4014 && !m_mmc5_reset_scanline_irq.isnull()) {
+		m_mmc5_reset_scanline_irq();
 	}
 	
 	write_cycles_since_dma_halt_request++; 
@@ -1141,11 +1149,14 @@ void m6502_device::write(uint16_t adr, uint8_t val) {
 	
 //Read Modify Write
 void m6502_device::write_1(uint16_t adr, uint8_t val) { 
-	if (is_mmc5 && m_mmc5 && (adr == 0x2000 || adr == 0x2001)) {
-		if (adr == 0x2000)
-			m_mmc5->mmc5_real_ppuctrl_write(val);
-		else
-			m_mmc5->mmc5_real_ppumask_write(val);
+	if (adr == 0x2000 && !m_mmc5_ppuctrl_write.isnull()) {
+		m_mmc5_ppuctrl_write(val);
+	}
+	else if (adr == 0x2001 && !m_mmc5_ppumask_write.isnull()) {
+		m_mmc5_ppumask_write(val);
+	}
+	else if (adr == 0x4014 && !m_mmc5_reset_scanline_irq.isnull()) {
+		m_mmc5_reset_scanline_irq();
 	}
 	
 	write_cycles_since_dma_halt_request++; 
@@ -1173,11 +1184,14 @@ void m6502_device::write_1(uint16_t adr, uint8_t val) {
 }
 	
 void m6502_device::write_9(uint16_t adr, uint8_t val) { 
-	if (is_mmc5 && m_mmc5 && (adr == 0x2000 || adr == 0x2001)) {
-		if (adr == 0x2000)
-			m_mmc5->mmc5_real_ppuctrl_write(val);
-		else
-			m_mmc5->mmc5_real_ppumask_write(val);
+	if (adr == 0x2000 && !m_mmc5_ppuctrl_write.isnull()) {
+		m_mmc5_ppuctrl_write(val);
+	}
+	else if (adr == 0x2001 && !m_mmc5_ppumask_write.isnull()) {
+		m_mmc5_ppumask_write(val);
+	}
+	else if (adr == 0x4014 && !m_mmc5_reset_scanline_irq.isnull()) {
+		m_mmc5_reset_scanline_irq();
 	}
 
 	write_cycles_since_dma_halt_request++; 
@@ -1195,6 +1209,8 @@ void m6502_device::write_9(uint16_t adr, uint8_t val) {
 	if (adr == 0x4016) {
 		if ((total_cycles() - prev_4016_write == 1) && get_apu_clk1_is_high() && !(val & 1)) {
 			//osd_printf_info("0x4016 Detected: Controllers should not be strobed when the CPU transitions from a \"put\" cycle to a \"get\" cycle.\n");
+			cpu_data_bus = val;
+			cpu_external_bus = val;
 			return;
 		}
 		prev_4016_write = total_cycles();
@@ -1202,6 +1218,8 @@ void m6502_device::write_9(uint16_t adr, uint8_t val) {
 	else if (adr == 0x4017) {
 		if ((total_cycles() - prev_4017_write == 1) && get_apu_clk1_is_high() && !(val & 1)) {
 			//osd_printf_info("0x4017 Detected: Controllers should not be strobed when the CPU transitions from a \"put\" cycle to a \"get\" cycle.\n");
+			cpu_data_bus = val;
+			cpu_external_bus = val;
 			return;
 		}
 		prev_4017_write = total_cycles();
@@ -1214,8 +1232,9 @@ void m6502_device::write_9(uint16_t adr, uint8_t val) {
 
 uint8_t m6502_device::read_arg(uint16_t adr)
 {
-	if (is_mmc5 && m_mmc5 && (adr == 0xfffa || adr == 0xfffb))
-		m_mmc5->mmc5_reset_scanline_irq_state();
+	if ((adr == 0xfffa || adr == 0xfffb) && !m_mmc5_reset_scanline_irq.isnull()) {
+		m_mmc5_reset_scanline_irq();
+	}
 	
 	adr_bus = adr;
 	prevReadAddress = adr;
@@ -1247,7 +1266,7 @@ uint8_t m6502_device::read_arg(uint16_t adr)
 
 	if (is_open_bus_address(adr))
 	{
-		logerror("OPENBUS READ addr=%04X value=%02X\n", adr, cpu_external_bus);
+		logerror("OPENBUS DATA: PC=%04X IR=%02X address=%04X value=%02X\n", PC, IR, adr, cpu_external_bus);
 		cpu_data_bus = cpu_external_bus;
 		return cpu_data_bus;
 	}
@@ -1278,8 +1297,9 @@ uint8_t m6502_device::read_pc()
 	adr_bus = adr;
 	prevReadAddress = adr;
 	
-	if (is_mmc5 && m_mmc5 && (adr == 0xfffa || adr == 0xfffb))
-		m_mmc5->mmc5_reset_scanline_irq_state();
+	if ((adr == 0xfffa || adr == 0xfffb) && !m_mmc5_reset_scanline_irq.isnull()) {
+		m_mmc5_reset_scanline_irq();
+	}
 		
 	if (adr == 0x4016 || adr == 0x4017)
 	{
@@ -1307,7 +1327,7 @@ uint8_t m6502_device::read_pc()
 
 	if (is_open_bus_address(adr))
 	{
-		logerror("OPENBUS READ addr=%04X value=%02X\n", adr, cpu_external_bus);
+		logerror("OPENBUS OPCODE: PC=%04X IR=%02X address=%04X value=%02X\n", PC, IR, adr, cpu_external_bus);
 		cpu_data_bus = cpu_external_bus;
 		return cpu_data_bus;
 	}
@@ -1332,8 +1352,9 @@ uint8_t m6502_device::read_pc()
 	
 uint8_t m6502_device::read_sync(uint16_t adr)
 {
-	if (is_mmc5 && m_mmc5 && (adr == 0xfffa || adr == 0xfffb))
-		m_mmc5->mmc5_reset_scanline_irq_state();
+	if ((adr == 0xfffa || adr == 0xfffb) && !m_mmc5_reset_scanline_irq.isnull()) {
+		m_mmc5_reset_scanline_irq();
+	}
 		
 	adr_bus = adr;
 	prevReadAddress = adr;
@@ -1365,7 +1386,7 @@ uint8_t m6502_device::read_sync(uint16_t adr)
 
 	if (is_open_bus_address(adr))
 	{
-		logerror("OPENBUS READ addr=%04X value=%02X\n", adr, cpu_external_bus);
+		logerror("OPENBUS OPCODE: PC=%04X IR=%02X address=%04X value=%02X\n", PC, IR, adr, cpu_external_bus);
 		cpu_data_bus = cpu_external_bus;
 		return cpu_data_bus;
 	}
@@ -1503,13 +1524,10 @@ void m6502_device::set_m_exram_control(int x) {
 	m_exram_control = x; 
 }
 
-void m6502_device::set_is_mmc5(bool x)
-{
-	is_mmc5 = x;
-
-	if (is_mmc5 && !m_mmc5)
-		m_mmc5 = machine().root_device().subdevice<nes_exrom_device>("nes_slot:exrom");
-}
+//void m6502_device::set_is_mmc5(bool x)
+//{
+//	is_mmc5 = x;
+//}
 
 bool m6502_device::get_apu_clk1_is_high() { 
 	return apu_clk1_is_high; 
@@ -1531,11 +1549,11 @@ void m6502_device::set_open_bus_ranges(const uint32_t *ranges, int count)	{
 
 bool m6502_device::is_open_bus_address(uint16_t adr) const
 {
-	if (!is_mmc5 && m_ob_count == 0)
+	if (m_mmc5_reset_scanline_irq.isnull() && m_ob_count == 0)
 		return false;
 	
 	// MMC5: open bus only in ExRAM modes 0 and 1
-	if(is_mmc5) {
+	if(!m_mmc5_reset_scanline_irq.isnull()) {
 		if (adr >= 0x5C00 && adr <= 0x5FFF) {
 			if (m_exram_control == 0 || m_exram_control == 1) {
 				logerror("open-bus MMC5 read @ %04x\n", adr);
@@ -1593,12 +1611,14 @@ uint8_t m6502_device::mi_default::read(uint16_t adr)
 
 uint8_t m6502_device::mi_default::read_sync(uint16_t adr)
 {
-	return csprogram.read_byte(adr);
+	//return csprogram.read_byte(adr);
+	return program.read_byte(adr);
 }
 
 uint8_t m6502_device::mi_default::read_arg(uint16_t adr)
 {
-	return cprogram.read_byte(adr);
+	//return cprogram.read_byte(adr);
+	return program.read_byte(adr);
 }
 
 void m6502_device::mi_default::write(uint16_t adr, uint8_t val)

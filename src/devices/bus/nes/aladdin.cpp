@@ -83,14 +83,6 @@ void nes_aladdin_slot_device::device_start()
 	m_cart = get_card_device();
 }
 
-uint8_t nes_aladdin_slot_device::read(offs_t offset)
-{
-	if (m_cart)
-		return m_cart->read(offset);
-
-	return 0xff;
-}
-
 // 128K for Dizzy The Adventurer, 256K for the others
 std::pair<std::error_condition, std::string> nes_aladdin_slot_device::call_load()
 {
@@ -108,18 +100,21 @@ std::pair<std::error_condition, std::string> nes_aladdin_slot_device::call_load(
 
 			uint8_t temp[0x40010];
 			size = length() - 0x10;
-			fread(&temp, length());
-			memcpy(ROM, temp + 0x10, size);
+			fread(temp, length());
 
-			// double check that iNES files are really mapper 71 or 232
-			uint8_t mapper = (temp[6] & 0xf0) >> 4;
-			mapper |= temp[7] & 0xf0;
+			if (memcmp(temp, "NES\x1a", 4))
+				return std::make_pair(image_error::INVALIDIMAGE, "File is not an iNES cartridge image");
+
+			const uint8_t mapper = ((temp[6] & 0xf0) >> 4) | (temp[7] & 0xf0);
+
 			if (mapper != 71 && mapper != 232)
 			{
 				return std::make_pair(
 						image_error::INVALIDIMAGE,
 						util::string_format("Unsupported iNES mapper %u (must be 71 or 232)", mapper));
 			}
+
+			memcpy(ROM, temp + 0x10, size);
 		}
 		else
 		{
@@ -141,22 +136,29 @@ std::string nes_aladdin_slot_device::get_default_card_software(get_default_card_
 {
 	if (hook.image_file())
 	{
-		uint64_t len;
-		hook.image_file()->length(len); // FIXME: check error return, guard against excessively large files
-		std::vector<uint8_t> rom(len);
+		uint64_t length = 0;
 
-		size_t actual;
-		hook.image_file()->read(&rom[0], len, actual); // FIXME: check error return or read returning short
+		if (hook.image_file()->length(length))
+			return "algn";
 
-		uint8_t const mapper = ((rom[6] & 0xf0) >> 4) | (rom[7] & 0xf0);
+		if (length != 0x20010 && length != 0x40010)
+			return "algn";
 
-		const char *slot_string = "algn";
-//      if (mapper == 71)
-//          slot_string = "algn";
-		if (mapper == 232)
-			slot_string = "algq";
+		uint8_t header[0x10] = { };
+		size_t actual = 0;
 
-		return std::string(slot_string);
+		if (hook.image_file()->read(header, sizeof(header), actual))
+			return "algn";
+
+		if (actual != sizeof(header))
+			return "algn";
+
+		if (memcmp(header, "NES\x1a", 4))
+			return "algn";
+
+		const uint8_t mapper = ((header[6] & 0xf0) >> 4) | (header[7] & 0xf0);
+
+		return mapper == 232 ? "algq" : "algn";
 	}
 
 	return software_get_default_slot("algn");
@@ -195,30 +197,19 @@ nes_algq_rom_device::nes_algq_rom_device(const machine_config &mconfig, const ch
 
 void nes_algn_rom_device::device_start()
 {
-	m_rom = (uint8_t*)memregion("aderom")->base();
+	m_rom = reinterpret_cast<uint8_t *>(memregion("aderom")->base());
 
 	save_item(NAME(m_lobank));
 	save_item(NAME(m_hibank));
-	save_item(NAME(m_firehawk_mirroring));
 }
 
 void nes_algn_rom_device::device_reset()
 {
-	// Mapper 071:
-	//   $8000-$BFFF = switchable 16K PRG bank
-	//   $C000-$FFFF = fixed last 16K PRG bank
-	//   CHR = 8K RAM, no CHR banking
-	//
-	// Reset state is not strongly guaranteed by the mapper docs, but MAME has
-	// traditionally started the switchable bank at 0 and the fixed bank at the
-	// last available bank. Keep that behavior.
+	// ALGNV11 single-game minicarts use the $C000 latch to
+	// select the 16 KiB bank mapped at CPU $8000-$BFFF.
+	// CPU $C000-$FFFF is fixed to the last 16 KiB bank.
 	m_lobank = 0;
 	m_hibank = m_rom_mask;
-
-	// Fire Hawk / BF9097 has mapper-controlled one-screen mirroring.
-	// For compatibility, do not enable it until a $9000-$9FFF write happens.
-	// Normal mapper 071 games keep their header/board mirroring.
-	m_firehawk_mirroring = false;
 }
 
 void nes_algq_rom_device::device_start()
@@ -248,59 +239,40 @@ uint8_t *nes_algn_rom_device::get_cart_base()
 
 void nes_algn_rom_device::write_prg(uint32_t offset, uint8_t data)
 {
-	// CPU $8000-$FFFF reaches this as offset $0000-$7FFF.
+	// CPU $8000-$FFFF reaches this handler as $0000-$7FFF.
 	//
-	// NESdev mapper 071:
-	//   $8000-$BFFF: Fire Hawk mirroring register only, not PRG bank select
-	//   $C000-$FFFF: PRG bank select for CPU $8000-$BFFF
-	//
-	// The fixed CPU $C000-$FFFF bank remains the last available 16K bank.
-
-	if (offset >= 0x1000 && offset < 0x2000)
-	{
-		// Fire Hawk compatibility behavior:
-		// NESdev notes Fire Hawk writes $9000, while other Camerica games can
-		// write $00 to $8000 at startup. So only $9000-$9FFF enables/updates
-		// mapper-controlled one-screen mirroring.
-		//
-		// This only affects carts that actually need Fire Hawk behavior. On a
-		// plain ALGN mini-cart path this is harmless unless the parent board
-		// exposes mirroring control through this sub-cart, which this file
-		// currently does not directly do.
-		m_firehawk_mirroring = true;
-
-		// Do NOT change PRG bank here.
-		return;
-	}
-
+	// ALGNV11 minicarts connect ROM A17-A14 to bits 3-0 of
+	// the $C000 latch. Writes below CPU $C000 do not change
+	// PRG banking.
 	if (offset >= 0x4000)
 	{
-		// $C000-$FFFF:
-		// Select 16K PRG bank visible at CPU $8000-$BFFF.
-		//
-		// BF9093 exposes 4 bits, BF9097 exposes 3 bits, BF9096 exposes 2 bits,
-		// but masking by ROM size gives the right available-bank behavior here.
 		m_lobank = data & m_rom_mask;
-
-		// Keep the upper half fixed to the final 16K bank.
 		m_hibank = m_rom_mask;
 	}
 }
 
 void nes_algq_rom_device::write_prg(uint32_t offset, uint8_t data)
 {
-	// here hibank & lobank variables are used differently
-	// m_bank_base = 64K block
-	// m_lobank = 16K page inside the block
-	// m_hibank = 3rd page inside the block
+	// CPU $8000-$BFFF selects the 64 KiB outer PRG block.
+	//
+	// ALGQV11 swaps the two outer-bank bits compared with
+	// the ordinary BF9096 mapper-232 wiring:
+	//
+	//   CPU D3 -> PRG A17
+	//   CPU D4 -> PRG A16
+	//
+	// CPU $C000-$FFFF selects the switchable 16 KiB page
+	// inside that block. The upper bank is fixed to page 3.
 	if (offset < 0x4000)
 	{
-		m_bank_base = (data & 0x18) >> 1;
-		m_lobank = m_bank_base | (m_lobank & 3);
-		m_hibank = m_bank_base | 3;
+		m_bank_base = (BIT(data, 3) << 3) | (BIT(data, 4) << 2);
+		m_lobank = m_bank_base | (m_lobank & 0x03);
+		m_hibank = m_bank_base | 0x03;
 	}
 	else
-		m_lobank = m_bank_base | (data & 3);
+	{
+		m_lobank = m_bank_base | (data & 0x03);
+	}
 }
 
 
@@ -329,6 +301,10 @@ void nes_aladdin_device::pcb_reset()
 {
 	prg32(0xff);
 	chr8(0, CHRRAM);
+
+	// The Aladdin minicart connector has no mirroring-control
+	// signal. All released Aladdin games use vertical mirroring.
+	set_nt_mirroring(PPU_MIRROR_VERT);
 }
 
 
@@ -340,22 +316,42 @@ void nes_aladdin_device::pcb_reset()
 
  Camerica/Codemasters Aladdin Deck Enhancer
 
- iNES: mapper 71 & 232
+ Minicart PCBs:
+   ALGNV11 - mapper 71 banking
+   ALGQV11 - mapper 232 with swapped outer-bank bits
 
- In MESS: Supported (but timing issues in some games)
+ In MAME: Supported.
+
+ The Deck Enhancer supplies 8 KiB of CHR RAM. PRG ROM is
+ located on the inserted minicart.
+
+ The minicart connector has no nametable-mirroring control
+ signal. All released Aladdin games use vertical mirroring.
+
+ ALGNV11 uses a $C000-$FFFF latch to select the switchable
+ 16 KiB PRG bank at $8000-$BFFF. The final 16 KiB bank is
+ fixed at $C000-$FFFF.
+
+ ALGQV11 uses $8000-$BFFF to select a 64 KiB outer block
+ and $C000-$FFFF to select a 16 KiB page within that block.
+ Its two outer-bank bits are swapped relative to ordinary
+ mapper-232 cartridges.
+
+ The Deck Enhancer does not drive CPU reads in $4020-$7FFF,
+ so reads in that range return CPU open bus. Writes to the
+ mapper latches are still decoded in the applicable ranges.
 
  -------------------------------------------------*/
 
 uint8_t nes_aladdin_device::read_h(offs_t offset)
 {
 	LOG("aladdin read_h, offset: %04x\n", offset);
-	// this shall be the proper code, but it's a bit slower, so we access directly the subcart below
-	//return m_subslot->read(offset);
 
 	if (m_subslot->m_cart)
 		return m_subslot->m_cart->read(offset);
-	else    // this is "fake" in the sense that we fill CPU space with 0xff if no Aladdin cart is loaded
-		return hi_access_rom(offset);
+
+	// With no minicart inserted, nothing drives the PRG ROM bus.
+	return get_open_bus();
 }
 
 void nes_aladdin_device::write_h(offs_t offset, uint8_t data)

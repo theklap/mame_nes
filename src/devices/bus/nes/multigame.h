@@ -13,12 +13,22 @@
 class nes_action52_device : public nes_nrom_device
 {
 public:
-	// construction/destruction
 	nes_action52_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock);
 
+	virtual u8 read_l(offs_t offset) override;
+	virtual void write_l(offs_t offset, u8 data) override;
+	virtual u8 read_ex(offs_t offset) override;
+	virtual void write_ex(offs_t offset, u8 data) override;
 	virtual void write_h(offs_t offset, u8 data) override;
-};
 
+	virtual void pcb_reset() override;
+
+protected:
+	virtual void device_start() override;
+
+private:
+	u8 m_ram[4];
+};
 
 // ======================> nes_caltron6in1_device
 
@@ -196,6 +206,8 @@ public:
 	nes_studyngame_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock);
 
 	virtual void write_h(offs_t offset, uint8_t data) override;
+	
+	virtual void pcb_reset() override;
 };
 
 
@@ -244,9 +256,11 @@ public:
 protected:
 	// device-level overrides
 	virtual void device_start() override;
+	virtual ioport_constructor device_input_ports() const override ATTR_COLD;
 
 private:
-	u8 m_latch, m_jumper;
+	u8 m_latch;
+	required_ioport m_jumper;
 };
 
 

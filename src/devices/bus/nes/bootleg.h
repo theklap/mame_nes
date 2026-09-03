@@ -7,29 +7,9 @@
 
 
 // ======================> nes_sc127_device
-
-class nes_sc127_device : public nes_nrom_device
-{
-public:
-	// construction/destruction
-	nes_sc127_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock);
-	virtual void write_h(offs_t offset, uint8_t data) override;
-
-	virtual void hblank_irq(int scanline, bool vblank, bool blanked) override;
-	virtual void pcb_reset() override;
-
-protected:
-	// device-level overrides
-	virtual void device_start() override;
-
-private:
-	uint16_t m_irq_count;
-	int m_irq_enable;
-};
-
+class m6502_device;
 
 // ======================> nes_mbaby_device
-
 class nes_mbaby_device : public nes_nrom_device
 {
 public:
@@ -38,8 +18,11 @@ public:
 
 	virtual u8 read_m(offs_t offset) override;
 	virtual void write_h(offs_t offset, u8 data) override;
-
+	virtual u8 read_ex(offs_t offset) override;
+	virtual void write_ex(offs_t offset, u8 data) override;
 	virtual void pcb_reset() override;
+	
+	virtual void ppu_to_mapper(int scanline, unsigned dot, int ppu_tick, uint16_t ppu_address) override;
 
 protected:
 	// device-level overrides
@@ -49,10 +32,12 @@ protected:
 
 private:
 	u16 m_irq_count;
-	int m_irq_enable;
+	u8 m_irq_enable;
+	u8 m_irq_delay;
 	u8 m_latch;
 
 	emu_timer *irq_timer;
+	m6502_device *m_maincpu6502;
 };
 
 
@@ -90,6 +75,7 @@ public:
 
 	virtual void pcb_reset() override;
 	virtual void pcb_start(running_machine &machine, u8 *ciram_ptr, bool cart_mounted) override;
+	virtual void ppu_to_mapper(int scanline, unsigned dot, int ppu_tick, uint16_t ppu_address) override;
 
 protected:
 	// device-level overrides
@@ -100,8 +86,10 @@ protected:
 private:
 	u16 m_irq_count;
 	int m_irq_enable;
+	u8 m_irq_delay;
 
 	emu_timer *irq_timer;
+	m6502_device *m_maincpu6502;
 };
 
 
@@ -125,9 +113,10 @@ class nes_btl_dn_device : public nes_nrom_device
 public:
 	// construction/destruction
 	nes_btl_dn_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock);
-	virtual void write_h(offs_t offset, uint8_t data) override;
 
-	virtual void hblank_irq(int scanline, bool vblank, bool blanked) override;
+	virtual void write_h(offs_t offset, uint8_t data) override;
+	virtual void ppu_to_mapper(int scanline, unsigned dot, int ppu_tick, uint16_t ppu_address) override;
+
 	virtual void pcb_reset() override;
 
 protected:
@@ -136,13 +125,16 @@ protected:
 
 private:
 	uint16_t m_irq_count;
+	uint8_t m_irq_delay;
+	uint8_t m_a12_low_ticks;
+
+	m6502_device *m_maincpu6502;
 };
 
 
 // ======================> nes_smb2j_device
 
-class nes_smb2j_device : public nes_nrom_device
-{
+class nes_smb2j_device : public nes_nrom_device {
 public:
 	// construction/destruction
 	nes_smb2j_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock);
@@ -152,6 +144,7 @@ public:
 	virtual void write_ex(offs_t offset, u8 data) override;
 	virtual void write_l(offs_t offset, u8 data) override;
 	virtual void write_h(offs_t offset, u8 data) override;
+	virtual void ppu_to_mapper(int scanline, unsigned dot, int ppu_tick, uint16_t ppu_address) override;
 
 	virtual void pcb_reset() override;
 
@@ -164,23 +157,26 @@ protected:
 private:
 	void update_irq(u8 data);
 	void write_45(offs_t offset, u8 data);
+
 	u16 m_irq_count;
-	int m_irq_enable;
+	u8 m_irq_enable;
+	u8 m_irq_delay;
 
 	emu_timer *irq_timer;
+	m6502_device *m_maincpu6502;
 };
 
 
 // ======================> nes_smb2ja_device
 
-class nes_smb2ja_device : public nes_nrom_device
-{
+class nes_smb2ja_device : public nes_nrom_device {
 public:
 	// construction/destruction
 	nes_smb2ja_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock);
 
 	virtual u8 read_m(offs_t offset) override;
 	virtual void write_h(offs_t offset, u8 data) override;
+	virtual void ppu_to_mapper(int scanline, unsigned dot, int ppu_tick, uint16_t ppu_address) override;
 
 	virtual void pcb_reset() override;
 
@@ -192,16 +188,17 @@ protected:
 
 private:
 	u16 m_irq_count;
-	int m_irq_enable;
+	u8 m_irq_enable;
+	u8 m_irq_delay;
 
 	emu_timer *irq_timer;
+	m6502_device *m_maincpu6502;
 };
 
 
 // ======================> nes_smb2jb_device
 
-class nes_smb2jb_device : public nes_nrom_device
-{
+class nes_smb2jb_device : public nes_nrom_device {
 public:
 	// construction/destruction
 	nes_smb2jb_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock);
@@ -209,6 +206,7 @@ public:
 	virtual u8 read_m(offs_t offset) override;
 	virtual void write_l(offs_t offset, u8 data) override;
 	virtual void write_ex(offs_t offset, u8 data) override;
+	virtual void ppu_to_mapper(int scanline, unsigned dot, int ppu_tick, uint16_t ppu_address) override;
 
 	virtual void pcb_reset() override;
 
@@ -220,29 +218,40 @@ protected:
 
 	TIMER_CALLBACK_MEMBER(irq_timer_tick);
 
+	void write_45(offs_t offset, u8 data);
+
 	u16 m_irq_count;
-	int m_irq_enable;
+	u8 m_irq_enable;
+	u8 m_irq_delay;
 	u8 m_reg;
 
-private:
-	void write_45(offs_t offset, u8 data);
-	const u8 m_bank67;
-
 	emu_timer *irq_timer;
+	m6502_device *m_maincpu6502;
+
+private:
+
+	const u8 m_bank67;
 };
 
 
 // ======================> nes_n32_4in1_device
 
-class nes_n32_4in1_device : public nes_smb2jb_device
-{
+class nes_n32_4in1_device : public nes_smb2jb_device {
 public:
 	// construction/destruction
 	nes_n32_4in1_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock);
 
+	virtual void write_ex(offs_t offset, u8 data) override;
+	virtual void write_l(offs_t offset, u8 data) override;
 	virtual void write_h(offs_t offset, u8 data) override;
 
 	virtual void pcb_reset() override;
+
+protected:
+	virtual void device_start() override;
+
+private:
+	u8 m_smb2j_mode;
 };
 
 
@@ -280,6 +289,7 @@ public:
 	virtual u8 read_ex(offs_t offset) override;
 	virtual u8 read_m(offs_t offset) override;
 
+	virtual void ppu_to_mapper(int scanline, unsigned dot, int ppu_tick, uint16_t ppu_address) override;
 	virtual void pcb_reset() override;
 
 protected:
@@ -292,8 +302,10 @@ private:
 	u16 m_irq_count;
 	int m_irq_enable;
 	u8 m_reg;
+	int m_irq_delay;
 
 	emu_timer *irq_timer;
+	m6502_device *m_maincpu6502;
 };
 
 
@@ -306,6 +318,7 @@ public:
 	nes_l001_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock);
 
 	virtual void write_h(offs_t offset, u8 data) override;
+	virtual void ppu_to_mapper(int scanline, unsigned dot, int ppu_tick, uint16_t ppu_address) override;
 
 	virtual void pcb_reset() override;
 
@@ -317,8 +330,10 @@ protected:
 
 private:
 	u16 m_irq_count;
+	u8 m_irq_delay;
 
 	emu_timer *irq_timer;
+	m6502_device *m_maincpu6502;
 };
 
 
@@ -331,6 +346,7 @@ public:
 	nes_batmanfs_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock);
 
 	virtual void write_h(offs_t offset, u8 data) override;
+	virtual void ppu_to_mapper(int scanline, unsigned dot, int ppu_tick, uint16_t ppu_address) override;
 
 	virtual void pcb_reset() override;
 
@@ -342,9 +358,11 @@ protected:
 
 private:
 	u16 m_irq_count;
-	int m_irq_enable;
+	u8 m_irq_enable;
+	u8 m_irq_delay;
 
 	emu_timer *irq_timer;
+	m6502_device *m_maincpu6502;
 };
 
 
@@ -567,17 +585,18 @@ public:
 
 // ======================> nes_lh53_device
 
-class nes_lh53_device : public nes_nrom_device
-{
+class nes_lh53_device : public nes_nrom_device {
 public:
 	// construction/destruction
 	nes_lh53_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock);
 
-	virtual uint8_t read_m(offs_t offset) override;
-	virtual uint8_t read_h(offs_t offset) override;
-	virtual void write_m(offs_t offset, uint8_t data) override {}
-	virtual void write_h(offs_t offset, uint8_t data) override;
+	virtual u8 read_m(offs_t offset) override;
+	virtual u8 read_h(offs_t offset) override;
 
+	virtual void write_m(offs_t offset, u8 data) override {}
+	virtual void write_h(offs_t offset, u8 data) override;
+
+	virtual void ppu_to_mapper(int scanline, unsigned dot, int ppu_tick, uint16_t ppu_address) override;
 	virtual void pcb_reset() override;
 
 protected:
@@ -587,12 +606,14 @@ protected:
 	TIMER_CALLBACK_MEMBER(irq_timer_tick);
 
 private:
-	uint16_t m_irq_count;
-	int m_irq_enable;
-	uint8_t m_reg;
+	u16 m_irq_count;
+	u8 m_irq_enable;
+	u8 m_irq_delay;
+	u8 m_reg;
 
 	emu_timer *irq_timer;
 	attotime timer_freq;
+	m6502_device *m_maincpu6502 = nullptr;
 };
 
 
@@ -629,7 +650,6 @@ public:
 	nes_ac08_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock);
 
 	virtual uint8_t read_m(offs_t offset) override;
-	virtual void write_ex(offs_t offset, uint8_t data) override;
 	virtual void write_h(offs_t offset, uint8_t data) override;
 
 	virtual void pcb_reset() override;
@@ -682,6 +702,7 @@ public:
 	virtual u8 read_m(offs_t offset) override;
 	virtual void write_ex(offs_t offset, u8 data) override;
 	virtual void write_l(offs_t offset, u8 data) override;
+	virtual void ppu_to_mapper(int scanline, unsigned dot, int ppu_tick, uint16_t ppu_address) override;
 
 	virtual void pcb_reset() override;
 
@@ -693,16 +714,18 @@ protected:
 
 private:
 	void write_45(offs_t offset, u8 data);
+
 	u16 m_irq_count;
 	int m_irq_latch;
+	u8 m_irq_delay;
 
 	emu_timer *irq_timer;
+	m6502_device *m_maincpu6502;
 };
 
 
 
 // device type definition
-DECLARE_DEVICE_TYPE(NES_SC127,          nes_sc127_device)
 DECLARE_DEVICE_TYPE(NES_MARIOBABY,      nes_mbaby_device)
 DECLARE_DEVICE_TYPE(NES_ASN,            nes_asn_device)
 DECLARE_DEVICE_TYPE(NES_SMB3PIRATE,     nes_smb3p_device)

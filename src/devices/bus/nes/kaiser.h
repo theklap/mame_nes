@@ -6,8 +6,9 @@
 #pragma once
 
 #include "nxrom.h"
+#include "mmc1.h"
 
-
+class m6502_device;
 // ======================> nes_ks106c_device
 
 class nes_ks106c_device : public nes_nrom_device
@@ -29,13 +30,14 @@ private:
 
 // ======================> nes_ks7058_device
 
-class nes_ks7058_device : public nes_nrom_device
+class nes_ks7058_device : public nes_sxrom_device
 {
 public:
-	// construction/destruction
 	nes_ks7058_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock);
 
-	virtual void write_h(offs_t offset, u8 data) override;
+protected:
+	virtual void set_prg() override;
+	virtual void set_mirror() override;
 };
 
 
@@ -71,6 +73,7 @@ public:
 
 	virtual u8 read_m(offs_t offset) override;
 	virtual void write_h(offs_t offset, u8 data) override;
+	virtual void ppu_to_mapper(int scanline, unsigned dot, int ppu_tick, uint16_t ppu_address) override;
 
 	virtual void pcb_reset() override;
 
@@ -83,16 +86,20 @@ protected:
 
 	TIMER_CALLBACK_MEMBER(irq_timer_tick);
 
+	void prg_update();
+
 	u8 m_reg[8];
 
 private:
-	void prg_update();
 	u8 m_latch;
 
-	u16 m_irq_count, m_irq_count_latch;
+	u16 m_irq_count;
+	u16 m_irq_count_latch;
 	u8 m_irq_enable;
+	u8 m_irq_delay;
 
 	emu_timer *irq_timer;
+	m6502_device *m_maincpu6502;
 };
 
 
@@ -106,6 +113,7 @@ public:
 
 	virtual u8 read_m(offs_t offset) override;
 	virtual void write_h(offs_t offset, u8 data) override;
+	virtual void pcb_reset() override;
 };
 
 
@@ -156,6 +164,7 @@ public:
 	virtual u8 read_ex(offs_t offset) override;
 	virtual void write_ex(offs_t offset, u8 data) override;
 	virtual void write_l(offs_t offset, u8 data) override;
+	virtual void ppu_to_mapper(int scanline, unsigned dot, int ppu_tick, uint16_t ppu_address) override;
 
 	virtual void pcb_reset() override;
 
@@ -171,8 +180,10 @@ private:
 	u16 m_irq_count;
 	u8 m_irq_status;
 	u8 m_irq_enable;
+	u8 m_irq_delay;
 
 	emu_timer *irq_timer;
+	m6502_device *m_maincpu6502;
 };
 
 

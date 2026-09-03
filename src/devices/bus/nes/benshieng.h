@@ -7,29 +7,23 @@
 
 #include "nxrom.h"
 
-
 // ======================> nes_benshieng_device
 
 class nes_benshieng_device : public nes_nrom_device
 {
 public:
-	// construction/destruction
 	nes_benshieng_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock);
 
 	virtual void write_h(offs_t offset, u8 data) override;
-
 	virtual void pcb_reset() override;
 
 protected:
-	// device-level overrides
-	virtual void device_start() override;
+	virtual ioport_constructor device_input_ports() const override;
 
 private:
-	u8 m_dipsetting;
+	required_ioport m_cartdips;
 };
 
-
-// device type definition
 DECLARE_DEVICE_TYPE(NES_BENSHIENG, nes_benshieng_device)
 
 #endif // MAME_BUS_NES_BENSHIENG_H

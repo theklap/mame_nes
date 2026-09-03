@@ -9,7 +9,7 @@
 #include "sound/vrc6.h"
 #include "sound/ymopl.h"
 
-
+class m6502_device;
 // ======================> nes_konami_vrc1_device
 
 class nes_konami_vrc1_device : public nes_nrom_device
@@ -59,7 +59,6 @@ private:
 
 
 // ======================> nes_konami_vrc3_device
-class m6502_device;
 class nes_konami_vrc3_device : public nes_nrom_device
 {
 public:
@@ -69,7 +68,7 @@ public:
 	virtual void write_h(offs_t offset, u8 data) override;
 
 	virtual void pcb_reset() override;
-	virtual void ppu_to_mapper(int scanline, unsigned dot, int ppu_tick) override;
+	virtual void ppu_to_mapper(int scanline, unsigned dot, int ppu_tick, uint16_t ppu_address) override;
 
 protected:
 	// device-level overrides
@@ -89,7 +88,6 @@ private:
 
 
 // ======================> nes_konami_vrc4_device
-class m6502_device;
 class nes_konami_vrc4_device : public nes_nrom_device
 {
 public:
@@ -102,7 +100,7 @@ public:
 
 	virtual void pcb_reset() override;
 	
-	virtual void ppu_to_mapper(int scanline, unsigned dot, int ppu_tick) override;
+	virtual void ppu_to_mapper(int scanline, unsigned dot, int ppu_tick, uint16_t ppu_address) override;
 
 protected:
 	m6502_device* m_maincpu6502 = nullptr;

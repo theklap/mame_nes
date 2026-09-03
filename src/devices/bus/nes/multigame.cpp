@@ -115,6 +115,14 @@ INPUT_PORTS_START( bmc_8157 )
 	PORT_CONFSETTING(    0x01, "4-in-1" )
 INPUT_PORTS_END
 
+INPUT_PORTS_START( vt5201 )
+	PORT_START("JUMPER")
+	PORT_CONFNAME(0x03, 0x00, "Menu Jumper")
+	PORT_CONFSETTING(0x00, "0")
+	PORT_CONFSETTING(0x01, "1")
+	PORT_CONFSETTING(0x02, "2")
+	PORT_CONFSETTING(0x03, "3")
+INPUT_PORTS_END
 
 //-------------------------------------------------
 //  input_ports - device-specific input ports
@@ -125,6 +133,9 @@ ioport_constructor nes_bmc_8157_device::device_input_ports() const
 	return INPUT_PORTS_NAME( bmc_8157 );
 }
 
+ioport_constructor nes_vt5201_device::device_input_ports() const {
+	return INPUT_PORTS_NAME(vt5201);
+}
 
 
 //**************************************************************************
@@ -132,7 +143,8 @@ ioport_constructor nes_bmc_8157_device::device_input_ports() const
 //**************************************************************************
 
 nes_action52_device::nes_action52_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock)
-	: nes_nrom_device(mconfig, NES_ACTION52, tag, owner, clock)
+	: nes_nrom_device(mconfig, NES_ACTION52, tag, owner, clock),
+	m_ram{}
 {
 }
 
@@ -197,8 +209,9 @@ nes_bmc_190in1_device::nes_bmc_190in1_device(const machine_config &mconfig, cons
 }
 
 nes_vt5201_device::nes_vt5201_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock)
-	: nes_nrom_device(mconfig, NES_VT5201, tag, owner, clock), m_latch(0), m_jumper(0)
-{
+	: nes_nrom_device(mconfig, NES_VT5201, tag, owner, clock)
+	, m_latch(0)
+	, m_jumper(*this, "JUMPER") {
 }
 
 nes_bmc_80013b_device::nes_bmc_80013b_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock)
@@ -533,23 +546,31 @@ nes_bmc_82ab_device::nes_bmc_82ab_device(const machine_config &mconfig, const ch
 {
 }
 
+void nes_action52_device::device_start() {
+	common_start();
+	save_item(NAME(m_ram));
+}
 
+void nes_action52_device::pcb_reset() {
+	prg16_89ab(0);
+	prg16_cdef(1);
+	chr8(0, CHRROM);
+	set_nt_mirroring(PPU_MIRROR_VERT);
+}
 
-
-void nes_caltron6in1_device::device_start()
-{
+void nes_caltron6in1_device::device_start() {
 	common_start();
 	save_item(NAME(m_latch));
 	save_item(NAME(m_reg));
 }
 
-void nes_caltron6in1_device::pcb_reset()
-{
-	prg32(0);
-	chr8(0, CHRROM);
-
+void nes_caltron6in1_device::pcb_reset() {
 	m_latch = 0;
 	m_reg = 0;
+
+	prg32(0);
+	update_chr();
+	set_nt_mirroring(PPU_MIRROR_VERT);
 }
 
 void nes_caltron9in1_device::device_start()
@@ -573,13 +594,12 @@ void nes_rumblestat_device::device_start()
 	save_item(NAME(m_chr));
 }
 
-void nes_rumblestat_device::pcb_reset()
-{
-	prg32(0);
-	chr8(0, m_chr_source);
-
+void nes_rumblestat_device::pcb_reset() {
 	m_prg = 0;
 	m_chr = 0;
+
+	prg32(0);
+	chr8(0, CHRROM);
 }
 
 void nes_svision16_device::device_start()
@@ -603,12 +623,16 @@ void nes_farid_unrom_device::device_start()
 	save_item(NAME(m_reg));
 }
 
-void nes_farid_unrom_device::pcb_reset()
-{
-	prg16_89ab(0);
-	prg16_cdef(7);
+void nes_farid_unrom_device::pcb_reset() {
+	// Bits 3-6 are explicitly cleared by hardware.
+	// Bits 7 and 0-2 belong to the unreset latch.
+	m_reg &= 0x87;
 
-	m_reg &= 0x87;    // only middle four bits cleared on soft reset
+	const u8 bank = ((m_reg & 0x70) >> 1) | (m_reg & 0x07);
+
+	prg16_89ab(bank);
+	prg16_cdef(bank | 0x07);
+	chr8(0, CHRRAM);
 }
 
 void nes_kn42_device::device_start()
@@ -617,17 +641,19 @@ void nes_kn42_device::device_start()
 	save_item(NAME(m_latch));
 }
 
-void nes_kn42_device::pcb_reset()
-{
+void nes_kn42_device::pcb_reset() {
 	m_latch ^= 0x10;
+
 	prg16_89ab(m_latch);
-	prg16_cdef(m_latch | 0x0f);    // fixed to last bank for either game
+	prg16_cdef(m_latch | 0x0f);
+	chr8(0, CHRRAM);
 }
 
-void nes_a65as_device::pcb_reset()
-{
+void nes_a65as_device::pcb_reset() {
 	prg16_89ab(0);
 	prg16_cdef(7);
+	chr8(0, CHRRAM);
+	set_nt_mirroring(PPU_MIRROR_VERT);
 }
 
 void nes_t262_device::device_start()
@@ -636,12 +662,18 @@ void nes_t262_device::device_start()
 	save_item(NAME(m_latch));
 }
 
-void nes_t262_device::pcb_reset()
-{
+void nes_t262_device::pcb_reset() {
+	m_latch = 0;
+
 	prg16_89ab(0);
 	prg16_cdef(7);
+	chr8(0, CHRRAM);
+	set_nt_mirroring(PPU_MIRROR_VERT);
+}
 
-	m_latch = 0;
+void nes_studyngame_device::pcb_reset() {
+	prg32(0);
+	chr8(0, CHRRAM);
 }
 
 void nes_sgun20in1_device::pcb_reset()
@@ -655,16 +687,14 @@ void nes_vt5201_device::device_start()
 {
 	common_start();
 	save_item(NAME(m_latch));
-	save_item(NAME(m_jumper));
 }
 
-void nes_vt5201_device::pcb_reset()
-{
+void nes_vt5201_device::pcb_reset() {
+	m_latch = 0;
+
 	prg32(0);
 	chr8(0, CHRROM);
-
-	m_latch = 0;
-	m_jumper = 0;
+	set_nt_mirroring(PPU_MIRROR_VERT);
 }
 
 void nes_bmc_80013b_device::device_start()
@@ -674,11 +704,16 @@ void nes_bmc_80013b_device::device_start()
 	save_item(NAME(m_reg));
 }
 
-void nes_bmc_80013b_device::pcb_reset()
-{
+void nes_bmc_80013b_device::pcb_reset() {
+	m_reg[0] = 0;
+	m_reg[1] = 0;
+
+	// Chip-select C resets low, selecting the extra PRG chip.
 	m_latch = 0x80;
-	m_reg[0] = m_reg[1] = 0;
+
 	update_prg();
+	chr8(0, CHRRAM);
+	set_nt_mirroring(PPU_MIRROR_VERT);
 }
 
 void nes_bmc_810544c_device::pcb_reset()
@@ -1195,16 +1230,34 @@ void nes_bmc_th22913_device::pcb_reset()
 
  -------------------------------------------------*/
 
-void nes_action52_device::write_h(offs_t offset, u8 data)
-{
-	LOG("ae_act52_w, offset: %04x, data: %02x\n", offset, data);
+u8 nes_action52_device::read_ex(offs_t offset) {
+	return (get_open_bus() & 0xf0) | m_ram[offset & 0x03];
+}
 
-	u8 bank = BIT(offset, 6, 7);
-	u8 mode = !BIT(offset, 5);
+void nes_action52_device::write_ex(offs_t offset, u8 data) {
+	m_ram[offset & 0x03] = data & 0x0f;
+}
+
+u8 nes_action52_device::read_l(offs_t offset) {
+	return (get_open_bus() & 0xf0) | m_ram[offset & 0x03];
+}
+
+void nes_action52_device::write_l(offs_t offset, u8 data) {
+	m_ram[offset & 0x03] = data & 0x0f;
+}
+
+void nes_action52_device::write_h(offs_t offset, u8 data) {
+	const u8 bank = BIT(offset, 6, 7);
+	const u8 mode = !BIT(offset, 5);
+	const u8 chr = ((offset & 0x0f) << 2) | (data & 0x03);
+
+	logerror("ACT52: CPU=%04X DATA=%02X PRG=%02X MODE=%u CHR=%02X MIR=%s\n",
+		u16(offset + 0x8000), data, bank, mode, chr,
+		BIT(offset, 13) ? "H" : "V");
+
 	prg16_89ab(bank & ~mode);
 	prg16_cdef(bank | mode);
-
-	chr8((data & 0x03) | (offset & 0x0f) << 2, CHRROM);
+	chr8(chr, CHRROM);
 	set_nt_mirroring(BIT(offset, 13) ? PPU_MIRROR_HORZ : PPU_MIRROR_VERT);
 }
 
@@ -1220,35 +1273,29 @@ void nes_action52_device::write_h(offs_t offset, u8 data)
 
  -------------------------------------------------*/
 
-void nes_caltron6in1_device::update_chr()
-{
+void nes_caltron6in1_device::update_chr() {
 	chr8(((m_latch >> 1) & 0x0c) | m_reg, CHRROM);
 }
 
-void nes_caltron6in1_device::write_m(offs_t offset, u8 data)
-{
+void nes_caltron6in1_device::write_m(offs_t offset, u8 data) {
 	LOG("caltron6in1 write_m, offset: %04x, data: %02x\n", offset, data);
 
-	switch (offset & 0x1800)
-	{
-		case 0x0000:
-			m_latch = offset & 0x3f;
-			prg32(offset & 0x07);
-			update_chr();
-			set_nt_mirroring(BIT(offset, 5) ? PPU_MIRROR_HORZ : PPU_MIRROR_VERT);
-			break;
+	if (offset < 0x0800) {
+		m_latch = offset & 0x3f;
+
+		prg32(m_latch & 0x07);
+		update_chr();
+		set_nt_mirroring(BIT(m_latch, 5) ? PPU_MIRROR_HORZ : PPU_MIRROR_VERT);
 	}
 }
 
-void nes_caltron6in1_device::write_h(offs_t offset, u8 data)
-{
+void nes_caltron6in1_device::write_h(offs_t offset, u8 data) {
 	LOG("caltron6in1 write_h, offset: %04x, data: %02x\n", offset, data);
 
 	// this pcb is subject to bus conflict
 	data = account_bus_conflict(offset, data);
 
-	if (BIT(m_latch, 2))
-	{
+	if (BIT(m_latch, 2)) {
 		m_reg = data & 0x03;
 		update_chr();
 	}
@@ -1266,27 +1313,29 @@ void nes_caltron6in1_device::write_h(offs_t offset, u8 data)
 
  -------------------------------------------------*/
 
-void nes_caltron9in1_device::write_h(offs_t offset, u8 data)
-{
+void nes_caltron9in1_device::write_h(offs_t offset, u8 data) {
 	LOG("caltron9in1 write_h, offset: %04x, data: %02x\n", offset, data);
-	int nibble = BIT(offset, 12, 3);
-	m_latch[std::min(nibble, 2)] = offset & 0x7f;
 
-	if (BIT(m_latch[1], 1))
-	{
-		u8 outer = (m_latch[0] >> 2) & ~0x03;
-		u8 inner = (m_latch[2] >> 2) & 0x03;
+	const u8 nibble = BIT(offset, 12, 3);
+	m_latch[std::min<u8>(nibble, 2)] = offset & 0x7f;
+
+	if (BIT(m_latch[1], 1)) {
+		const u8 outer = (m_latch[0] >> 2) & 0x1c;
+		const u8 inner = (m_latch[2] >> 2) & 0x03;
+
 		prg16_89ab(outer | inner);
 		prg16_cdef(outer | 0x03);
 	}
-	else
+	else {
 		prg32(m_latch[0] >> 3);
+	}
 
-	if (nibble)
+	if (nibble) {
 		chr8(((m_latch[1] >> 1) & 0x1c) | (m_latch[2] & 0x03), CHRROM);
-	else
+	}
+	else {
 		set_nt_mirroring(BIT(m_latch[0], 0) ? PPU_MIRROR_HORZ : PPU_MIRROR_VERT);
-
+	}
 }
 
 /*-------------------------------------------------
@@ -1301,25 +1350,25 @@ void nes_caltron9in1_device::write_h(offs_t offset, u8 data)
 
  -------------------------------------------------*/
 
-void nes_rumblestat_device::write_m(offs_t offset, uint8_t data)
-{
+void nes_rumblestat_device::write_m(offs_t offset, u8 data) {
 	LOG("rumblestation write_m, offset: %04x, data: %02x\n", offset, data);
 
 	m_prg = (m_prg & 0x01) | ((data & 0x0f) << 1);
 	m_chr = (m_chr & 0x07) | ((data & 0xf0) >> 1);
+
 	prg32(m_prg);
 	chr8(m_chr, CHRROM);
 }
 
-void nes_rumblestat_device::write_h(offs_t offset, uint8_t data)
-{
+void nes_rumblestat_device::write_h(offs_t offset, u8 data) {
 	LOG("rumblestation write_h, offset: %04x, data: %02x\n", offset, data);
 
-	// this pcb is subject to bus conflict
+	// This PCB is believed to be subject to bus conflicts.
 	data = account_bus_conflict(offset, data);
 
-	m_prg = (m_prg & ~0x01) | BIT(data, 0);
-	m_chr = (m_chr & ~0x07) | BIT(data, 4, 3);
+	m_prg = (m_prg & 0x1e) | BIT(data, 0);
+	m_chr = (m_chr & 0x78) | BIT(data, 4, 3);
+
 	prg32(m_prg);
 	chr8(m_chr, CHRROM);
 }
@@ -1344,41 +1393,39 @@ void nes_rumblestat_device::write_h(offs_t offset, uint8_t data)
 
  -------------------------------------------------*/
 
-void nes_svision16_device::update_prg()
-{
-	if (BIT(m_latch1, 4))
-	{
-		u8 bank = (m_latch1 & 0x0f) << 3 | (m_latch2 & 0x07);
+void nes_svision16_device::update_prg() {
+	if (BIT(m_latch1, 4)) {
+		const u8 bank = ((m_latch1 & 0x0f) << 3) | (m_latch2 & 0x07);
+
 		prg16_89ab(bank + 2);             // +2 due to the 32KB menu
 		prg16_cdef((bank | 0x07) + 2);    // +2 due to the 32KB menu
 	}
 }
 
-void nes_svision16_device::write_m(offs_t offset, u8 data)
-{
+void nes_svision16_device::write_m(offs_t offset, u8 data) {
 	LOG("svision16 write_m, offset: %04x, data: %02x\n", offset, data);
 
-	if (!BIT(m_latch1, 4))
-	{
+	if (!BIT(m_latch1, 4)) {
 		m_latch1 = data;
+
 		update_prg();
 		set_nt_mirroring(BIT(m_latch1, 5) ? PPU_MIRROR_HORZ : PPU_MIRROR_VERT);
 	}
 }
 
-void nes_svision16_device::write_h(offs_t offset, u8 data)
-{
+void nes_svision16_device::write_h(offs_t offset, u8 data) {
 	LOG("svision16 write_h, offset: %04x, data: %02x\n", offset, data);
+
 	m_latch2 = data;
 	update_prg();
 }
 
-u8 nes_svision16_device::read_m(offs_t offset)
-{
+u8 nes_svision16_device::read_m(offs_t offset) {
 	LOG("svision16 read_m, offset: %04x\n", offset);
 
-	u8 bank = m_latch1 << 4 | 0x0f;
-	return m_prg[((bank + 4) * 0x2000 + offset) % m_prg_size];    // +4 due to the 32KB menu
+	const u8 bank = ((m_latch1 & 0x0f) << 4) | 0x0f;
+
+	return m_prg[((bank + 4) * 0x2000 + offset) % m_prg_size]; // +4 due to the 32KB menu
 }
 
 /*-------------------------------------------------
@@ -1393,19 +1440,22 @@ u8 nes_svision16_device::read_m(offs_t offset)
 
  -------------------------------------------------*/
 
-void nes_farid_unrom_device::write_h(offs_t offset, u8 data)
-{
+void nes_farid_unrom_device::write_h(offs_t offset, u8 data) {
 	LOG("farid_unrom write_h, offset: %04x, data: %02x\n", offset, data);
 
-	// this pcb is subject to bus conflict
+	// This PCB is subject to bus conflicts.
 	data = account_bus_conflict(offset, data);
 
-	if (BIT(data, 7) && !(m_reg & 0x88))
+	// A rising D7 clocks the outer bank and lock bits only while unlocked.
+	if (BIT(data, 7) && !(m_reg & 0x88)) {
 		m_reg = data;
-	else
+	}
+	else {
 		m_reg = (m_reg & 0x78) | (data & 0x87);
+	}
 
-	u8 bank = (m_reg & 0x70) >> 1 | (m_reg & 0x07);
+	const u8 bank = ((m_reg & 0x70) >> 1) | (m_reg & 0x07);
+
 	prg16_89ab(bank);
 	prg16_cdef(bank | 0x07);
 }
@@ -1426,42 +1476,45 @@ void nes_farid_unrom_device::write_h(offs_t offset, u8 data)
 
  -------------------------------------------------*/
 
-void nes_kn42_device::write_h(offs_t offset, u8 data)
-{
+void nes_kn42_device::write_h(offs_t offset, u8 data) {
 	LOG("kn42 write_h, offset: %04x, data: %02x\n", offset, data);
 
-	// this pcb is subject to bus conflict
+	// This PCB is subject to bus conflicts.
 	data = account_bus_conflict(offset, data);
 
-	prg16_89ab(m_latch | (data & 0x07) << 1 | BIT(data, 4));
+	const u8 bank = m_latch | ((data & 0x07) << 1) | BIT(data, 4);
+
+	prg16_89ab(bank);
 }
 
 /*-------------------------------------------------
 
  Board BMC-A65AS
 
- Games: 3-in-1 (N068)
+ Games: 3-in-1 (N068), 4-in-1 (JY-066)
 
- In MAME: Supported
+ NES 2.0: mapper 285
+
+ In MAME: Supported.
 
  -------------------------------------------------*/
 
-void nes_a65as_device::write_h(offs_t offset, uint8_t data)
-{
-	uint8_t helper = (data & 0x30) >> 1;
-	LOG("a65as write_h, offset: %04x, data: %02x\n", offset, data);
+void nes_a65as_device::write_h(offs_t offset, uint8_t data) {
+	logerror("A65AS write: cpu=%04x offset=%04x data=%02x\n", uint16_t(offset + 0x8000), uint16_t(offset), data);
 
-	if (data & 0x80)
+	if (BIT(data, 7)) {
 		set_nt_mirroring(BIT(data, 5) ? PPU_MIRROR_HIGH : PPU_MIRROR_LOW);
-	else
+	}
+	else {
 		set_nt_mirroring(BIT(data, 3) ? PPU_MIRROR_HORZ : PPU_MIRROR_VERT);
+	}
 
-	if (data & 0x40)
-		prg32(data >> 1);
-	else
-	{
-		prg16_89ab(helper | (data & 0x07));
-		prg16_cdef(helper | 0x07);
+	if (BIT(data, 6)) {
+		prg32((data >> 1) & 0x0f);
+	}
+	else {
+		prg16_89ab(((data & 0x30) >> 1) | (data & 0x07));
+		prg16_cdef(((data & 0x30) >> 1) | 0x07);
 	}
 }
 
@@ -1477,25 +1530,24 @@ void nes_a65as_device::write_h(offs_t offset, uint8_t data)
 
  -------------------------------------------------*/
 
-void nes_t262_device::write_h(offs_t offset, u8 data)
-{
+void nes_t262_device::write_h(offs_t offset, u8 data) {
 	LOG("t262 write_h, offset: %04x, data: %02x\n", offset, data);
 
-	if (!BIT(m_latch, 13))
-	{
+	if (!BIT(m_latch, 13)) {
 		m_latch = offset;
 		set_nt_mirroring(BIT(m_latch, 1) ? PPU_MIRROR_HORZ : PPU_MIRROR_VERT);
 	}
 
-	u8 bank = bitswap<4>(m_latch, 9, 8, 6, 5) << 3 | (data & 0x07);    // NesDev shows the high bit here, but is it correct? So far no cart is large enough to use this.
+	u8 bank = (bitswap<4>(m_latch, 9, 8, 6, 5) << 3) | (data & 0x07);
 	u8 mode = BIT(m_latch, 0);
-	if (BIT(m_latch, 7))    // NROM mode
-	{
+
+	if (BIT(m_latch, 7)) {
+		// NROM-128 or NROM-256 mode.
 		prg16_89ab(bank & ~mode);
 		prg16_cdef(bank | mode);
 	}
-	else                    // UNROM mode
-	{
+	else {
+		// UNROM mode.
 		prg16_89ab(bank);
 		prg16_cdef(bank | 0x07);
 	}
@@ -1534,27 +1586,20 @@ void nes_studyngame_device::write_h(offs_t offset, uint8_t data)
 
  -------------------------------------------------*/
 
-void nes_sgun20in1_device::write_h(offs_t offset, u8 data)
-{
+void nes_sgun20in1_device::write_h(offs_t offset, u8 data) {
 	LOG("supergun20in1 write_h, offset: %04x, data: %02x\n", offset, data);
 
-// Hogan's Alley in 20-in-1 will occasionally sweep through 0x66xx-0x68xx which
-// causes an abrupt goto Bomberman title screen. This mask is a best guess.
-	switch (offset & 0x7000)
-	{
-		case 0x0000:
-		case 0x7000:
-			offset >>= 2;
-			prg16_89ab(offset);
-			prg16_cdef(offset);
-			chr8(offset, CHRROM);
-	}
+	// CPU A4-A2 select the 16K PRG and 8K CHR bank.
+	offset = BIT(offset, 2, 3);
+
+	prg16_89ab(offset);
+	prg16_cdef(offset);
+	chr8(offset, CHRROM);
 }
 
-void nes_bmc_190in1_device::write_h(offs_t offset, u8 data)
-{
+void nes_bmc_190in1_device::write_h(offs_t offset, u8 data) {
 	nes_sgun20in1_device::write_h(offset, data);
-	set_nt_mirroring(BIT(data, 0) ? PPU_MIRROR_HORZ : PPU_MIRROR_VERT);
+	set_nt_mirroring(BIT(offset, 0) ? PPU_MIRROR_HORZ : PPU_MIRROR_VERT);
 }
 
 /*-------------------------------------------------
@@ -1588,14 +1633,14 @@ void nes_vt5201_device::write_h(offs_t offset, u8 data)
 	}
 }
 
-u8 nes_vt5201_device::read_h(offs_t offset)
-{
+u8 nes_vt5201_device::read_h(offs_t offset) {
 	LOG("bmc_vt5201 read_h, offset: %04x\n", offset);
 
-	if (BIT(m_latch, 0))
-		return (get_open_bus() & ~0x03) | m_jumper;    // TODO: add jumper settings, m_jumper is 0 for now
-	else
-		return hi_access_rom(offset);
+	if (BIT(m_latch, 0)) {
+		return (get_open_bus() & ~0x03) | (m_jumper->read() & 0x03);
+	}
+
+	return hi_access_rom(offset);
 }
 
 /*-------------------------------------------------
@@ -1610,25 +1655,55 @@ u8 nes_vt5201_device::read_h(offs_t offset)
 
  -------------------------------------------------*/
 
-void nes_bmc_80013b_device::update_prg()
-{
-	prg16_89ab(m_latch | (m_reg[1] & 0x70) | m_reg[0]);
+void nes_bmc_80013b_device::update_prg() {
+	if (m_latch && m_prg_chunks > 0x80) {
+		/*
+		    The extra PRG chip follows the 2 MiB main chip
+		    in the loaded PRG region.
+
+		    Cartridge Story II has one extra 16K bank.
+		    Cartridge Story III has four extra 16K banks.
+		    Address lines above the actual extra-chip size
+		    are not connected and must be masked explicitly.
+		*/
+		prg16_89ab(0x80 | (m_reg[0] & (m_prg_chunks - 0x81)));
+	}
+	else {
+		prg16_89ab((m_reg[1] & 0x70) | m_reg[0]);
+	}
+
+	// CPU $C000-$FFFF always selects the main PRG chip.
 	prg16_cdef(m_reg[1]);
 }
 
-void nes_bmc_80013b_device::write_h(offs_t offset, u8 data)
-{
+void nes_bmc_80013b_device::write_h(offs_t offset, u8 data) {
 	LOG("bmc_80013b write_h, offset: %04x, data: %02x\n", offset, data);
-	if (offset & 0x6000)
-	{
+
+	if (offset & 0x6000) {
+		/*
+		    $A000-$FFFF:
+
+		    D6-D4 select PRG A20-A18.
+		    D3-D0 select PRG A17-A14 when CPU A14 is high.
+		    CPU A14 selects the PRG chip for $8000-$BFFF.
+
+		    A14 low  = extra chip
+		    A14 high = main chip
+		*/
 		m_reg[1] = data & 0x7f;
-		m_latch = !BIT(offset, 14) << 7;
+		m_latch = BIT(offset, 14) ? 0x00 : 0x80;
 	}
-	else
-	{
+	else {
+		/*
+		    $8000-$9FFF:
+
+		    D3-D0 select PRG A17-A14 when CPU A14 is low.
+		    D4 controls nametable mirroring.
+		*/
 		m_reg[0] = data & 0x0f;
 		set_nt_mirroring(BIT(data, 4) ? PPU_MIRROR_HORZ : PPU_MIRROR_VERT);
 	}
+
 	update_prg();
 }
 

@@ -130,13 +130,14 @@ device_nes_cart_interface::device_nes_cart_interface(const machine_config &mconf
 	, m_outer_prg_size(0)
 	, m_outer_chr_size(0)
 	, m_smd133_addr(0x6000)
+	, m_fk23c_solder_pad(0)
 	, m_mirroring(PPU_MIRROR_HORZ)
 	, m_pcb_ctrl_mirror(false)
 	, m_four_screen_vram(false)
 	, m_has_trainer(false)
 	, m_x1_005_alt_mirroring(false)
 	, m_bus_conflict(true)
-	, m_open_bus(0)
+	//, m_open_bus(0)
 	, m_prg_chunks(0)
 	, m_prg_mask(0xffff)
 	, m_chr_source(CHRRAM)
@@ -644,7 +645,7 @@ void device_nes_cart_interface::pcb_start(running_machine &machine, uint8_t *cir
 		device().save_item(NAME(m_battery));
 
 	// open bus
-	device().save_item(NAME(m_open_bus));
+	//device().save_item(NAME(m_open_bus));
 }
 
 void device_nes_cart_interface::pcb_reg_postload(running_machine &machine)
@@ -869,7 +870,7 @@ uint8_t nes_cart_slot_device::read_l(offs_t offset)
 		// cartridge access.  If the mapper returned open bus, val is already
 		// the previous bus value, so this preserves the bus instead of replacing
 		// it with an address-derived approximation.
-		m_cart->set_open_bus(val);
+		//m_cart->set_open_bus(val);
 
 		return val;
 	}
@@ -886,7 +887,7 @@ uint8_t nes_cart_slot_device::read_m(offs_t offset)
 		// $6000-$7FFF may be PRG RAM, battery RAM, mapper RAM, or open bus.
 		// Use the actual returned value as the new data-bus value.  For true
 		// open-bus reads, read_m() returns get_open_bus(), so this is a no-op.
-		m_cart->set_open_bus(val);
+		//m_cart->set_open_bus(val);
 
 		return val;
 	}
@@ -902,7 +903,7 @@ uint8_t nes_cart_slot_device::read_h(offs_t offset)
 
 		// PRG ROM drives the CPU data bus here.  Store the actual ROM/protection
 		// value returned, not the high byte of the address.
-		m_cart->set_open_bus(val);
+		//m_cart->set_open_bus(val);
 
 		return val;
 	}
@@ -918,7 +919,7 @@ uint8_t nes_cart_slot_device::read_ex(offs_t offset)
 
 		// Expansion reads may be mapper registers, expansion audio, or open bus.
 		// Preserve true open bus by storing the returned value.
-		m_cart->set_open_bus(val);
+		//m_cart->set_open_bus(val);
 
 		return val;
 	}
@@ -938,7 +939,7 @@ void nes_cart_slot_device::write_l(offs_t offset, uint8_t data)
 		m_cart->write_l(offset, data);
 
 		// CPU writes drive the data bus with the written value.
-		m_cart->set_open_bus(data);
+		//m_cart->set_open_bus(data);
 	}
 }
 
@@ -950,7 +951,7 @@ void nes_cart_slot_device::write_m(offs_t offset, uint8_t data)
 
 		// Even if no RAM/register accepts the write, the CPU still drove this
 		// value on the data bus.
-		m_cart->set_open_bus(data);
+		//m_cart->set_open_bus(data);
 	}
 }
 
@@ -963,7 +964,7 @@ void nes_cart_slot_device::write_h(offs_t offset, uint8_t data)
 		// For mapper writes, the CPU data bus contains the written value.
 		// Bus-conflict logic inside the mapper may latch data & ROM, but the
 		// CPU-side open bus should still decay from the value the CPU drove.
-		m_cart->set_open_bus(data);
+		//m_cart->set_open_bus(data);
 	}
 }
 
@@ -974,6 +975,6 @@ void nes_cart_slot_device::write_ex(offs_t offset, uint8_t data)
 		m_cart->write_ex(offset, data);
 
 		// Expansion writes also drive the CPU data bus with the written value.
-		m_cart->set_open_bus(data);
+		//m_cart->set_open_bus(data);
 	}
 }

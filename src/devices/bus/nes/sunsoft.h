@@ -106,7 +106,7 @@ public:
 	void fme7_write(offs_t offset, uint8_t data);
 	virtual void write_h(offs_t offset, uint8_t data) override { fme7_write(offset, data); }
 
-	virtual void ppu_to_mapper(int scanline, unsigned dot, int ppu_tick) override;
+	virtual void ppu_to_mapper(int scanline, unsigned dot, int ppu_tick, uint16_t ppu_address) override;
 
 	virtual void pcb_reset() override;
 

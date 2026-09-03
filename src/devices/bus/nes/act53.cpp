@@ -2,12 +2,12 @@
 // copyright-holders:Fabio Priuli
 /***********************************************************************************************************
 
+ NES/Famicom cartridge emulation for the Action 53 multicart mapper
 
- NES/Famicom cartridge emulation for Action 53
-
-
- Here we emulate the Multi-Discrete PCB designed by Tepples for
- this homebrew multicart [mapper 28]
+ This emulates the INL-ROM Action 53 Multi-Discrete PCB designed
+ by Damian Yerrick (Tepples). It combines the banking capabilities
+ of several common discrete cartridge boards in a single multicart
+ mapper using iNES mapper 28.
 
  ***********************************************************************************************************/
 
@@ -49,15 +49,24 @@ void nes_action53_device::device_start()
 void nes_action53_device::pcb_start(running_machine &machine, u8 *ciram_ptr, bool cart_mounted)
 {
 	device_nes_cart_interface::pcb_start(machine, ciram_ptr, cart_mounted);
-	// at power on last 16K of ROM is mapped to $C000-$FFFF
-	m_reg[0] = m_reg[1] = m_reg[2] = 0;
+
+	// At power-on, the last 16 KiB of PRG ROM must appear at
+	// $C000-$FFFF. The remaining hardware state is unspecified,
+	// so initialize it deterministically and apply that state.
+	m_sel = 0;
+	m_reg[0] = 0;
+	m_reg[1] = 0;
+	m_reg[2] = 0;
 	m_reg[3] = (m_prg_chunks - 1) >> 1;
+
+	chr8(m_reg[0] & 0x03, m_chr_source);
 	update_prg();
+	update_mirr();
 }
 
 void nes_action53_device::pcb_reset()
 {
-	// register content is not touched by reset
+	// A soft reset does not change the mapper register contents.
 }
 
 
@@ -67,64 +76,118 @@ void nes_action53_device::pcb_reset()
 
 /*-------------------------------------------------
 
- Board ACTION 53
+ Action 53 Multi-Discrete Board
 
  iNES: mapper 28
 
- In MAME: Preliminary supported.
+ In MAME: Supported.
 
- This board uses 4 registers (reg is selected by writes to 0x5xxx)
- Info from nesdev wiki
+ The mapper contains four logical registers: $00, $01,
+ $80 and $81.
+
+ Writes to $5000-$5FFF select a register using data
+ bits 7 and 0:
+
+   D7 D0   Register
+   -----   --------
+    0  0      $00
+    0  1      $01
+    1  0      $80
+    1  1      $81
+
+ Writes to $8000-$FFFF update the selected register.
+ There are no bus conflicts.
+
+ The $5000-$5FFF register-select range is write-only.
+ The cartridge does not drive reads from $4100-$5FFF,
+ so reads in that range return CPU open bus.
+
+ $6000-$7FFF contains WRAM when fitted to the cartridge;
+ otherwise, reads in that range return CPU open bus.
 
  R:$00:  [...M ..CC]
-     C = CHR Reg
-     M = Mirroring
-         This bit overwrites bit 0 of R:$80, but only if bit 1 of
-         R:$80 is clear
+
+ C = Inner CHR bank
+ M = Mirroring override
+
+ The mirroring bit overwrites bit 0 of R:$80 when bit 1
+ of R:$80 is clear.
 
  R:$01:  [...M PPPP]
-     P = Inner PRG Reg
-     M = Mirroring
-         This bit overwrites bit 0 of R:$80, but only if bit 1 of
-         R:$80 is clear
+
+ P = Inner PRG bank
+ M = Mirroring override
+
+ The mirroring bit overwrites bit 0 of R:$80 when bit 1
+ of R:$80 is clear.
 
  R:$80:  [..GG PSMM]
-     G = Game Size (0=32K, 1=64K, 2=128K, 3=256K)
-     P = PRG Size (0=32k mode, 1=16k mode)
-     S = Slot select:
-         0 = $C000 swappable, $8000 fixed to bottom of 32K outer bank
-         1 = $8000 swappable, $C000 fixed to top of 32K outer bank
-         This bit is ignored when 'P' is clear (32k mode)
-     M = Mirroring control:
-         %00 = 1ScA
-         %01 = 1ScB
-         %10 = Vert
-         %11 = Horz
+
+ G = Game size:
+     0 = 32 KiB
+     1 = 64 KiB
+     2 = 128 KiB
+     3 = 256 KiB
+
+ P = PRG banking mode:
+     0 = 32 KiB
+     1 = 16 KiB
+
+ S = PRG slot selection:
+     0 = $8000 fixed to the bottom of the selected
+         32 KiB outer bank; $C000 is switchable
+     1 = $8000 is switchable; $C000 fixed to the top
+         of the selected 32 KiB outer bank
+
+ S is ignored in 32 KiB mode.
+
+ M = Nametable mirroring:
+     0 = One-screen, lower CIRAM bank
+     1 = One-screen, upper CIRAM bank
+     2 = Vertical
+     3 = Horizontal
 
  R:$81:  [BBBB BBBB]
-     Outer PRG Reg
 
+ B = Outer PRG bank
+
+ At power-on, the last 16 KiB of PRG ROM is mapped at
+ $C000-$FFFF. All other power-on register state is
+ unspecified. A soft reset does not change the mapper
+ registers.
 
  -------------------------------------------------*/
 
 void nes_action53_device::update_prg()
 {
-	u16 prg_lo, prg_hi;
-	u8 size = BIT(m_reg[2], 4, 2);            // Game size
-	u16 mask = ~0 << (size + 1);              // Bits to be taken from PRG regs
-	u8 b32k = !BIT(m_reg[2], 3);              // 32K mode bit
-	u16 outer = m_reg[3] << 1;                // Outer PRG reg bits
-	u8 inner = (m_reg[1] << b32k) & ~mask;    // Inner PRG reg bits
+	const u8 size = BIT(m_reg[2], 4, 2);
+	const u16 mask = u16(0xffffU << (size + 1));
+	const bool mode_32k = !BIT(m_reg[2], 3);
+	u16 outer = u16(m_reg[3]) << 1;
+	const u16 inner = (u16(m_reg[1]) << mode_32k) & ~mask;
 
-	prg_hi = prg_lo = (outer & mask) | inner;
-	if (b32k)                     // 32K mode
-		prg_hi++;
-	else if (BIT(m_reg[2], 2))    // 16K mode with fixed HI
+	u16 prg_lo = (outer & mask) | inner;
+	u16 prg_hi = prg_lo;
+
+	if (mode_32k)
+	{
+		// 32 KiB mode: the inner bank selects an even 16 KiB
+		// bank and CPU A14 selects the following bank.
+		++prg_hi;
+	}
+	else if (BIT(m_reg[2], 2))
+	{
+		// 16 KiB mode with $8000 switchable and $C000 fixed
+		// to the top of the selected 32 KiB outer bank.
 		prg_hi = ++outer;
-	else                          // 16K mode with fixed LO
+	}
+	else
+	{
+		// 16 KiB mode with $8000 fixed to the bottom of the
+		// selected 32 KiB outer bank and $C000 switchable.
 		prg_lo = outer;
+	}
 
-//  printf("banks : 0x%2X - 0x%2X\n", prg_lo, prg_hi);
 	prg16_89ab(prg_lo);
 	prg16_cdef(prg_hi);
 }
@@ -151,6 +214,9 @@ void nes_action53_device::update_mirr()
 void nes_action53_device::write_l(offs_t offset, u8 data)
 {
 	LOG("action 53 write_l, offset: %04x, data: %02x\n", offset, data);
+	
+	// Low cartridge offsets begin at CPU address $4100.
+	// Only writes at $5000-$5FFF select a register.
 	offset += 0x100;
 	if (offset >= 0x1000)
 		m_sel = bitswap<2>(data, 7, 0);
@@ -161,37 +227,42 @@ void nes_action53_device::write_h(offs_t offset, u8 data)
 {
 	LOG("action 53 write_h, offset: %04x, data: %02x\n", offset, data);
 
-	if (m_reg[m_sel] != data)
-	{
-		m_reg[m_sel] = data;
+	// Every write must be processed, even if the selected register
+	// already contains the same value. Registers $00 and $01 can
+	// overwrite mirroring mode bit 0.
+	m_reg[m_sel] = data;
 
-		switch (m_sel)
-		{
-			case 0:
-				if (!BIT(m_reg[2],1))
-				{
-					m_reg[2] &= 0xfe;
-					m_reg[2] |= BIT(data,4);
-					update_mirr();
-				}
-				chr8(m_reg[0] & 0x03, m_chr_source);
-				break;
-			case 1:
-				if (!BIT(m_reg[2],1))
-				{
-					m_reg[2] &= 0xfe;
-					m_reg[2] |= BIT(data,4);
-					update_mirr();
-				}
-				update_prg();
-				break;
-			case 2:
-				update_prg();
+	switch (m_sel)
+	{
+		case 0:
+			if (!BIT(m_reg[2], 1))
+			{
+				m_reg[2] &= 0xfe;
+				m_reg[2] |= BIT(data, 4);
 				update_mirr();
-				break;
-			case 3:
-				update_prg();
-				break;
-		}
+			}
+
+			chr8(m_reg[0] & 0x03, m_chr_source);
+			break;
+
+		case 1:
+			if (!BIT(m_reg[2], 1))
+			{
+				m_reg[2] &= 0xfe;
+				m_reg[2] |= BIT(data, 4);
+				update_mirr();
+			}
+
+			update_prg();
+			break;
+
+		case 2:
+			update_prg();
+			update_mirr();
+			break;
+
+		case 3:
+			update_prg();
+			break;
 	}
 }

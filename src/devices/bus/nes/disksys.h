@@ -27,7 +27,6 @@ public:
 
 	virtual void disk_flip_side() override;
 
-	virtual void hblank_irq(int scanline, bool vblank, bool blanked) override;
 	virtual void pcb_reset() override;
 
 protected:
@@ -44,12 +43,14 @@ private:
 	static void unload_proc(device_image_interface &image);
 
 	TIMER_CALLBACK_MEMBER(irq_timer_tick);
+	TIMER_CALLBACK_MEMBER(transfer_timer_tick);
 
 	std::unique_ptr<uint8_t[]> m_fds_data;    // here, we store a copy of the disk
 	required_device<legacy_floppy_image_device> m_disk;
 	required_device<rp2c33_sound_device> m_sound;
 
 	emu_timer *irq_timer;
+	emu_timer *transfer_timer;
 
 	void load_disk(device_image_interface &image);
 	void unload_disk(device_image_interface &image);
@@ -57,10 +58,9 @@ private:
 	uint16_t m_irq_count, m_irq_count_latch;
 	int m_irq_enable, m_irq_repeat, m_irq_transfer;
 	int m_disk_reg_enable;
-	bool m_sound_en;
+	bool m_sound_en = false;
 
 	uint8_t m_fds_motor_on;
-	uint8_t m_fds_door_closed;
 	uint8_t m_fds_current_side;
 	uint32_t m_fds_head_position;
 	uint8_t m_fds_status0;

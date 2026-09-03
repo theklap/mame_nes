@@ -1,18 +1,19 @@
 // license:BSD-3-Clause
 // copyright-holders:Fabio Priuli
-/***********************************************************************************************************
+/**************************************************************************************************
 
+ NES/Famicom cartridge emulation for the Bandai Datach Joint ROM System
 
- NES/Famicom cartridge emulation for Bandai Datach PCBs
+ iNES: mapper 157
 
+ The Datach base unit contains a Bandai LZ93D50 ASIC, an internal
+ 24C02 EEPROM, a barcode reader, 8 KiB of CHR-RAM and a slot for
+ a 256 KiB PRG-ROM minicart.
 
- Here we emulate the Bandai Datach Joint ROM System [mapper 157].
- The base unit features: a Bandai LZ93D50 + 24C02 EEPROM PCB
- + barcode reader + subslot for PRG cart
+ Most minicarts contain only PRG-ROM. Battle Rush also contains
+ an external X24C01 EEPROM.
 
-
- ***********************************************************************************************************/
-
+**************************************************************************************************/
 
 #include "emu.h"
 #include "datach.h"
@@ -22,27 +23,17 @@
 #else
 #define VERBOSE (0)
 #endif
+
 #include "logmacro.h"
 
-#define EEPROM_INTERNAL 0
-#define EEPROM_EXTERNAL 1
-
-#define TEST_EEPROM 0
-
-//--------------------------------
-//
-//  Datach Cartslot implementation
-//
-//--------------------------------
 
 //-------------------------------------------------
-//  sub-cart interface
+//  Datach minicart interface
 //-------------------------------------------------
 
 datach_cart_interface::datach_cart_interface(const machine_config &mconfig, device_t &device)
 	: device_interface(device, "datachcart")
-	, m_i2cmem(*this, "i2cmem")
-	, m_rom(nullptr), m_bank(0)
+	, m_external_eeprom(*this, "i2cmem")
 {
 }
 
@@ -52,14 +43,20 @@ datach_cart_interface::~datach_cart_interface()
 
 uint8_t datach_cart_interface::read(offs_t offset)
 {
-	if (offset < 0x4000)
+	if (!m_rom) {
+		return 0xff;
+	}
+
+	if (offset < 0x4000) {
 		return m_rom[(m_bank * 0x4000) + (offset & 0x3fff)];
-	else
-		return m_rom[(0x0f * 0x4000) + (offset & 0x3fff)];
+	}
+
+	return m_rom[(0x0f * 0x4000) + (offset & 0x3fff)];
 }
 
+
 //-------------------------------------------------
-//  sub-cart slot device
+//  Datach minicart slot
 //-------------------------------------------------
 
 DEFINE_DEVICE_TYPE(NES_DATACH_SLOT, nes_datach_slot_device, "nes_datach_slot", "NES Datach Cartridge Slot")
@@ -68,14 +65,12 @@ nes_datach_slot_device::nes_datach_slot_device(const machine_config &mconfig, co
 	: device_t(mconfig, NES_DATACH_SLOT, tag, owner, clock)
 	, device_cartrom_image_interface(mconfig, *this)
 	, device_single_card_slot_interface<datach_cart_interface>(mconfig, *this)
-	, m_cart(nullptr)
 {
 }
 
 nes_datach_slot_device::~nes_datach_slot_device()
 {
 }
-
 
 void nes_datach_slot_device::device_start()
 {
@@ -84,82 +79,104 @@ void nes_datach_slot_device::device_start()
 
 uint8_t nes_datach_slot_device::read(offs_t offset)
 {
-	if (m_cart)
+	if (m_cart) {
 		return m_cart->read(offset);
-	else
-		return 0xff;
+	}
+
+	return 0xff;
 }
 
 std::pair<std::error_condition, std::string> nes_datach_slot_device::call_load()
 {
-	if (m_cart)
-	{
-		uint8_t *const ROM = m_cart->get_cart_base();
-		if (!ROM)
-			return std::make_pair(image_error::INTERNAL, std::string());
+	if (!m_cart) {
+		return std::make_pair(
+			image_error::INTERNAL,
+			"Datach minicart device is missing");
+	}
 
-		// Existing Datach carts are all 256K, so we only load files of this size
-		if (!loaded_through_softlist())
-		{
-			if (length() != 0x40000 && length() != 0x40010)
-				return std::make_pair(image_error::INVALIDLENGTH, std::string());
+	uint8_t *const rom = m_cart->get_cart_base();
 
-			int shift = length() - 0x40000;
-			uint8_t temp[0x40010];
-			fread(&temp, length());
-			memcpy(ROM, temp + shift, 0x40000);
+	if (!rom) {
+		return std::make_pair(
+			image_error::INTERNAL,
+			"Datach minicart ROM region is missing");
+	}
 
-			// double check that iNES files are really mapper 157
-			// (or 16, since some older .nes files marked Datach as mapper 16)
-			if (length() == 0x40010)
-			{
-				uint8_t mapper = (temp[6] & 0xf0) >> 4;
-				mapper |= temp[7] & 0xf0;
-				if (mapper != 157 && mapper != 16)
-				{
-					return std::make_pair(
-							image_error::INVALIDIMAGE,
-							util::string_format("Unsupported iNES mapper %u (must be 16 or 157)", mapper));
-				}
-			}
+	if (loaded_through_softlist()) {
+		if (get_software_region_length("rom") != 0x40000) {
+			return std::make_pair(
+				image_error::INVALIDLENGTH,
+				"Unsupported cartridge size (must be 256K)");
 		}
-		else
-		{
-			if (get_software_region_length("rom") != 0x40000)
-				return std::make_pair(image_error::INVALIDLENGTH, "Unsupported cartridge size (must be 256K)");
 
-			memcpy(ROM, get_software_region("rom"), 0x40000);
+		const uint8_t *const source = get_software_region("rom");
+
+		if (!source) {
+			return std::make_pair(
+				image_error::INTERNAL,
+				"Datach software-list ROM region is missing");
+		}
+
+		memcpy(rom, source, 0x40000);
+
+		return std::make_pair(std::error_condition(), std::string());
+	}
+
+	const uint64_t file_size = length();
+
+	if (file_size != 0x40000 && file_size != 0x40010) {
+		return std::make_pair(
+			image_error::INVALIDLENGTH,
+			"Unsupported cartridge size (must be 256K raw or 256K iNES)");
+	}
+
+	std::vector<uint8_t> temp(file_size);
+
+	fread(temp.data(), file_size);
+
+	const size_t shift = file_size - 0x40000;
+
+	if (file_size == 0x40010) {
+		uint8_t mapper = (temp[6] & 0xf0) >> 4;
+
+		mapper |= temp[7] & 0xf0;
+
+		if (mapper != 157 && mapper != 16) {
+			return std::make_pair(
+				image_error::INVALIDIMAGE,
+				util::string_format(
+					"Unsupported iNES mapper %u (must be 16 or 157)",
+					mapper));
 		}
 	}
+
+	memcpy(rom, temp.data() + shift, 0x40000);
 
 	return std::make_pair(std::error_condition(), std::string());
 }
 
-
 std::string nes_datach_slot_device::get_default_card_software(get_default_card_software_hook &hook) const
 {
-	// any way to detect the game with X24C01?
 	return software_get_default_slot("datach_rom");
 }
 
 
-//--------------------------------
+//-------------------------------------------------
+//  Datach minicarts
 //
-//  Datach Minicart implementation
+//  Two known minicart PCB configurations exist:
 //
-//  Two kinds of PCB exist
-//  * ROM only, used by most games
-//  * ROM + X24C01 EEPROM, used by
-//    Battle Rush
-//
-//--------------------------------
+//  * PRG-ROM only, used by most games.
+//  * PRG-ROM with an X24C01 EEPROM, used by
+//    Battle Rush.
+//-------------------------------------------------
 
-ROM_START( datach_rom )
+ROM_START(datach_rom)
 	ROM_REGION(0x40000, "datachrom", ROMREGION_ERASEFF)
 ROM_END
 
 DEFINE_DEVICE_TYPE(NES_DATACH_ROM,   nes_datach_rom_device,   "nes_datach_rom", "NES Datach ROM")
-DEFINE_DEVICE_TYPE(NES_DATACH_24C01, nes_datach_24c01_device, "nes_datach_ep1", "NES Datach + 24C01 PCB")
+DEFINE_DEVICE_TYPE(NES_DATACH_24C01, nes_datach_24c01_device, "nes_datach_ep1", "NES Datach + X24C01 PCB")
 
 nes_datach_rom_device::nes_datach_rom_device(const machine_config &mconfig, device_type type, const char *tag, device_t *owner, uint32_t clock)
 	: device_t(mconfig, type, tag, owner, clock)
@@ -177,10 +194,10 @@ nes_datach_24c01_device::nes_datach_24c01_device(const machine_config &mconfig, 
 {
 }
 
-
 void nes_datach_rom_device::device_start()
 {
-	m_rom = (uint8_t*)memregion("datachrom")->base();
+	m_rom = reinterpret_cast<uint8_t *>(memregion("datachrom")->base());
+
 	save_item(NAME(m_bank));
 }
 
@@ -191,173 +208,157 @@ void nes_datach_rom_device::device_reset()
 
 const tiny_rom_entry *nes_datach_rom_device::device_rom_region() const
 {
-	return ROM_NAME( datach_rom );
+	return ROM_NAME(datach_rom);
 }
-
-uint8_t *nes_datach_rom_device::get_cart_base()
-{
-	return m_rom;
-}
-
 
 void nes_datach_24c01_device::device_add_mconfig(machine_config &config)
 {
-	I2C_24C01(config, m_i2cmem);
+	I2C_X24C01(config, m_external_eeprom);
 }
 
 
-//---------------------------------
-//
-//  Datach Base Unit implementation
-//
-//---------------------------------
+//-------------------------------------------------
+//  Datach base unit
+//-------------------------------------------------
 
 DEFINE_DEVICE_TYPE(NES_DATACH, nes_datach_device, "nes_datach", "NES Cart Bandai Datach PCB")
 
-
 nes_datach_device::nes_datach_device(const machine_config &mconfig, const char *tag, device_t *owner, uint32_t clock)
 	: nes_lz93d50_device(mconfig, NES_DATACH, tag, owner, clock)
-	, m_datach_latch(0)
-	, m_i2cmem(*this, "i2cmem")
+	, m_internal_eeprom(*this, "i2cmem")
 	, m_reader(*this, "datach")
 	, m_subslot(*this, "datach_slot")
-	, m_i2c_dir(0), m_i2c_in_use(0)
-	, serial_timer(nullptr)
 {
 }
 
-
 void nes_datach_device::device_start()
 {
-	common_start();
-	irq_timer = timer_alloc(FUNC(nes_datach_device::irq_timer_tick), this);
-	serial_timer = timer_alloc(FUNC(nes_datach_device::serial_tick), this);
-	irq_timer->adjust(attotime::zero, 0, clocks_to_attotime(1));
-	serial_timer->adjust(attotime::zero, 0, clocks_to_attotime(1000));
+	nes_fcg_device::device_start();
 
-	save_item(NAME(m_irq_enable));
-	save_item(NAME(m_irq_count));
+	m_serial_timer = timer_alloc(FUNC(nes_datach_device::serial_tick), this);
+	m_serial_timer->adjust(attotime::zero, 0, clocks_to_attotime(1000));
+
 	save_item(NAME(m_datach_latch));
+	save_item(NAME(m_i2c_dir));
 }
 
 void nes_datach_device::pcb_reset()
 {
-	prg16_89ab(0);
-	prg16_cdef(m_prg_chunks - 1);
-	chr8(0, m_chr_source);
+	nes_fcg_device::pcb_reset();
 
-	m_irq_enable = 0;
-	m_irq_count = 0;
 	m_datach_latch = 0;
-	m_i2c_in_use = EEPROM_INTERNAL;
+	m_i2c_dir = false;
 }
 
 
 /*-------------------------------------------------
- mapper specific handlers
- -------------------------------------------------*/
 
-/*-------------------------------------------------
+ Bandai Datach Joint ROM System
 
- Bandai LZ93D50 + Datach barcode reader emulation
+ The base unit contains an LZ93D50 ASIC, an internal
+ 24C02 EEPROM, a barcode reader, 8 KiB of CHR-RAM
+ and a slot for a 256 KiB PRG-ROM minicart.
 
- Games: Datach Games
+ Most minicarts contain only PRG-ROM. Battle Rush
+ also contains an external X24C01 EEPROM. Its SDA
+ line is shared with the internal EEPROM, while
+ each EEPROM has a separate clock line.
 
- iNES: mappers 157
+ Reads from $6000-$7FFF return barcode data on bit 3
+ and EEPROM data on bit 4. The other data lines retain
+ CPU open bus.
 
- In MAME: Supported
+ iNES: mapper 157
 
- TODO: Datach carts should actually be handled
- separately! Original carts were minicarts to be
- inserted in a smaller slot of the Barcode reader
- FC cart. The Barcode reader acts as a passthrough
- but it has no internal ROM (it does not work if
- you don't have any minicart inserted)
-
- TODO2: This class should be derived from the
- LZ93D50 + X24C02 class, since the main board
- has this EEPROM. Moreover, Datach - Battle Rush
- has a second X24C01 EEPROM that we don't emulate yet...
+ In MAME: Supported.
 
  -------------------------------------------------*/
-
 
 uint8_t nes_datach_device::read_m(offs_t offset)
 {
 	LOG("Datach read_m, offset: %04x\n", offset);
-	uint8_t i2c_val = 0;
-#if TEST_EEPROM
-	if (m_i2c_dir)
-	{
-		if (m_i2c_in_use == EEPROM_INTERNAL)
-			i2c_val = (m_i2cmem->read_sda() & 1) << 4;
-		if (m_i2c_in_use == EEPROM_EXTERNAL && m_subslot->m_cart && m_subslot->m_cart->m_i2cmem)
-			i2c_val = (m_subslot->m_cart->m_i2cmem->read_sda() & 1) << 4;
-	}
-#endif
-	return m_datach_latch | i2c_val;
-}
 
+	uint8_t result = get_open_bus() & 0xe7;
+
+	if (m_datach_latch) {
+		result |= 0x08;
+	}
+
+	if (m_i2c_dir) {
+		int eeprom_sda = m_internal_eeprom->read_sda();
+
+		if (m_subslot->m_cart && m_subslot->m_cart->m_external_eeprom) {
+			eeprom_sda &= m_subslot->m_cart->m_external_eeprom->read_sda();
+		}
+
+		result |= (eeprom_sda & 0x01) << 4;
+	}
+
+	return result;
+}
 
 uint8_t nes_datach_device::read_h(offs_t offset)
 {
 	LOG("Datach read_h, offset: %04x\n", offset);
-	// this should be the proper code, but it's a bit slower, so we access directly the subcart below
-	//return m_subslot->read(offset);
 
-	if (m_subslot->m_cart)
+	if (m_subslot->m_cart) {
 		return m_subslot->m_cart->read(offset);
-	else    // this is "fake" in the sense that we fill CPU space with 0xff if no Datach cart is loaded
-		return hi_access_rom(offset);
+	}
+
+	return get_open_bus();
 }
 
 void nes_datach_device::write_h(offs_t offset, uint8_t data)
 {
 	LOG("Datach write_h, offset: %04x, data: %02x\n", offset, data);
 
-	switch (offset & 0x0f)
-	{
-		case 0: case 1: case 2: case 3:
-		case 4: case 5: case 6: case 7:
-			// these don't switch CHR bank (if you try this, both Battle Rush and SD Gundam Wars will have glitches!)
-			// bit3 goes to SCL of the external EEPROM (and we use write=1 to enable reading from this EEPROM)
-			// docs from naruko don't specify the bit, our choice comes from observation of writes performed by Battle Rush
-#if TEST_EEPROM
-			if (m_subslot->m_cart && m_subslot->m_cart->m_i2cmem)
-			{
-				if (BIT(data, 3))
-					m_i2c_in_use = EEPROM_EXTERNAL;
-				m_subslot->m_cart->m_i2cmem->write_scl(BIT(data, 3));
+	switch (offset & 0x0f) {
+		case 0x00:
+		case 0x01:
+		case 0x02:
+		case 0x03:
+			// $8000-$8003: external X24C01 clock.
+			if (m_subslot->m_cart && m_subslot->m_cart->m_external_eeprom) {
+				m_subslot->m_cart->m_external_eeprom->write_scl(BIT(data, 3));
 			}
-#endif
 			break;
+
+		case 0x04:
+		case 0x05:
+		case 0x06:
+		case 0x07:
+			// PA12 and PA13 are grounded in the Datach base unit.
+			break;
+
 		case 0x08:
 			m_subslot->write_prg_bank(data & 0x0f);
 			break;
+
 		case 0x0d:
-#if TEST_EEPROM
-			// bit7, select SDA direction LZ93D50P -> EEPROM or EEPROM -> LZ93D50P
+		{
 			m_i2c_dir = BIT(data, 7);
 
-			// bit6 goes to SDA line, which is in common with the 2nd EEPROM, if present
-			m_i2cmem->write_sda(BIT(data, 6));
-			if (m_subslot->m_cart && m_subslot->m_cart->m_i2cmem)
-				m_subslot->m_cart->m_i2cmem->write_sda(BIT(data, 6));
+			const int sda = m_i2c_dir ? 1 : BIT(data, 6);
 
-			// bit5 goes to SCL of the internal EEPROM (and we use write=1 to enable reading from this EEPROM)
-			if (BIT(data, 5))
-				m_i2c_in_use = EEPROM_INTERNAL;
-			m_i2cmem->write_scl(BIT(data, 5));
-#endif
+			m_internal_eeprom->write_sda(sda);
+
+			if (m_subslot->m_cart && m_subslot->m_cart->m_external_eeprom) {
+				m_subslot->m_cart->m_external_eeprom->write_sda(sda);
+			}
+
+			m_internal_eeprom->write_scl(BIT(data, 5));
 			break;
+		}
+
 		default:
 			fcg_write(offset & 0x0f, data);
 			break;
 	}
 }
 
+
 //-------------------------------------------------
-//  BARCODE READER + CART SLOT + X24C02
+//  Barcode reader, minicart slot and EEPROMs
 //-------------------------------------------------
 
 static void datach_cart(device_slot_interface &device)
@@ -366,44 +367,19 @@ static void datach_cart(device_slot_interface &device)
 	device.option_add_internal("datach_ep1", NES_DATACH_24C01);
 }
 
-
 void nes_datach_device::device_add_mconfig(machine_config &config)
 {
 	BARCODE_READER(config, m_reader, 0);
 	NES_DATACH_SLOT(config, m_subslot, 0, datach_cart);
-	I2C_24C02(config, m_i2cmem);
+	I2C_24C02(config, m_internal_eeprom);
 }
 
 
 //-------------------------------------------------
-//  irq_timer_tick - handle IRQ timer
-//-------------------------------------------------
-
-TIMER_CALLBACK_MEMBER(nes_datach_device::irq_timer_tick)
-{
-	if (m_irq_enable)
-	{
-		// 16bit counter, IRQ fired when the counter goes from 1 to 0
-		// after firing, the counter is *not* reloaded, but next clock
-		// counter wraps around from 0 to 0xffff
-		if (!m_irq_count)
-			m_irq_count = 0xffff;
-		else
-			m_irq_count--;
-
-		if (!m_irq_count)
-		{
-			set_irq_line(ASSERT_LINE);
-			m_irq_enable = 0;
-		}
-	}
-}
-
-//-------------------------------------------------
-//  serial_tick - tick in a serial bit
+//  Barcode serial input
 //-------------------------------------------------
 
 TIMER_CALLBACK_MEMBER(nes_datach_device::serial_tick)
 {
-	m_datach_latch = (m_reader->read_pixel() << 3);
+	m_datach_latch = m_reader->read_pixel() << 3;
 }
