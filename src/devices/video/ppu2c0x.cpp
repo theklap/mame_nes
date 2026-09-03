@@ -3087,8 +3087,10 @@ uint8_t ppu2c0x_device::read(offs_t offset) {
 					//Reading from $2004 (with rendering enabled) from dots 257 through 320 should read from secondary OAM.
 					ret = oamdata_latch;
 				} else {
-					//Reading from $2004 (with rendering enabled) from dots 321 through 340 should read from index 0 of secondary OAM.
-					ret = secondary_oam[0];
+					// During dots 321 through 340, $2004 reads secondary OAM at
+					// the current OAM2 address. Normally that address is zero,
+					// but interrupted sprite fetch can leave it misaligned.
+					ret = secondary_oam[oam2addr & 0x1F];
 				}
 			} else {
 				// Non-rendering: CPU reads primary OAM at OAMADDR
