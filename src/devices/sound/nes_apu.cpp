@@ -30,6 +30,7 @@
 #include "nes_apu.h"
 #include "video/ppu2c0x.h"
 #include "cpu/m6502/m6502.h"
+#include <numbers>
 //#include "bus/nes/mmc5.h"
 
 DEFINE_DEVICE_TYPE(NES_APU,  nesapu_device,  "nesapu",  "RP2A0X APU")
@@ -3113,13 +3114,13 @@ sound_stream::sample_t nesapu_device::apply_analog_filter(sound_stream::sample_t
 	//   1st-order high-pass around 440 Hz
 	//   1st-order low-pass around 14 kHz
 	const sound_stream::sample_t a_hp90 =
-		sound_stream::sample_t(std::exp(-2.0 * M_PI * 90.0 / sr));
+		sound_stream::sample_t(std::exp(-2.0 * std::numbers::pi * 90.0 / sr));
 
 	const sound_stream::sample_t a_hp440 =
-		sound_stream::sample_t(std::exp(-2.0 * M_PI * 440.0 / sr));
+		sound_stream::sample_t(std::exp(-2.0 * std::numbers::pi * 440.0 / sr));
 
 	const sound_stream::sample_t a_lp14k =
-		sound_stream::sample_t(1.0 - std::exp(-2.0 * M_PI * 14000.0 / sr));
+		sound_stream::sample_t(1.0 - std::exp(-2.0 * std::numbers::pi * 14000.0 / sr));
 
 	// HPF 90 Hz
 	const sound_stream::sample_t hp90 =

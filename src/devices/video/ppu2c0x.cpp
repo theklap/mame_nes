@@ -19,6 +19,7 @@ Total rewrite by Matthew Sutton for Accuracy NTSC and PAL
 #include "video/ppu2c0x.h"
 #include "cpu/m6502/m6502.h"
 #include "sound/nes_apu.h"
+#include <numbers>
 //#include "bus/nes/mmc5.h"
 //#include "bus/nes/mmc3.h"
 //#include "bus/nes/mmc1.h"
@@ -913,7 +914,7 @@ rgb_t ppu2c0x_device::nespal_to_RGB(int color_intensity, int color_num, int colo
 
 		default:
 			sat = tint;
-			rad = M_PI * ((color_num * 30 + hue) / 180.0);
+			rad = std::numbers::pi * ((color_num * 30 + hue) / 180.0);
 			y = brightness[1][color_intensity];
 			break;
 	}

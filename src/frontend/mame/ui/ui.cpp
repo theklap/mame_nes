@@ -665,7 +665,8 @@ void mame_ui_manager::display_startup_screens(bool first_time)
 	bool video_none = strcmp(downcast<osd_options &>(machine().options()).video(), OSDOPTVAL_NONE) == 0;
 
 	//no nag
-	show_gameinfo = show_warnings = show_mandatory_fileman = false;
+	//show_gameinfo = show_warnings = show_mandatory_fileman = false;
+	show_gameinfo = show_warnings = false;
 
 	// disable everything if we are using -str for 300 or fewer seconds, or if we're the empty driver,
 	// or if we are debugging, or if there's no mame window to send inputs to
