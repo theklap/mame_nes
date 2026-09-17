@@ -27814,9 +27814,9 @@ The graphics for the recreated CHR ROM were mostly sourced from HAL's port of St
 		<year>1990</year>
 		<publisher>Bandai</publisher>
 		<info name="serial" value="BA-OEKA1"/>
-		<sharedfeat name="exp_default" value="oekakids" />
 		<info name="release" value="19901025"/>
 		<info name="alt_title" value="おえかキッズ アンパンマンとおえかきしよう!!"/>
+		<sharedfeat name="exp_default" value="oekakids" />
 		<part name="cart" interface="nes_cart">
 			<feature name="slot" value="oekakids" />
 			<feature name="pcb" value="BANDAI-OEKAKIDS" />
@@ -49871,9 +49871,9 @@ preliminary proto for the PAL version, still running on NTSC systems) or the gfx
 		<year>1991</year>
 		<publisher>Bandai</publisher>
 		<info name="serial" value="BA-OEKA2"/>
-		<sharedfeat name="exp_default" value="oekakids" />
 		<info name="release" value="19910326"/>
 		<info name="alt_title" value="おえかキッズ アンパンマンのひらがなだいすき"/>
+		<sharedfeat name="exp_default" value="oekakids" />
 		<part name="cart" interface="nes_cart">
 			<feature name="slot" value="oekakids" />
 			<feature name="pcb" value="BANDAI-OEKAKIDS" />
