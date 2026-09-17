@@ -57,9 +57,11 @@
 #include "konamihs.h"
 #include "miracle.h"
 #include "mjpanel.h"
+#include "oekakids.h"
 #include "pachinko.h"
 #include "partytap.h"
 #include "powerpad.h"
+#include "racermate_ctrl.h"
 #include "rob.h"
 #include "sharpcass.h"
 #include "snesadapter.h"
@@ -188,6 +190,7 @@ void nes_control_port1_devices(device_slot_interface &device)
 	device.option_add("zapper", NES_ZAPPER);
 	device.option_add("4score_p1p3", NES_4SCORE_P1P3);
 	device.option_add("miracle_piano", NES_MIRACLE);
+	device.option_add("racermate", NES_RACERMATE_P1);
 	device.option_add("snes_adapter", NES_SNESADAPTER);
 	device.option_add("vboy", NES_VBOYCTRL);
 }
@@ -198,6 +201,7 @@ void nes_control_port2_devices(device_slot_interface &device)
 	device.option_add("zapper", NES_ZAPPER);
 	device.option_add("vaus", NES_ARKPADDLE);
 	device.option_add("powerpad", NES_POWERPAD);
+	device.option_add("racermate", NES_RACERMATE_P2);
 	device.option_add("4score_p2p4", NES_4SCORE_P2P4);
 	device.option_add("snes_adapter", NES_SNESADAPTER);
 	device.option_add("vboy", NES_VBOYCTRL);
@@ -243,6 +247,7 @@ void fc_expansion_devices(device_slot_interface &device)
 	device.option_add("subor_keyboard", NES_SUBORKEYBOARD);
 	device.option_add("taptapmat", NES_TAPTAPMAT);
 	device.option_add("turbofile", NES_TURBOFILE);
+	device.option_add("oekakids", NES_OEKAKIDS_TABLET);
 }
 
 void famibox_control_port12_devices(device_slot_interface &device)
