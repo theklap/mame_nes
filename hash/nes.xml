@@ -44385,7 +44385,7 @@ This mod inserts recreations of the music tracks and sound effects into the prot
 		<part name="cart" interface="nes_cart">
 			<feature name="slot" value="nrom" />
 			<feature name="pcb" value="NES-NROM-256" />
-			<feature name="mirroring" value="horizontal" />
+			<feature name="mirroring" value="vertical" />
 			<dataarea name="chr" size="8192">
 				<rom name="ntf2 test cart (pd).chr" size="8192" crc="04a1eb14" sha1="19f58ce37d065a3922254d1863de12952c5848c5" offset="00000" status="baddump" />
 			</dataarea>
@@ -44402,7 +44402,7 @@ This mod inserts recreations of the music tracks and sound effects into the prot
 		<part name="cart" interface="nes_cart">
 			<feature name="slot" value="nrom" />
 			<feature name="pcb" value="NES-NROM-256" />
-			<feature name="mirroring" value="horizontal" />
+			<feature name="mirroring" value="vertical" />
 			<dataarea name="chr" size="8192">
 				<rom name="nintendo world class service - control deck test cartridge (usa).chr" size="8192" crc="f53bdcae" sha1="b1c9ea767899ed4ffc261f7b376a634452230842" offset="00000" status="baddump" />
 			</dataarea>
@@ -44419,7 +44419,7 @@ This mod inserts recreations of the music tracks and sound effects into the prot
 		<part name="cart" interface="nes_cart">
 			<feature name="slot" value="nrom" />
 			<feature name="pcb" value="NES-NROM-128" />
-			<feature name="mirroring" value="horizontal" />
+			<feature name="mirroring" value="vertical" />
 			<dataarea name="chr" size="8192">
 				<rom name="nintendo world class service - joystick test cartridge (usa).chr" size="8192" crc="bd3a18b2" sha1="f6fd2c27e459c3081a78162441906760c98ae836" offset="00000" status="baddump" />
 			</dataarea>
@@ -44437,7 +44437,7 @@ This mod inserts recreations of the music tracks and sound effects into the prot
 		<part name="cart" interface="nes_cart">
 			<feature name="slot" value="nrom" />
 			<feature name="pcb" value="NES-NROM-256" />
-			<feature name="mirroring" value="horizontal" />
+			<feature name="mirroring" value="vertical" />
 			<dataarea name="prg" size="32768">
 				<rom name="nintendo world class service - port test cartridge (usa).prg" size="32768" crc="32e02cb8" sha1="7b269bca835dcbc41b3f828aa5183d3c16158b80" offset="00000" status="baddump" />
 			</dataarea>
@@ -44453,7 +44453,7 @@ This mod inserts recreations of the music tracks and sound effects into the prot
 		<part name="cart" interface="nes_cart">
 			<feature name="slot" value="nrom" />
 			<feature name="pcb" value="NES-NROM-128" />
-			<feature name="mirroring" value="horizontal" />
+			<feature name="mirroring" value="vertical" />
 			<dataarea name="chr" size="8192">
 				<rom name="nintendo world class service - power pad test cartridge (usa).chr" size="8192" crc="755e2773" sha1="284cfc23118b0f48aff8fd04ce2fc836dfaa1a90" offset="00000" status="baddump" />
 			</dataarea>
@@ -63804,13 +63804,17 @@ preliminary proto for the PAL version, still running on NTSC systems) or the gfx
 		</part>
 	</software>
 
-	<software name="2s5ej3" supported="no">
+	<software name="2s5ej3">
 		<description>2 in 1 - Sonic 5 + Earthworm Jim 3 (Asia)</description>
 		<year>19??</year>
 		<publisher>&lt;unknown&gt;</publisher>
 		<part name="cart" interface="nes_cart">
 			<feature name="slot" value="fk23c" />
 			<feature name="pcb" value="BMC-FK23C" />
+			<!-- 0 = Earthworm Jim 3
+				 1 = Sonic 5
+				 2 = Menu  -->
+			<feature name="fk23c_solder_pad" value="2"/>
 			<dataarea name="chr" size="524288">
 				<rom name="2-in-1 sonic 5 + earth worm jim 3 (unl)[u].chr" size="524288" crc="4c9840af" sha1="3f498a18f5e62869325c0bb8421980e0b12ff8a2" offset="00000" status="baddump" />
 			</dataarea>
@@ -77306,7 +77310,7 @@ Other
 		<year>19??</year>
 		<publisher>&lt;pirate&gt;</publisher>
 		<part name="cart" interface="nes_cart">
-			<feature name="slot" value="sc127" />
+			<feature name="slot" value="jyc_c" />
 			<feature name="pcb" value="UNL-SC-127" />
 			<dataarea name="chr" size="262144">
 				<rom name="warioland ii (unl).chr" size="262144" crc="67819faa" sha1="b082dd14504c163252fb54e951822a3853c5203d" offset="00000" status="baddump" />
@@ -80978,7 +80982,7 @@ be better to redump them properly. -->
 
 <!-- Multicarts (these have to be better examined: some dumps are possibly incomplete, e.g. menu + 1 game: these incomplete dumps should be removed) -->
 
-	<software name="mc_10og" supported="no">
+	<software name="mc_10og">
 		<description>10 in 1 Omake Game (FC Mobile)</description>
 		<year>19??</year>
 		<publisher>&lt;unknown&gt;</publisher>
@@ -80988,8 +80992,8 @@ be better to redump them properly. -->
 			<dataarea name="prg" size="2097152">
 				<rom name="10-in-1 omake game (fc mobile)[u].prg" size="2097152" crc="6c979bac" sha1="581d70dfd68c65261887ea5969ca2cae6acc6b92" offset="00000" status="baddump" />
 			</dataarea>
-			<!-- 8k VRAM on cartridge -->
-			<dataarea name="vram" size="8192" />
+			<!-- 256k CHR-RAM on cartridge -->
+			<dataarea name="vram" size="262144" />
 		</part>
 	</software>
 
@@ -81345,7 +81349,7 @@ be better to redump them properly. -->
 		</part>
 	</software>
 
-	<software name="mc_120" supported="partial">
+	<software name="mc_120">
 		<description>120 in 1</description>
 		<year>19??</year>
 		<publisher>&lt;unknown&gt;</publisher>
@@ -81355,8 +81359,8 @@ be better to redump them properly. -->
 			<dataarea name="prg" size="8388608">
 				<rom name="120-in-1 (unl)[u].prg" size="8388608" crc="678de5aa" sha1="01da22ddf1897b47d6b03ecb4ff0c093f9b39dfc" offset="00000" status="baddump" />
 			</dataarea>
-			<!-- 8k? VRAM on cartridge -->
-			<dataarea name="vram" size="8192" />
+			<!-- 256k CHR-RAM on cartridge -->
+			<dataarea name="vram" size="262144" />
 		</part>
 	</software>
 
@@ -81376,7 +81380,7 @@ be better to redump them properly. -->
 		</part>
 	</software>
 
-	<software name="mc_126" supported="no">
+	<software name="mc_126">
 		<description>126 in 1</description>
 		<year>19??</year>
 		<publisher>&lt;unknown&gt;</publisher>
