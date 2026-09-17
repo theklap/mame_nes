@@ -27809,11 +27809,12 @@ The graphics for the recreated CHR ROM were mostly sourced from HAL's port of St
 		</part>
 	</software>
 
-	<software name="oekashi" supported="no">
+	<software name="oekashi">
 		<description>Oeka Kids - Anpanman to Oekaki Shiyou!! (Japan)</description>
 		<year>1990</year>
 		<publisher>Bandai</publisher>
 		<info name="serial" value="BA-OEKA1"/>
+		<sharedfeat name="exp_default" value="oekakids" />
 		<info name="release" value="19901025"/>
 		<info name="alt_title" value="おえかキッズ アンパンマンとおえかきしよう!!"/>
 		<part name="cart" interface="nes_cart">
@@ -49865,11 +49866,12 @@ preliminary proto for the PAL version, still running on NTSC systems) or the gfx
 		</part>
 	</software>
 
-	<software name="oekahira" supported="no">
+	<software name="oekahira">
 		<description>Oeka Kids - Anpanman no Hiragana Daisuki (Japan)</description>
 		<year>1991</year>
 		<publisher>Bandai</publisher>
 		<info name="serial" value="BA-OEKA2"/>
+		<sharedfeat name="exp_default" value="oekakids" />
 		<info name="release" value="19910326"/>
 		<info name="alt_title" value="おえかキッズ アンパンマンのひらがなだいすき"/>
 		<part name="cart" interface="nes_cart">
