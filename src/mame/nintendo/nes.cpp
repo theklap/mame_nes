@@ -253,6 +253,16 @@ void nes_state::machine_start()
 		m_ppu->space(AS_PROGRAM).install_readwrite_handler(0x2000, 0x3eff, read8sm_delegate(*m_cartslot->m_cart, FUNC(device_nes_cart_interface::nt_r)), write8sm_delegate(*m_cartslot->m_cart, FUNC(device_nes_cart_interface::nt_w)));
 		m_ppu->set_latch(*m_cartslot->m_cart, FUNC(device_nes_cart_interface::ppu_latch));
 		m_ppu->set_ppu_to_mapper(*m_cartslot->m_cart, FUNC(device_nes_cart_interface::ppu_to_mapper));
+		
+		m_ppu->set_ppu_bus_address(*m_cartslot->m_cart, FUNC(device_nes_cart_interface::ppu_bus_address));
+		m_ppu->set_ppu_odd_frame_skip(*m_cartslot->m_cart, FUNC(device_nes_cart_interface::ppu_odd_frame_skip));
+		m_ppu->set_mmc1_ppu_phase(*m_cartslot->m_cart, FUNC(device_nes_cart_interface::mmc1_ppu_phase));
+		m_ppu->set_mmc5_ppu_read(*m_cartslot->m_cart, FUNC(device_nes_cart_interface::mmc5_clock_ppu_read));
+		m_ppu->set_mmc5_reset_scanline_irq(*m_cartslot->m_cart, FUNC(device_nes_cart_interface::mmc5_reset_scanline_irq_state));
+
+		m_maincpu6502->set_mmc5_reset_scanline_irq(*m_cartslot->m_cart, FUNC(device_nes_cart_interface::mmc5_reset_scanline_irq_state));
+		m_maincpu6502->set_mmc5_ppuctrl_write(*m_cartslot->m_cart, FUNC(device_nes_cart_interface::mmc5_real_ppuctrl_write));
+		m_maincpu6502->set_mmc5_ppumask_write(*m_cartslot->m_cart, FUNC(device_nes_cart_interface::mmc5_real_ppumask_write));
 
 		// install additional handlers (read_h, read_ex, write_ex)
 		static const int r_h_pcbs[] =
