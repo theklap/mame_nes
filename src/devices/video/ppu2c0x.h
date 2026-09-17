@@ -116,6 +116,7 @@ public:
 	// paths may depend on the virtual API even though the current NES path is
 	// driven by the cycle-accurate renderer below.
 	// ---------------------------------------------------------------------
+	void spriteram_dma(address_space &space, const uint8_t page);
 	void apply_color_emphasis_and_clamp(bool is_pal_or_dendy, int color_emphasis, double& R, double& G, double& B);
 	rgb_t nespal_to_RGB(int color_intensity, int color_num, int color_emphasis, bool is_pal_or_dendy);
 	virtual void init_palette_tables();

@@ -3562,6 +3562,19 @@ uint32_t ppu2c0x_device::screen_update(screen_device& screen, bitmap_rgb32& bitm
 	return 0;
 }
 
+void ppu2c0x_device::spriteram_dma(address_space &space, const uint8_t page)
+{
+	const int address = page << 8;
+
+	for (int i = 0; i < 0x100; i++)
+	{
+		const uint8_t spriteData = space.read_byte(address + i);
+		space.write_byte(0x2004, spriteData);
+	}
+
+	// should last 513 CPU cycles.
+	space.device().execute().adjust_icount(-513);
+}
 void ppu2c0x_device::read_tile_plane_data(int address, int color) {}
 void ppu2c0x_device::shift_tile_plane_data(uint8_t& pix) {}
 void ppu2c0x_device::draw_tile_pixel(uint8_t pix, int color, uint32_t back_pen, uint32_t*& dest) {}
