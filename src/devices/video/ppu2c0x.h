@@ -119,6 +119,7 @@ public:
 	void spriteram_dma(address_space &space, const uint8_t page);
 	void set_spriteram_value(offs_t, uint8_t) { }
 	void ppu_vram_direct_write(offs_t, uint8_t) { }
+	bool in_vblanking() { return false; }
 	void apply_color_emphasis_and_clamp(bool is_pal_or_dendy, int color_emphasis, double& R, double& G, double& B);
 	rgb_t nespal_to_RGB(int color_intensity, int color_num, int color_emphasis, bool is_pal_or_dendy);
 	virtual void init_palette_tables();
