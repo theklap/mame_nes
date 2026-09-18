@@ -1994,12 +1994,12 @@ end
 --@src/devices/sound/mmc5.h,SOUNDS["MMC5"] = true
 ---------------------------------------------------
 
-if SOUNDS["MMC5"] then
-	files {
-		MAME_DIR .. "src/devices/sound/mmc5.cpp",
-		MAME_DIR .. "src/devices/sound/mmc5.h",
-	}
-end
+--if SOUNDS["MMC5"] then
+--	files {
+		--MAME_DIR .. "src/devices/sound/mmc5.cpp",
+		--MAME_DIR .. "src/devices/sound/mmc5.h",
+	--}
+--end
 
 ---------------------------------------------------
 -- ADCs
