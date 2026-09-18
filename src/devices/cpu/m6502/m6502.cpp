@@ -133,6 +133,7 @@ void m6502_device::init()
 	save_item(NAME(dmc_dma_explicit_stop));
 	save_item(NAME(write_cycles_since_dma_halt_request));
 	save_item(NAME(dmc_dma_reload));
+	save_item(NAME(m_famicom_controller_timing));
 	save_item(NAME(prev_4016_write));
 	save_item(NAME(prev_4017_write));
 	save_item(NAME(prev_4016_read));
@@ -999,7 +1000,7 @@ uint8_t m6502_device::read(uint16_t adr)
 	set_var_read();
 
 	// --- 4016/4017 special timing ---
-	if (adr == 0x4016 || adr == 0x4017)
+	if (!m_famicom_controller_timing && (adr == 0x4016 || adr == 0x4017))
 	{
 		int64_t tc = suspended() ? (total_cycles() - 1) : total_cycles();
 
@@ -1061,7 +1062,7 @@ uint8_t m6502_device::read_9(uint16_t adr)
 	prevReadAddress = adr;
 	set_var_read();
 
-	if (adr == 0x4016 || adr == 0x4017)
+	if (!m_famicom_controller_timing && (adr == 0x4016 || adr == 0x4017))
 	{
 		int64_t tc = suspended() ? (total_cycles() - 1) : total_cycles();
 
@@ -1247,7 +1248,7 @@ uint8_t m6502_device::read_arg(uint16_t adr)
 	prevReadAddress = adr;
 	set_var_read();
 
-	if (adr == 0x4016 || adr == 0x4017)
+	if (!m_famicom_controller_timing && (adr == 0x4016 || adr == 0x4017))
 	{
 		int64_t tc = suspended() ? (total_cycles() - 1) : total_cycles();
 
@@ -1308,7 +1309,7 @@ uint8_t m6502_device::read_pc()
 		m_mmc5_reset_scanline_irq();
 	}
 		
-	if (adr == 0x4016 || adr == 0x4017)
+	if (!m_famicom_controller_timing && (adr == 0x4016 || adr == 0x4017))
 	{
 		int64_t tc = suspended() ? (total_cycles() - 1) : total_cycles();
 
@@ -1367,7 +1368,7 @@ uint8_t m6502_device::read_sync(uint16_t adr)
 	prevReadAddress = adr;
 	set_var_read();
 
-	if (adr == 0x4016 || adr == 0x4017)
+	if (!m_famicom_controller_timing && (adr == 0x4016 || adr == 0x4017))
 	{
 		int64_t tc = suspended() ? (total_cycles() - 1) : total_cycles();
 

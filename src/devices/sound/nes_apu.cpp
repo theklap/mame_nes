@@ -2855,25 +2855,23 @@ void nesapu_device::dmc_read()
 			{
 				status_r();
 			}
-			else if (apu_reg == 0x4016 || apu_reg == 0x4017)
-			{
+			else if (apu_reg == 0x4016 || apu_reg == 0x4017) {
+				// The cartridge drives the DMC sample onto the external bus before
+				// the mirrored controller register is activated. Floating controller
+				// bits therefore retain the corresponding bits from the sample.
+				m_maincpu6502->set_open_bus(raw_dmc_sample);
+
 				const uint8_t ctrl = m_maincpu6502->read_4016_4017(apu_reg);
+
+				// Value left on the external/open bus after the read ends.
+				// This includes the resolved controller lines, floating sample bits,
+				// and the Famicom's driven-high D6.
+				external_bus = ctrl;
 
 				// Value the DMC/Ricoh-side sample fetch sees during the live bus conflict:
 				// D0-D4 are an AND conflict between joypad/expansion and DMC/cart.
 				// D5-D7 come from the DMC/cart byte.
-				const uint8_t dmc_conflicted_sample =
-					(raw_dmc_sample & 0xe0) |
-					((ctrl & 0x1f) & (raw_dmc_sample & 0x1f));
-
-				// Value left on the external/open bus after the read ends:
-				// D0-D4 are left by the joypad hex inverter.
-				// D5-D7 remain from the DMC/cart byte.
-				external_bus =
-					(ctrl & 0x1f) |
-					(raw_dmc_sample & 0xe0);
-
-				dmc_sample_buffer = dmc_conflicted_sample;
+				dmc_sample_buffer = (raw_dmc_sample & 0xe0) | ((ctrl & 0x1f) & (raw_dmc_sample & 0x1f));
 			}
 		}
 

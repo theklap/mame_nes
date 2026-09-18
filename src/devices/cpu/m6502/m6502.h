@@ -96,6 +96,7 @@ typedef device_delegate<void (uint8_t data)> mmc5_register_write_delegate;
 	void cancel_delayed_apu_irq();								//used in APU
 	bool get_is_pal() { return is_pal; }						//used in APU
 	void set_is_pal(bool x) { is_pal = x; }						//used in APU
+	void set_famicom_controller_timing(bool x) { m_famicom_controller_timing = x; } //used in nes.cpp
 	int64_t get_previous_cpu_write_cycle() { return m_previous_cpu_write_cycle; }	//mmc1.cpp
 	int64_t	get_last_cpu_write_cycle() { return m_last_cpu_write_cycle; } 	//mmc1.cpp
 	//MMC5 Mapper
@@ -233,6 +234,7 @@ protected:
 	bool		dmc_dma_explicit_stop;	//is this an explicit stop request?
 	int 		write_cycles_since_dma_halt_request;			//used to help stop the CPU for DMA
 	bool		dmc_dma_reload;			//is this a DMC reload?
+	bool 		m_famicom_controller_timing = false;	//is this famicom or frontloader
 	int64_t 	prev_4016_write;		//keep track of strobing the controller and when
 	int64_t 	prev_4017_write;		//keep track of strobing the controller and when
 	int64_t 	prev_4016_read;			//last controller read cycle

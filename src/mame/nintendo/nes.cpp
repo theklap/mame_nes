@@ -404,26 +404,22 @@ void nes_base_state::nes_in0_w(uint8_t data)
 
 uint8_t nes_state::fc_in0_r()
 {
-	uint8_t ret = 0x40;
-	// bit 0 from controller port
+	uint8_t ret = 0x40 | (m_maincpu6502->get_open_bus() & 0xb8);
+
 	ret |= m_ctrl1->read_bit0();
-
-	// bit 2 from P2 controller microphone
 	ret |= m_ctrl2->read_bit2();
-
-	// and bit 1 comes from expansion port
 	ret |= m_exp->read_exp(0);
+
 	return ret;
 }
 
 uint8_t nes_state::fc_in1_r()
 {
-	uint8_t ret = 0x40;
-	// bit 0 from controller port
-	ret |= m_ctrl2->read_bit0();
+	uint8_t ret = 0x40 | (m_maincpu6502->get_open_bus() & 0xa0);
 
-	// bits 1-4 from expansion port (in theory bit 0 also can be read on AV Famicom when controller is unplugged)
+	ret |= m_ctrl2->read_bit0();
 	ret |= m_exp->read_exp(1);
+
 	return ret;
 }
 
@@ -571,6 +567,8 @@ void nes_state::famicom(machine_config &config)
 {
 	nes(config);
 
+	downcast<m6502_device &>(*m_maincpu).set_famicom_controller_timing(true);
+
 	NES_CONTROL_PORT(config.replace(), m_ctrl1, fc_control_port1_devices, "joypad").set_screen_tag(m_screen);
 	NES_CONTROL_PORT(config.replace(), m_ctrl2, fc_control_port2_devices, "joypad").set_screen_tag(m_screen);
 	NES_CONTROL_PORT(config, m_exp, fc_expansion_devices, nullptr).set_screen_tag(m_screen);
@@ -587,6 +585,7 @@ void nes_state::famicomo(machine_config &config)
 	// basic machine hardware
 	rp2a03_device &maincpu(RP2A03(config.replace(), m_maincpu, NTSC_APU_CLOCK));
 	maincpu.set_addrmap(AS_PROGRAM, &nes_state::nes_map);
+	maincpu.set_famicom_controller_timing(true);
 
 	// sound hardware
 	maincpu.add_route(ALL_OUTPUTS, "mono", 0.90);
