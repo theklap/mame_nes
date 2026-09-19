@@ -1844,15 +1844,13 @@ void nesapu_device::dma_engine_finish_dmc_read()
 	dma_engine_resume_cpu_if_done();
 }
 
-
 void nesapu_device::clock_dmc() {
 	if (dpcm_active) {
 		if (dmc_shift_reg & 1) {
 			if (dmc_counter < 126) {
 				dmc_counter += 2;
 			}
-		}
-		else {
+		} else {
 			if (dmc_counter > 1) {
 				dmc_counter -= 2;
 			}
@@ -1863,19 +1861,16 @@ void nesapu_device::clock_dmc() {
 
 	if (--dmc_bits_remaining == 0) {
 		dmc_bits_remaining = 8;
-			
-		if (dmc_sample_buffer_has_data)
-		{
+
+		if (dmc_sample_buffer_has_data) {
 			dpcm_active = true;
 			dmc_shift_reg = dmc_sample_buffer;
 			dmc_sample_buffer_has_data = false;
-		}
-		else
-		{
+		} else {
 			dpcm_active = false;
 		}
 	}
-	
+
 	if (!dmc_sample_buffer_has_data && !dmc_loading_sample_byte && dmc_bytes_remaining > 0) {
 		//reload DMC
 		m_dma_engine.dmc.load_request = false;
@@ -1884,21 +1879,16 @@ void nesapu_device::clock_dmc() {
 	}
 }
 
-void nesapu_device::clock_noise_generator()
-{
-	const uint16_t feedback =
-		((noise_shift_reg & 1) ^ ((noise_shift_reg >> noise_feedback_bit) & 1)) & 1;
+void nesapu_device::clock_noise_generator() {
+	const uint16_t feedback = ((noise_shift_reg & 1) ^ ((noise_shift_reg >> noise_feedback_bit) & 1)) & 1;
 
 	noise_shift_reg = (noise_shift_reg >> 1) | (feedback << 14);
 	update_noise_output_level();
 }
 
-void nesapu_device::clock_triangle_generator() 
-{
-	if (tri_len_cnt > 0 && tri_lin_cnt > 0)
-	{
+void nesapu_device::clock_triangle_generator() {
+	if (tri_len_cnt > 0 && tri_lin_cnt > 0) {
 		tri_waveform_pos = (tri_waveform_pos + 1) & 0x1f;
-
 		tri_output_level = tri_waveform_steps[tri_waveform_pos];
 	}
 }
@@ -1918,31 +1908,24 @@ void nesapu_device::check_frame_irq() {
 //   - clocks noise envelope
 //   - clocks triangle linear counter
 //
-void nesapu_device::clock_env_and_tri_lin() 
-{
+void nesapu_device::clock_env_and_tri_lin() {
 	// Pulse channels
-	for (int n = 0; n < 2; ++n)
-	{
-		if (m_APU.pulse[n].env_start_flag)
-		{
+	for (int n = 0; n < 2; ++n) {
+		if (m_APU.pulse[n].env_start_flag) {
 			m_APU.pulse[n].env_start_flag = false;
 
-			m_APU.pulse[n].env_vol     = 15;
+			m_APU.pulse[n].env_vol = 15;
 			m_APU.pulse[n].env_div_cnt = m_APU.pulse[n].vol;
-		}
-		else
-		{
-			if (m_APU.pulse[n].env_div_cnt == 0)
-			{
+		} else {
+			if (m_APU.pulse[n].env_div_cnt == 0) {
 				m_APU.pulse[n].env_div_cnt = m_APU.pulse[n].vol;
 
-				if (m_APU.pulse[n].env_vol > 0)
+				if (m_APU.pulse[n].env_vol > 0) {
 					--m_APU.pulse[n].env_vol;
-				else if (m_APU.pulse[n].halt_len_loop_env)
+				} else if (m_APU.pulse[n].halt_len_loop_env) {
 					m_APU.pulse[n].env_vol = 15;
-			}
-			else
-			{
+				}
+			} else {
 				--m_APU.pulse[n].env_div_cnt;
 			}
 		}
@@ -1951,26 +1934,21 @@ void nesapu_device::clock_env_and_tri_lin()
 	}
 
 	// Noise channel
-	if (noise_env_start_flag)
-	{
+	if (noise_env_start_flag) {
 		noise_env_start_flag = false;
 
-		noise_env_vol     = 15;
+		noise_env_vol = 15;
 		noise_env_div_cnt = noise_vol;
-	}
-	else
-	{
-		if (noise_env_div_cnt == 0)
-		{
+	} else {
+		if (noise_env_div_cnt == 0) {
 			noise_env_div_cnt = noise_vol;
 
-			if (noise_env_vol > 0)
+			if (noise_env_vol > 0) {
 				--noise_env_vol;
-			else if (noise_halt_len_loop_env)
+			} else if (noise_halt_len_loop_env) {
 				noise_env_vol = 15;
-		}
-		else
-		{
+			}
+		} else {
 			--noise_env_div_cnt;
 		}
 	}
@@ -1978,12 +1956,9 @@ void nesapu_device::clock_env_and_tri_lin()
 	update_noise_output_level();
 
 	// Triangle linear counter
-	if (tri_lin_cnt_reload_flag)
-	{
+	if (tri_lin_cnt_reload_flag) {
 		tri_lin_cnt = tri_lin_cnt_load;
-	}
-	else if (tri_lin_cnt > 0)
-	{
+	} else if (tri_lin_cnt > 0) {
 		--tri_lin_cnt;
 	}
 
@@ -1991,49 +1966,13 @@ void nesapu_device::clock_env_and_tri_lin()
 	// If clear, the linear-counter reload flag is cleared after the clock.
 	// If set, the reload flag remains set, causing the counter to reload every
 	// quarter-frame clock.
-	if (!tri_halt_flag)
+	if (!tri_halt_flag) {
 		tri_lin_cnt_reload_flag = false;
 	}
+}
 
 // Half frame
-/*void nesapu_device::clock_len_and_sweep() 
-{
-	for (int n = 0; n < 2; ++n) {
-		if (!m_APU.pulse[n].halt_len_loop_env && m_APU.pulse[n].len_cnt > 0) {
-			--m_APU.pulse[n].len_cnt;
-			update_pulse_output_level(n);
-		}
-
-		if (m_APU.pulse[n].sweep_period_cnt == 0 &&
-			m_APU.pulse[n].sweep_enabled &&
-			m_APU.pulse[n].sweep_shift > 0 &&
-			m_APU.pulse[n].period >= 8 &&
-			m_APU.pulse[n].sweep_target_period <= 0x7ff) {
-				m_APU.pulse[n].period = m_APU.pulse[n].sweep_target_period;
-				update_sweep_target_period(n);
-				update_pulse_output_level(n);
-		}
-
-
-		if (m_APU.pulse[n].sweep_reload_flag || m_APU.pulse[n].sweep_period_cnt == 0) {
-			m_APU.pulse[n].sweep_reload_flag = false;
-			m_APU.pulse[n].sweep_period_cnt = m_APU.pulse[n].sweep_period;
-		} else {
-			--m_APU.pulse[n].sweep_period_cnt;
-		}
-	}
-
-	if (!tri_halt_flag && tri_len_cnt > 0)
-		--tri_len_cnt;
-
-	if (!noise_halt_len_loop_env && noise_len_cnt > 0) {
-		--noise_len_cnt;
-		update_noise_output_level();
-	}
-}*/
-
-void nesapu_device::clock_len_and_sweep() 
-{
+void nesapu_device::clock_len_and_sweep() {
 	for (int n = 0; n < 2; ++n) {
 		if (!m_APU.pulse[n].halt_len_loop_env && m_APU.pulse[n].len_cnt > 0) {
 			--m_APU.pulse[n].len_cnt;
@@ -2041,16 +1980,12 @@ void nesapu_device::clock_len_and_sweep()
 		}
 
 		// BreakingNES SW_UVF blocks sweep when frequency bits [10:2] are zero,
-		// i.e. period < 4.  Keep this separate from output muting, which still
+		// i.e. period < 4. Keep this separate from output muting, which still
 		// mutes pulse output when period < 8.
-		if (m_APU.pulse[n].sweep_period_cnt == 0 &&
-			m_APU.pulse[n].sweep_enabled &&
-			m_APU.pulse[n].sweep_shift > 0 &&
-			m_APU.pulse[n].period >= 4 &&
-			m_APU.pulse[n].sweep_target_period <= 0x7ff) {
-				m_APU.pulse[n].period = m_APU.pulse[n].sweep_target_period;
-				update_sweep_target_period(n);
-				update_pulse_output_level(n);
+		if (m_APU.pulse[n].sweep_period_cnt == 0 && m_APU.pulse[n].sweep_enabled && m_APU.pulse[n].sweep_shift > 0 && m_APU.pulse[n].period >= 4 && m_APU.pulse[n].sweep_target_period <= 0x7ff) {
+			m_APU.pulse[n].period = m_APU.pulse[n].sweep_target_period;
+			update_sweep_target_period(n);
+			update_pulse_output_level(n);
 		}
 
 		if (m_APU.pulse[n].sweep_reload_flag || m_APU.pulse[n].sweep_period_cnt == 0) {
@@ -2061,8 +1996,9 @@ void nesapu_device::clock_len_and_sweep()
 		}
 	}
 
-	if (!tri_halt_flag && tri_len_cnt > 0)
+	if (!tri_halt_flag && tri_len_cnt > 0) {
 		--tri_len_cnt;
+	}
 
 	if (!noise_halt_len_loop_env && noise_len_cnt > 0) {
 		--noise_len_cnt;
@@ -2081,30 +2017,26 @@ void nesapu_device::clock_len_and_sweep()
 		T2=2*7456;
 		T3=2*11185;
 		T4=2*14914;
-		T5=2*18640;
-		
+		T5=2*18640;	
 */
 
 // Prevent duplicate frame-unit clocks when a scheduled frame step
 // and delayed $4017 reset/immediate 5-step clock overlap the same
 // APU put/get boundary.
-bool nesapu_device::frame_unit_clock_allowed()
-{
+bool nesapu_device::frame_unit_clock_allowed() {
 	const uint64_t apu_cycle = uint64_t(cpu_cycle) >> 1;
 
 	return last_frame_unit_pulse_apu_cycle != apu_cycle;
 }
 
-void nesapu_device::arm_frame_unit_clock_block()
-{
+void nesapu_device::arm_frame_unit_clock_block() {
 	const uint64_t apu_cycle = uint64_t(cpu_cycle) >> 1;
 
 	last_frame_unit_pulse_apu_cycle = apu_cycle;
 }
 
-void nesapu_device::clock_frame_counter()
-{
-	const int q1 = m_is_pal ?  8313 :  7457;
+void nesapu_device::clock_frame_counter() {
+	const int q1 = m_is_pal ? 8313 : 7457;
 	const int h2 = m_is_pal ? 16627 : 14913;
 	const int q3 = m_is_pal ? 24939 : 22371;
 	const int h4 = m_is_pal ? 33253 : 29829;
@@ -2118,71 +2050,70 @@ void nesapu_device::clock_frame_counter()
 	const int h5 = m_is_pal ? 41565 : 37281;
 	const int wrap5 = m_is_pal ? 41566 : 37282;
 
-	switch (frame_counter_mode)
-	{
-	case FOUR_STEP:
-		++frame_counter_clock;
+	switch (frame_counter_mode) {
+		case FOUR_STEP:
+			++frame_counter_clock;
 
-		if (frame_counter_clock == q1 || frame_counter_clock == q3) {
-			if (frame_unit_clock_allowed()) {
-				clock_env_and_tri_lin();
-				arm_frame_unit_clock_block();
+			if (frame_counter_clock == q1 || frame_counter_clock == q3) {
+				if (frame_unit_clock_allowed()) {
+					clock_env_and_tri_lin();
+					arm_frame_unit_clock_block();
+				}
 			}
-		}
 
-		if (frame_counter_clock == h2 || frame_counter_clock == h4) {
-			if (frame_unit_clock_allowed()) {
-				clock_len_and_sweep();
-				clock_env_and_tri_lin();
-				arm_frame_unit_clock_block();
+			if (frame_counter_clock == h2 || frame_counter_clock == h4) {
+				if (frame_unit_clock_allowed()) {
+					clock_len_and_sweep();
+					clock_env_and_tri_lin();
+					arm_frame_unit_clock_block();
+				}
 			}
-		}
 
-		if (frame_counter_clock == irq0 ||
-			frame_counter_clock == irq1 ||
-			frame_counter_clock == irq2)
-		{
-			if (inhibit_frame_irq) {
-				set_frame_irq_flag_only();
+			if (frame_counter_clock == irq0 || frame_counter_clock == irq1 || frame_counter_clock == irq2) {
+				if (inhibit_frame_irq) {
+					set_frame_irq_flag_only();
 
-				if (frame_counter_clock == irq0)
-					frame_irq_suppress_clear_cycle = 3;
-				else if (frame_counter_clock == irq1)
-					frame_irq_suppress_clear_cycle = 2;
-				else
-					frame_irq_suppress_clear_cycle = 1;
-			} else {
-				check_frame_irq();
+					if (frame_counter_clock == irq0) {
+						frame_irq_suppress_clear_cycle = 3;
+					} else if (frame_counter_clock == irq1) {
+						frame_irq_suppress_clear_cycle = 2;
+					} else {
+						frame_irq_suppress_clear_cycle = 1;
+					}
+				} else {
+					check_frame_irq();
+				}
 			}
-		}
 
-		if (frame_counter_clock == wrap4)
-			frame_counter_clock = 0;
-
-		break;
-
-	case FIVE_STEP:
-		++frame_counter_clock;
-
-		if (frame_counter_clock == h2 || frame_counter_clock == h5) {
-			if (frame_unit_clock_allowed()) {
-				clock_len_and_sweep();
-				clock_env_and_tri_lin();
-				arm_frame_unit_clock_block();
+			if (frame_counter_clock == wrap4) {
+				frame_counter_clock = 0;
 			}
-		}
 
-		if (frame_counter_clock == q1 || frame_counter_clock == q3) {
-			if (frame_unit_clock_allowed()) {
-				clock_env_and_tri_lin();
-				arm_frame_unit_clock_block();
+			break;
+
+		case FIVE_STEP:
+			++frame_counter_clock;
+
+			if (frame_counter_clock == h2 || frame_counter_clock == h5) {
+				if (frame_unit_clock_allowed()) {
+					clock_len_and_sweep();
+					clock_env_and_tri_lin();
+					arm_frame_unit_clock_block();
+				}
 			}
-		}
 
-		if (frame_counter_clock == wrap5)
-			frame_counter_clock = 0;
+			if (frame_counter_clock == q1 || frame_counter_clock == q3) {
+				if (frame_unit_clock_allowed()) {
+					clock_env_and_tri_lin();
+					arm_frame_unit_clock_block();
+				}
+			}
 
-		break;
+			if (frame_counter_clock == wrap5) {
+				frame_counter_clock = 0;
+			}
+
+			break;
 	}
 
 	if (delayed_frame_timer_reset > 0 && --delayed_frame_timer_reset == 0) {
@@ -2199,8 +2130,7 @@ void nesapu_device::clock_frame_counter()
 	}
 }
 
-void nesapu_device::clock_pulse_generator(unsigned n)
-{
+void nesapu_device::clock_pulse_generator(unsigned n) {
 	assert(n < 2);
 	assert(m_APU.pulse[n].duty < 4);
 	assert(m_APU.pulse[n].waveform_pos < 8);
@@ -2212,18 +2142,13 @@ void nesapu_device::clock_pulse_generator(unsigned n)
 	update_pulse_output_level(n);
 }
 
-void nesapu_device::update_pulse_output_level(unsigned n) 
-{
-	const bool sweep_mutes = (m_APU.pulse[n].sweep_target_period > 0x7FF);
-	const bool period_mutes = (m_APU.pulse[n].period < 8);
+void nesapu_device::update_pulse_output_level(unsigned n) {
+	const bool sweep_mutes = m_APU.pulse[n].sweep_target_period > 0x7FF;
+	const bool period_mutes = m_APU.pulse[n].period < 8;
 
 	uint8_t new_output = 0;
 
-	if (m_APU.pulse[n].len_cnt != 0 &&
-		!period_mutes &&
-		pulse_duties[m_APU.pulse[n].duty][m_APU.pulse[n].waveform_pos] &&
-		!sweep_mutes)
-	{
+	if (m_APU.pulse[n].len_cnt != 0 && !period_mutes && pulse_duties[m_APU.pulse[n].duty][m_APU.pulse[n].waveform_pos] && !sweep_mutes) {
 		new_output = m_APU.pulse[n].const_vol ? m_APU.pulse[n].vol : m_APU.pulse[n].env_vol;
 	}
 
@@ -2231,41 +2156,41 @@ void nesapu_device::update_pulse_output_level(unsigned n)
 }
 
 void nesapu_device::update_sweep_target_period(unsigned n) {
-    int addition = m_APU.pulse[n].period >> m_APU.pulse[n].sweep_shift;
-    // The adder on the first pulse channel is missing the carry in to the
-    // first bit for some unknown reason
-    if (m_APU.pulse[n].sweep_negate) 
+	int addition = m_APU.pulse[n].period >> m_APU.pulse[n].sweep_shift;
+
+	// The adder on the first pulse channel is missing the carry in to the
+	// first bit for some unknown reason
+	if (m_APU.pulse[n].sweep_negate) {
 		addition = (n == 0) ? ~addition : -addition;
-    m_APU.pulse[n].sweep_target_period = (int)m_APU.pulse[n].period + addition;
+	}
+
+	m_APU.pulse[n].sweep_target_period = (int)m_APU.pulse[n].period + addition;
 }
 
-void nesapu_device::update_noise_output_level()
-{
+void nesapu_device::update_noise_output_level() {
 	uint8_t new_output = 0;
 
-	if (noise_len_cnt != 0 && !(noise_shift_reg & 1))
+	if (noise_len_cnt != 0 && !(noise_shift_reg & 1)) {
 		new_output = noise_const_vol ? noise_vol : noise_env_vol;
+	}
 
 	noise_output_level = new_output;
 }
 
-uint8_t nesapu_device::read(offs_t offset)
-{
+uint8_t nesapu_device::read(offs_t offset) {
 	return m_maincpu6502->get_open_bus();
 }
 
 /* WRITE REGISTER VALUE */
-void nesapu_device::write(offs_t offset, u8 value)
-{
+void nesapu_device::write(offs_t offset, u8 value) {
 	//logerror("Write:  $%02X at $%04X, cpu: %d\n", value, offset, m_maincpu6502->total_cycles());
 
 	// For pulse channel registers, bit 2 selects the channel:
 	//   0 = pulse 1 ($4000-$4003)
 	//   1 = pulse 2 ($4004-$4007)
 	int chan = BIT(offset, 2);
-	
-	switch (offset)
-	{
+
+	switch (offset) {
 		/* squares */
 		case apu_t::WRA0: //$4000 / $4004	DDLC VVVV	Duty (D), envelope loop / length counter halt (L), constant volume (C), volume/envelope (V)
 		case apu_t::WRB0: // $4004
@@ -2323,7 +2248,6 @@ void nesapu_device::write(offs_t offset, u8 value)
 			// Recompute sweep target/output because the timer period changed.
 			update_sweep_target_period(chan);
 			update_pulse_output_level(chan);
-
 			break;
 
 		case apu_t::WRA3:
@@ -2346,16 +2270,14 @@ void nesapu_device::write(offs_t offset, u8 value)
 			}
 
 			// Bits 2:0 provide the high 3 bits of the 11-bit pulse timer period.
-			m_APU.pulse[chan].period =
-				(m_APU.pulse[chan].period & ~0x700) | ((value & 0x07) << 8);
+			m_APU.pulse[chan].period = (m_APU.pulse[chan].period & ~0x700) | ((value & 0x07) << 8);
 
 			// Writing here resets the duty sequencer and restarts the envelope.
-			m_APU.pulse[chan].waveform_pos   = 0;
+			m_APU.pulse[chan].waveform_pos = 0;
 			m_APU.pulse[chan].env_start_flag = true;
 
 			// Refresh sweep/output state after the timer update.
 			update_sweep_target_period(chan);
-
 			break;
 
 		/* triangle */
@@ -2430,7 +2352,6 @@ void nesapu_device::write(offs_t offset, u8 value)
 
 			// Low 4 bits select the noise timer period.
 			noise_period = noise_periods[value & 0x0F];
-			
 			break;
 
 		case apu_t::WRD3: // $400F
@@ -2459,8 +2380,9 @@ void nesapu_device::write(offs_t offset, u8 value)
 			dmc_loop_sample = (value & 0x40) != 0;
 
 			// Clearing IRQ enable also clears any pending DMC IRQ.
-			if (!new_irq_enable)
+			if (!new_irq_enable) {
 				set_dmc_irq(false);
+			}
 
 			// Latch the new IRQ enable state and update the playback period
 			// from the low 4-bit rate index.
@@ -2469,8 +2391,7 @@ void nesapu_device::write(offs_t offset, u8 value)
 			break;
 		}
 
-		case apu_t::WRE1:  // $4011: direct 7-bit DMC DAC load
-		{
+		case apu_t::WRE1: { // $4011: direct 7-bit DMC DAC load
 			dmc_counter = value & 0x7F;
 			break;
 		}
@@ -2485,24 +2406,23 @@ void nesapu_device::write(offs_t offset, u8 value)
 			dmc_sample_len = (value << 4) | 0x0001;
 			break;
 
-		case apu_t::IRQCTRL:  
-		{
+		case apu_t::IRQCTRL: {
 			//$4017	MI-- ----	Mode (M, 0 = 4-step, 1 = 5-step), IRQ inhibit flag (I)
 			// Bit 7 selects the frame counter mode:
 			//   0 = four-step sequence
 			//   1 = five-step sequence
 			new_frame_counter_mode = BIT(value, 7) ? FIVE_STEP : FOUR_STEP;
-			
+
 			// Bit 6 inhibits the frame IRQ.
 			// On hardware, writing $4017 with IRQ inhibit set also clears any
 			// currently pending/asserted frame IRQ condition.
 			inhibit_frame_irq = BIT(value, 6);
+
 			if (inhibit_frame_irq) {
 				// Inhibit immediately clears both the $4015-visible frame IRQ flag
 				// and the actual CPU IRQ output contribution.
 				frame_irq = false;
 				frame_irq_output = false;
-				//frame_irq_no_clear_before = 0;
 				delayed_frame_irq = 0;
 				delayed_frame_irq_clear = 0;
 				frame_irq_suppress_clear_cycle = 0;
@@ -2515,34 +2435,38 @@ void nesapu_device::write(offs_t offset, u8 value)
 			delayed_frame_timer_reset = ((m_maincpu_dev->total_cycles() & 0x01) == 0) ? 4 : 3;
 			break;
 		}
-		case apu_t::SMASK:	{			//status $4015
-			// logerror("	Write to $4015: CPU Cycles: %d, Value: $%02X, high/low: %d\n", cpu_cycle+1, value, apu_clk1_is_high);
+
+		case apu_t::SMASK: { //status $4015
 			// We need to clear the DMC IRQ before handling the DMC enable/disable in
 			// case a one-byte sample is loaded below, which will immediately fire a
 			// DMC IRQ
-			if (dmc_irq)
+			if (dmc_irq) {
 				set_dmc_irq(false);
-			
-			for (int n = 0; n < 2; ++n)
-			{
+			}
+
+			for (int n = 0; n < 2; ++n) {
 				const bool old_enabled = m_APU.pulse[n].enabled;
 				const bool new_enabled = (value & (1 << n)) != 0;
 
 				m_APU.pulse[n].enabled = new_enabled;
 
-				if (!new_enabled)
+				if (!new_enabled) {
 					m_APU.pulse[n].len_cnt = 0;
+				}
 
-				if (old_enabled != new_enabled || !new_enabled)
+				if (old_enabled != new_enabled || !new_enabled) {
 					update_pulse_output_level(n);
+				}
 			}
 
 			tri_enabled = (value & 0x04) != 0;
+
 			if (!tri_enabled) {
 				tri_len_cnt = 0;
 			}
 
 			noise_enabled = (value & 0x08) != 0;
+
 			if (!noise_enabled) {
 				noise_len_cnt = 0;
 				update_noise_output_level();
@@ -2552,93 +2476,77 @@ void nesapu_device::write(offs_t offset, u8 value)
 			// sample bytes that remain (greater than zero => enabled).
 			if (!(value & 0x10)) {
 				/*
-				DMC DMA suffers from two bugs related to sample playback stopping around the time a 
-				DMC output cycle ends, which is what empties the sample buffer and triggers a reload DMA. 
-				This can happen explicitly, where the sample is stopped by clearing $4015 D4.
+					DMC DMA suffers from two bugs related to sample playback stopping around the time a
+					DMC output cycle ends, which is what empties the sample buffer and triggers a reload DMA.
+					This can happen explicitly, where the sample is stopped by clearing $4015 D4.
 				*/
 				// explicit disabling DMC 0 cycle before reload causes the DMC to run 3 cycles
 				if (dmc_cycles_until_buffer_empty == (dmc_period * 8)) {
 					m_dma_engine.dmc.load_request = false;
-					
+
 					m_dma_engine.dmc.halt_read_cycles = 0;
 					m_dma_engine.dmc.halt_write_cycles = 0;
 
 					dma_engine_request_dmc(dmc_dma_mode::explicit_abort_0);
-					
+
 					detect_abort_0++;
-					//logerror("Explicit: DMC Bug Delay = 0\n");
-					//osd_printf_info("Explicit DMA Abort Detected: 0\n");
-				} // explicit disabling DMC 1 cycle before reload causes the DMC to run 4 cycles
-				else if (dmc_cycles_until_buffer_empty == 1) {
+				} else if (dmc_cycles_until_buffer_empty == 1) { // explicit disabling DMC 1 cycle before reload causes the DMC to run 4 cycles
 					m_dma_engine.dmc.load_request = false;
-					
+
 					m_dma_engine.dmc.halt_read_cycles = 0;
 					m_dma_engine.dmc.halt_write_cycles = 0;
 
 					dma_engine_request_dmc(dmc_dma_mode::explicit_abort_minus_1);
 
 					detect_abort_1++;
-					//logerror("Explicit: DMC Bug Delay = -1\n");
-					//osd_printf_info("Explicit DMA Abort Detected: -1\n");
-				} // explicit disabling DMC 2 cycle before reload causes the DMC to run 1 cycle
-				else if (dmc_cycles_until_buffer_empty == 2 || dmc_cycles_until_buffer_empty == 3) {
+				} else if (dmc_cycles_until_buffer_empty == 2 || dmc_cycles_until_buffer_empty == 3) { // explicit disabling DMC 2 cycle before reload causes the DMC to run 1 cycle
 					m_dma_engine.dmc.load_request = false;
-					
+
 					m_dma_engine.dmc.halt_read_cycles = 0;
 					m_dma_engine.dmc.halt_write_cycles = 0;
 
 					detect_abort_2_3++;
 
 					dma_engine_request_dmc(dmc_dma_mode::explicit_abort_minus_2_or_3);
-					
-					//logerror("Explicit: DMC Bug Delay = -2 or -3\n");
-					//osd_printf_info("Explicit DMA Abort Detected: -2 or -3\n");
 				}
+
 				dmc_bytes_remaining = 0;
 				m_dma_engine.dmc.load_request = false;
 			} else if (dmc_bytes_remaining == 0) {
 				dmc_sample_cur_addr = dmc_sample_start_addr;
 				dmc_bytes_remaining = dmc_sample_len;
-					
+
 				dmc_4015_load_defer_pending = false;
 				dmc_4015_load_defer_delay = 0;
-				
+
 				//test L detection
 				if (dmc_cycles_until_buffer_empty == 2) {
-					//osd_printf_info("Test L [APU Delta Modulation Channel] Detected\n");
 					detect_test_l++;
 					dmc_4015_load_defer_pending = true;
 					dmc_4015_load_defer_delay = 1;
-				} //test M detection
-				else if (dmc_cycles_until_buffer_empty == 1) {
-					//osd_printf_info("Test M [APU Delta Modulation Channel] Detected\n");
+				} else if (dmc_cycles_until_buffer_empty == 1) { //test M detection
 					detect_test_m++;
 					dmc_4015_load_defer_pending = true;
 					dmc_4015_load_defer_delay = 1;
-				} 
-					
+				}
+
 				const bool defer_4015_dmc_load = dmc_4015_load_defer_pending;
 
-				if (!dmc_sample_buffer_has_data && !defer_4015_dmc_load)
-				{
+				if (!dmc_sample_buffer_has_data && !defer_4015_dmc_load) {
 					m_dma_engine.dmc.load_request = true;
 					m_dma_engine.dmc.late_implicit_short = false;
 
-					const int implicitOffset = ((dmc_period * 8) - dmc_cycles_since_buffer_empty);
+					const int implicitOffset = (dmc_period * 8) - dmc_cycles_since_buffer_empty;
 
-					if (!dmc_loop_sample && dmc_bytes_remaining == 1)
-					{
-						if (implicitOffset == 6 || implicitOffset == 7)
-						{
+					if (!dmc_loop_sample && dmc_bytes_remaining == 1) {
+						if (implicitOffset == 6 || implicitOffset == 7) {
 							dma_engine_request_dmc(dmc_dma_mode::implicit_unexpected_6_7);
 
 							m_dma_engine.dmc.replay_pending = false;
 							m_dma_engine.dmc.clear_implicit_after_read = false;
 							m_dma_engine.dmc.late_implicit_short = false;
 							m_dma_engine.dmc.implicit_abort_halt_reads_required = 0;
-						}
-						else if (implicitOffset == 8 || implicitOffset == 9)
-						{
+						} else if (implicitOffset == 8 || implicitOffset == 9) {
 							dma_engine_request_dmc(dmc_dma_mode::implicit_abort_8_9);
 
 							m_dma_engine.dmc.replay_pending = false;
@@ -2651,11 +2559,8 @@ void nesapu_device::write(offs_t offset, u8 value)
 
 							detect_abort_8_9++;
 						}
-					}
-					else if (dmc_loop_sample && dmc_bytes_remaining == 1)
-					{
-						if (implicitOffset == 6 || implicitOffset == 7)
-						{
+					} else if (dmc_loop_sample && dmc_bytes_remaining == 1) {
+						if (implicitOffset == 6 || implicitOffset == 7) {
 							dma_engine_request_dmc(dmc_dma_mode::implicit_unexpected_6_7);
 
 							m_dma_engine.dmc.replay_pending = false;
@@ -2668,18 +2573,19 @@ void nesapu_device::write(offs_t offset, u8 value)
 					load_dmc_sample_byte();
 				}
 			}
-		break;
+
+			break;
 		}
+
 		default:
-			#ifdef MAME_DEBUG
+#ifdef MAME_DEBUG
 			logerror("invalid apu write: $%02X at $%04X\n", value, offset);
-			#endif
-		break;
+#endif
+			break;
 	}
 }
 
-void nesapu_device::do_oam_dma(address_space &space, const uint8_t page)
-{
+void nesapu_device::do_oam_dma(address_space &space, const uint8_t page) {
 	const uint16_t oam_base_addr = uint16_t(page) << 8;
 
 	dma_engine_request_oam(oam_base_addr);
@@ -2689,8 +2595,7 @@ void nesapu_device::do_oam_dma(address_space &space, const uint8_t page)
 	m_maincpu6502->oam_halt_next_read();
 }
 
-void nesapu_device::load_dmc_sample_byte()
-{
+void nesapu_device::load_dmc_sample_byte() {
 	m_dma_engine.dmc.halt_read_cycles = 0;
 	m_dma_engine.dmc.halt_write_cycles = 0;
 
@@ -2699,8 +2604,9 @@ void nesapu_device::load_dmc_sample_byte()
 	// A $4015 enable write can be followed closely by a DMC clock/reload.
 	// If a DMC sample-byte DMA is already pending, do not restart or
 	// reclassify it.
-	if (dmc_loading_sample_byte)
+	if (dmc_loading_sample_byte) {
 		return;
+	}
 
 	dmc_loading_sample_byte = true;
 
@@ -2714,20 +2620,19 @@ void nesapu_device::load_dmc_sample_byte()
 	// Special DMC stop-bug modes are detected before this point and must
 	// survive this request conversion.
 	// --------------------------------------------------
-	dmc_dma_mode dmc_mode = m_dma_engine.dmc.load_request
-		? dmc_dma_mode::normal_load
-		: dmc_dma_mode::normal_reload;
+	dmc_dma_mode dmc_mode = m_dma_engine.dmc.load_request ? dmc_dma_mode::normal_load : dmc_dma_mode::normal_reload;
 
-	if (m_dma_engine.dmc.mode == dmc_dma_mode::explicit_abort_0)
+	if (m_dma_engine.dmc.mode == dmc_dma_mode::explicit_abort_0) {
 		dmc_mode = dmc_dma_mode::explicit_abort_0;
-	else if (m_dma_engine.dmc.mode == dmc_dma_mode::explicit_abort_minus_1)
+	} else if (m_dma_engine.dmc.mode == dmc_dma_mode::explicit_abort_minus_1) {
 		dmc_mode = dmc_dma_mode::explicit_abort_minus_1;
-	else if (m_dma_engine.dmc.mode == dmc_dma_mode::explicit_abort_minus_2_or_3)
+	} else if (m_dma_engine.dmc.mode == dmc_dma_mode::explicit_abort_minus_2_or_3) {
 		dmc_mode = dmc_dma_mode::explicit_abort_minus_2_or_3;
-	else if (m_dma_engine.dmc.mode == dmc_dma_mode::implicit_abort_8_9)
+	} else if (m_dma_engine.dmc.mode == dmc_dma_mode::implicit_abort_8_9) {
 		dmc_mode = dmc_dma_mode::implicit_abort_8_9;
-	else if (m_dma_engine.dmc.mode == dmc_dma_mode::implicit_unexpected_6_7)
+	} else if (m_dma_engine.dmc.mode == dmc_dma_mode::implicit_unexpected_6_7) {
 		dmc_mode = dmc_dma_mode::implicit_unexpected_6_7;
+	}
 
 	// dma_engine_request_dmc() resets per-request state. Preserve the
 	// implicit-stop policy bits that were detected before the request was
@@ -2756,8 +2661,9 @@ void nesapu_device::load_dmc_sample_byte()
 	// into the later one-cycle aborted DMA and breaks the implicit abort timing
 	// test.
 	// --------------------------------------------------
-	if (dmc_mode == dmc_dma_mode::implicit_abort_8_9)
+	if (dmc_mode == dmc_dma_mode::implicit_abort_8_9) {
 		m_dma_engine.dmc.implicit_abort_halt_reads_required = 0;
+	}
 
 	// --------------------------------------------------
 	// Reload timing counters.
@@ -2765,12 +2671,11 @@ void nesapu_device::load_dmc_sample_byte()
 	// These are part of the DMC reload/stop-bug detector and must be reset
 	// when the sample-byte request is armed, not later in dmc_read().
 	// --------------------------------------------------
-	dmc_cycles_until_buffer_empty = (dmc_period * 8);
+	dmc_cycles_until_buffer_empty = dmc_period * 8;
 	dmc_cycles_since_buffer_empty = -1;
 }
 
-void nesapu_device::dmc_read()
-{
+void nesapu_device::dmc_read() {
 	// --------------------------------------------------
 	// Explicit DMC abort cleanup.
 	//
@@ -2785,14 +2690,10 @@ void nesapu_device::dmc_read()
 	// This preserves the old passing behavior where explicit 0, -1, and
 	// -2/-3 all returned at the top of dmc_read().
 	// --------------------------------------------------
-	if (m_dma_engine.dmc.mode == dmc_dma_mode::explicit_abort_0 ||
-		m_dma_engine.dmc.mode == dmc_dma_mode::explicit_abort_minus_1 ||
-		m_dma_engine.dmc.mode == dmc_dma_mode::explicit_abort_minus_2_or_3)
-	{
+	if (m_dma_engine.dmc.mode == dmc_dma_mode::explicit_abort_0 || m_dma_engine.dmc.mode == dmc_dma_mode::explicit_abort_minus_1 || m_dma_engine.dmc.mode == dmc_dma_mode::explicit_abort_minus_2_or_3) {
 		dma_engine_request_dmc(dmc_dma_mode::none);
 
-		if (delayed_frame_irq_after_dmc)
-		{
+		if (delayed_frame_irq_after_dmc) {
 			// A frame IRQ was held back while DMC loading/abort handling was active.
 			delayed_frame_irq_after_dmc = false;
 			//delayed_frame_irq = 2;
@@ -2812,8 +2713,7 @@ void nesapu_device::dmc_read()
 	// can be fetched again. After the replay read completes, clear the replay
 	// policy state and return to normal DMC behavior.
 	// --------------------------------------------------
-	if (m_dma_engine.dmc.clear_implicit_after_read)
-	{
+	if (m_dma_engine.dmc.clear_implicit_after_read) {
 		m_dma_engine.dmc.implicit_abort_halt_reads_required = 0;
 
 		m_dma_engine.dmc.replay_pending = false;
@@ -2824,14 +2724,12 @@ void nesapu_device::dmc_read()
 	}
 
 	// DMC DMA performs the actual sample fetch only on a GET cycle.
-	if (!dma_engine_is_get_cycle())
-	{
+	if (!dma_engine_is_get_cycle()) {
 		logerror("Detected Error: DMC_READ On Put Cycle\n");
 		osd_printf_info("Detected Error: DMC_READ On Put Cycle\n");
 	}
 
-	if (dmc_bytes_remaining > 0)
-	{
+	if (dmc_bytes_remaining > 0) {
 		const uint16_t cpu_bus_addr = m_dmc_cpu_bus_latch;
 
 		// --------------------------------------------------
@@ -2847,15 +2745,12 @@ void nesapu_device::dmc_read()
 		const uint8_t raw_dmc_sample = dmc_sample_buffer;
 		uint8_t external_bus = raw_dmc_sample;
 
-		if ((cpu_bus_addr & 0xffe0) == 0x4000)
-		{
+		if ((cpu_bus_addr & 0xffe0) == 0x4000) {
 			const uint16_t apu_reg = 0x4000 | (dmc_sample_cur_addr & 0x1f);
 
-			if (apu_reg == 0x4015)
-			{
+			if (apu_reg == 0x4015) {
 				status_r();
-			}
-			else if (apu_reg == 0x4016 || apu_reg == 0x4017) {
+			} else if (apu_reg == 0x4016 || apu_reg == 0x4017) {
 				// The cartridge drives the DMC sample onto the external bus before
 				// the mirrored controller register is activated. Floating controller
 				// bits therefore retain the corresponding bits from the sample.
@@ -2885,15 +2780,11 @@ void nesapu_device::dmc_read()
 
 		dmc_sample_cur_addr = ((dmc_sample_cur_addr + 1) & 0x7fff) | 0x8000;
 
-		if (--dmc_bytes_remaining == 0)
-		{
-			if (dmc_loop_sample)
-			{
+		if (--dmc_bytes_remaining == 0) {
+			if (dmc_loop_sample) {
 				dmc_sample_cur_addr = dmc_sample_start_addr;
 				dmc_bytes_remaining = dmc_sample_len;
-			}
-			else if (dmc_irq_enabled)
-			{
+			} else if (dmc_irq_enabled) {
 				set_dmc_irq(true);
 			}
 		}
@@ -2906,16 +2797,14 @@ void nesapu_device::dmc_read()
 	// DMC loading/abort handling is active. Once the DMC path completes, arm
 	// the normal delayed frame IRQ publication.
 	// --------------------------------------------------
-	if (delayed_frame_irq_after_dmc)
-	{
+	if (delayed_frame_irq_after_dmc) {
 		delayed_frame_irq_after_dmc = false;
 		//delayed_frame_irq = 2;
 		delayed_frame_irq = apu_clk1_is_high ? 2 : 1;
 	}
 }
 
-void nesapu_device::set_frame_irq(bool s)
-{
+void nesapu_device::set_frame_irq(bool s) {
 	if (!s) {
 		// Do not clear frame_irq immediately here.
 		//
@@ -2931,10 +2820,11 @@ void nesapu_device::set_frame_irq(bool s)
 		// 0 means inactive.
 		frame_irq_suppress_clear_cycle = 0;
 
-		if (apu_clk1_is_high)
-			delayed_frame_irq_clear = 1;	// put -> get clears now
-		else
-			delayed_frame_irq_clear = 2;	// get -> put does not clear yet
+		if (apu_clk1_is_high) {
+			delayed_frame_irq_clear = 1; // put -> get clears now
+		} else {
+			delayed_frame_irq_clear = 2; // get -> put does not clear yet
+		}
 
 		return;
 	}
@@ -2959,8 +2849,7 @@ void nesapu_device::set_frame_irq(bool s)
 			// service point in tick(), so add one extra count:
 			delayed_frame_irq = apu_clk1_is_high ? 3 : 4;
 			delayed_frame_irq_after_dmc = false;
-		}
-		else {
+		} else {
 			// DMC is loading the sample byte. Do not publish the CPU IRQ output
 			// yet. dmc_read() or the DMC abort paths will release this through
 			// delayed_frame_irq once the DMC read/loading path completes.
@@ -2970,17 +2859,14 @@ void nesapu_device::set_frame_irq(bool s)
 	}
 }
 
-void nesapu_device::set_dmc_irq(bool s)
-{
+void nesapu_device::set_dmc_irq(bool s) {
 	dmc_irq = s;
 
-	if (s)
-	{
+	if (s) {
 		// Publish DMC IRQ to the CPU after the core's IRQ-output delay.
 		delayed_dmc_irq = 2;
 	}
-	else
-	{
+	else {
 		// Clearing DMC IRQ is immediate from the APU side.
 		delayed_dmc_irq = 0;
 
@@ -2989,15 +2875,13 @@ void nesapu_device::set_dmc_irq(bool s)
 	}
 }
 
-void nesapu_device::update_irq_output()
-{
+void nesapu_device::update_irq_output() {
 	// frame_irq is only the $4015-visible status flag.
 	// frame_irq_output is the actual frame IRQ contribution to the CPU IRQ line.
 	m_irq_handler(dmc_irq || (frame_irq_output && !inhibit_frame_irq));
 }
 
-void nesapu_device::set_frame_irq_flag_only()
-{
+void nesapu_device::set_frame_irq_flag_only() {
 	frame_irq = true;
 	frame_irq_output = false;
 
@@ -3013,24 +2897,24 @@ void nesapu_device::set_frame_irq_flag_only()
 }
 
 // Read status register at $4015
-u8 nesapu_device::status_r()
-{
-	uint8_t res =
-		(dmc_irq                   		 << 7) |
-		(frame_irq                 		 << 6) |
-		(m_maincpu6502->get_data_bus() & 0x20) |
-		((dmc_bytes_remaining > 0) 		 << 4) |
-		((noise_len_cnt > 0)	 		 << 3) |
-		((tri_len_cnt > 0) 				 << 2) |
-		((m_APU.pulse[1].len_cnt > 0) 	 << 1) |
-		((m_APU.pulse[0].len_cnt > 0)	 << 0);
+u8 nesapu_device::status_r() {
+	uint8_t res = 
+		(dmc_irq << 7) | 
+		(frame_irq << 6) | 
+		(m_maincpu6502->get_data_bus() & 0x20) | 
+		((dmc_bytes_remaining > 0) << 4) | 
+		((noise_len_cnt > 0) << 3) | 
+		((tri_len_cnt > 0) << 2) | 
+		((m_APU.pulse[1].len_cnt > 0) << 1) | 
+		((m_APU.pulse[0].len_cnt > 0) << 0);
 
 	// Reading $4015 at specific intervals after the IRQ flag is set should
 	// not clear the frame IRQ flag yet.
 	//   0  = clear is allowed
 	//   >0 = reads may see bit 6, but must not clear the flag yet
-	if (frame_irq)
+	if (frame_irq) {
 		set_frame_irq(false);
+	}
 
 	return res;
 }
@@ -3039,12 +2923,12 @@ u8 nesapu_device::status_r()
 //-------------------------------------------------
 //  sound_stream_update - handle a stream update
 //-------------------------------------------------
-void nesapu_device::push_out_sample(sound_stream::sample_t sample)
-{
+
+void nesapu_device::push_out_sample(sound_stream::sample_t sample) {
 	const uint32_t next_w = (m_out_fifo_w + 1) % OUT_FIFO_SIZE;
 
 	if (next_w == m_out_fifo_r) {
-		 ++m_audio_fifo_overflows;
+		++m_audio_fifo_overflows;
 		m_out_fifo_r = (m_out_fifo_r + 1) % OUT_FIFO_SIZE;
 	}
 
@@ -3053,8 +2937,7 @@ void nesapu_device::push_out_sample(sound_stream::sample_t sample)
 	m_last_out_sample = sample;
 }
 
-bool nesapu_device::pop_out_sample(sound_stream::sample_t &sample)
-{
+bool nesapu_device::pop_out_sample(sound_stream::sample_t &sample) {
 	if (m_out_fifo_r == m_out_fifo_w) {
 		++m_audio_fifo_underflows;
 		return false;
@@ -3065,32 +2948,24 @@ bool nesapu_device::pop_out_sample(sound_stream::sample_t &sample)
 	return true;
 }
 
-void nesapu_device::accumulate_output_sample(sound_stream::sample_t level)
-{
+void nesapu_device::accumulate_output_sample(sound_stream::sample_t level) {
 	// Assert that m_resample_step is valid
-    assert(m_resample_step > 0); // Ensures resample step is correctly initialized
-	
+	assert(m_resample_step > 0); // Ensures resample step is correctly initialized
+
 	constexpr uint64_t ONE = 1ULL << 32;
 
 	uint64_t remaining = ONE;
 
-	while (remaining > 0)
-	{
-		//uint64_t to_boundary = m_resample_step - m_resample_phase;
-		uint64_t to_boundary =
-			(m_resample_phase < m_resample_step)
-				? (m_resample_step - m_resample_phase)
-				: 0;
+	while (remaining > 0) {
+		uint64_t to_boundary = (m_resample_phase < m_resample_step) ? (m_resample_step - m_resample_phase) : 0;
 		uint64_t slice = (remaining < to_boundary) ? remaining : to_boundary;
 
 		m_output_accum += level * sound_stream::sample_t(double(slice) / double(ONE));
 		m_resample_phase += slice;
 		remaining -= slice;
 
-		if (m_resample_phase >= m_resample_step)
-		{
-			sound_stream::sample_t sample =
-				m_output_accum / sound_stream::sample_t(double(m_resample_step) / double(ONE));
+		if (m_resample_phase >= m_resample_step) {
+			sound_stream::sample_t sample = m_output_accum / sound_stream::sample_t(double(m_resample_step) / double(ONE));
 
 			sample = apply_analog_filter(sample);
 			push_out_sample(sample);
@@ -3101,8 +2976,7 @@ void nesapu_device::accumulate_output_sample(sound_stream::sample_t level)
 	}
 }
 
-sound_stream::sample_t nesapu_device::apply_analog_filter(sound_stream::sample_t in)
-{
+sound_stream::sample_t nesapu_device::apply_analog_filter(sound_stream::sample_t in) {
 	const double sr = double(m_stream->sample_rate());
 
 	assert(sr > 0.0);
@@ -3111,66 +2985,48 @@ sound_stream::sample_t nesapu_device::apply_analog_filter(sound_stream::sample_t
 	//   1st-order high-pass around 90 Hz
 	//   1st-order high-pass around 440 Hz
 	//   1st-order low-pass around 14 kHz
-	const sound_stream::sample_t a_hp90 =
-		sound_stream::sample_t(std::exp(-2.0 * std::numbers::pi * 90.0 / sr));
-
-	const sound_stream::sample_t a_hp440 =
-		sound_stream::sample_t(std::exp(-2.0 * std::numbers::pi * 440.0 / sr));
-
-	const sound_stream::sample_t a_lp14k =
-		sound_stream::sample_t(1.0 - std::exp(-2.0 * std::numbers::pi * 14000.0 / sr));
+	const sound_stream::sample_t a_hp90 = sound_stream::sample_t(std::exp(-2.0 * std::numbers::pi * 90.0 / sr));
+	const sound_stream::sample_t a_hp440 = sound_stream::sample_t(std::exp(-2.0 * std::numbers::pi * 440.0 / sr));
+	const sound_stream::sample_t a_lp14k = sound_stream::sample_t(1.0 - std::exp(-2.0 * std::numbers::pi * 14000.0 / sr));
 
 	// HPF 90 Hz
-	const sound_stream::sample_t hp90 =
-		a_hp90 * (m_hp90_prev_out + in - m_hp90_prev_in);
+	const sound_stream::sample_t hp90 = a_hp90 * (m_hp90_prev_out + in - m_hp90_prev_in);
 
 	m_hp90_prev_in = in;
 	m_hp90_prev_out = hp90;
 
 	// HPF 440 Hz
-	const sound_stream::sample_t hp440 =
-		a_hp440 * (m_hp440_prev_out + hp90 - m_hp440_prev_in);
+	const sound_stream::sample_t hp440 = a_hp440 * (m_hp440_prev_out + hp90 - m_hp440_prev_in);
 
 	m_hp440_prev_in = hp90;
 	m_hp440_prev_out = hp440;
 
 	// LPF 14 kHz
-	m_lp14k_prev_out =
-		m_lp14k_prev_out + a_lp14k * (hp440 - m_lp14k_prev_out);
+	m_lp14k_prev_out = m_lp14k_prev_out + a_lp14k * (hp440 - m_lp14k_prev_out);
 
 	return m_lp14k_prev_out;
 }
 
-sound_stream::sample_t nesapu_device::calc_current_output()
-{
-	const int pulse_sum =
-		m_APU.pulse[0].output_level + m_APU.pulse[1].output_level;
+sound_stream::sample_t nesapu_device::calc_current_output() {
+	const int pulse_sum = m_APU.pulse[0].output_level + m_APU.pulse[1].output_level;
 
 	// Hardware does not mute triangle periods 0/1.
 	// The raw sequencer runs ultrasonically; the analog output is effectively
-	// a center-ish DC level after filtering.  Use this only for mixer output,
+	// a center-ish DC level after filtering. Use this only for mixer output,
 	// not for the triangle sequencer state.
-	const int tri_mixer_level =
-		(tri_len_cnt > 0 && tri_lin_cnt > 0 && tri_period <= 1)
-			? 7
-			: tri_output_level;
+	const int tri_mixer_level = (tri_len_cnt > 0 && tri_lin_cnt > 0 && tri_period <= 1) ? 7 : tri_output_level;
 
-	return
-		m_square_lut[pulse_sum] +
-		m_tnd_lut[tri_mixer_level][noise_output_level][dmc_counter];
+	return m_square_lut[pulse_sum] + m_tnd_lut[tri_mixer_level][noise_output_level][dmc_counter];
 }
 
-void nesapu_device::sound_stream_update(sound_stream &stream)
-{
-	for (int sampindex = 0; sampindex < stream.samples(); sampindex++)
-	{
+void nesapu_device::sound_stream_update(sound_stream &stream) {
+	for (int sampindex = 0; sampindex < stream.samples(); sampindex++) {
 		sound_stream::sample_t sample;
 
-		if (!pop_out_sample(sample))
+		if (!pop_out_sample(sample)) {
 			sample = m_last_out_sample;
+		}
 
 		stream.put(0, sampindex, sample);
 	}
 }
-
-

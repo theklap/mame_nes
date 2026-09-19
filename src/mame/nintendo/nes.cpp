@@ -56,26 +56,339 @@ public:
 
 bool g_nes_p1_a_pressed_edge = false;
 
-static std::vector<open_bus_range> compute_open_bus_ranges(nes_cart_slot_device *cartslot, bool cart_reads_ex)
+static std::vector<open_bus_range> compute_open_bus_ranges(
+	nes_cart_slot_device *cartslot,
+	bool cart_reads_ex)
 {
 	std::vector<open_bus_range> ranges;
+
 	if (!cartslot || !cartslot->m_cart)
 		return ranges;
 
 	device_nes_cart_interface *cart = cartslot->m_cart;
 	const int pcb_id = cartslot->get_pcb_id();
+
+	// $4018-$401F is normally disabled/test APU/IO space on retail NES.
+	// No normal device drives reads here, so it should read as CPU open bus.
 	ranges.push_back({ 0x4018, 0x401f });
+
+	// $4020-$40FF is cartridge expansion space.
+	// Only boards that install read_ex() should drive reads here.
 	if (!cart_reads_ex)
 		ranges.push_back({ 0x4020, 0x40ff });
 
+	// $4100-$5FFF is open bus only for simple boards that do not decode
+	// low cartridge space.
+
+	// NROM-368 maps PRG ROM from $4800-$FFFF.
+	// Therefore only $4100-$47FF is open bus in the low cart area,
+	// and $6000-$7FFF must NOT be treated as open bus just because
+	// the cart has no PRG RAM.
 	if (pcb_id == STD_NROM368)
 	{
 		ranges.push_back({ 0x4100, 0x47ff });
 		return ranges;
 	}
 
-	switch (pcb_id)
+	if (pcb_id == CAMERICA_ALADDIN)
 	{
+		ranges.push_back({ 0x4100, 0x5fff });
+		ranges.push_back({ 0x6000, 0x7fff });
+		return ranges;
+	}
+
+	if (pcb_id == BATMAP_SRRX)
+	{
+		ranges.push_back({ 0x4100, 0x47ff });
+		return ranges;
+	}
+
+	// MMC5 only drives specific readable registers in $4100-$5FFF.
+	// ExRAM at $5C00-$5FFF is runtime-dependent and handled separately.
+	if (pcb_id == STD_EXROM) {
+		ranges.push_back({ 0x4100, 0x500f });
+		ranges.push_back({ 0x5011, 0x5014 });
+		ranges.push_back({ 0x5016, 0x5203 });
+		ranges.push_back({ 0x5207, 0x5bff });
+		return ranges;
+	}
+
+	if (pcb_id == UNL_SMB2J) {
+		ranges.push_back({ 0x4100, 0x4fff });
+		return ranges;
+	}
+
+	if (pcb_id == BTL_SMB2JA) {
+		ranges.push_back({ 0x4100, 0x5fff });
+		return ranges;
+	}
+
+	if (pcb_id == BTL_SMB2JB) {
+		ranges.push_back({ 0x4100, 0x5fff });
+		return ranges;
+	}
+
+	if (pcb_id == BMC_N32_4IN1) {
+		ranges.push_back({ 0x4100, 0x5fff });
+		return ranges;
+	}
+
+	if (pcb_id == BTL_0353) {
+		ranges.push_back({ 0x4100, 0x5fff });
+		return ranges;
+	}
+
+	if (pcb_id == BTL_09034A) {
+		ranges.push_back({ 0x4020, 0x4041 });
+		ranges.push_back({ 0x4056, 0x5fff });
+		return ranges;
+	}
+
+	if (pcb_id == BTL_L001) {
+		ranges.push_back({ 0x4100, 0x7fff });
+		return ranges;
+	}
+
+	if (pcb_id == BTL_BATMANFS) {
+		ranges.push_back({ 0x4100, 0x7fff });
+		return ranges;
+	}
+
+	if (pcb_id == BTL_PALTHENA) {
+		ranges.push_back({ 0x4100, 0x5fff });
+		return ranges;
+	}
+
+	if (pcb_id == BTL_TOBIDASE) {
+		ranges.push_back({ 0x4100, 0x5fff });
+		return ranges;
+	}
+
+	if (pcb_id == UNL_LH32) {
+		ranges.push_back({ 0x4100, 0x5fff });
+		return ranges;
+	}
+
+	if (pcb_id == UNL_LH42) {
+		ranges.push_back({ 0x4100, 0x5fff });
+		ranges.push_back({ 0x6000, 0x7fff });
+		return ranges;
+	}
+
+	if (pcb_id == UNL_LG25) {
+		ranges.push_back({ 0x4100, 0x5fff });
+		return ranges;
+	}
+
+	if (pcb_id == UNL_LH10) {
+		ranges.push_back({ 0x4100, 0x5fff });
+		return ranges;
+	}
+
+	if (pcb_id == UNL_LH51) {
+		ranges.push_back({ 0x4100, 0x5fff });
+		return ranges;
+	}
+
+	if (pcb_id == UNL_LH53) {
+		ranges.push_back({ 0x4100, 0x5fff });
+		return ranges;
+	}
+
+	if (pcb_id == UNL_2708) {
+		ranges.push_back({ 0x4100, 0x5fff });
+		return ranges;
+	}
+
+	if (pcb_id == UNL_AC08) {
+		ranges.push_back({ 0x4100, 0x5fff });
+		return ranges;
+	}
+
+	if (pcb_id == UNL_MMALEE) {
+		ranges.push_back({ 0x4100, 0x5fff });
+		return ranges;
+	}
+
+	if (pcb_id == CNE_FSB) {
+		ranges.push_back({ 0x4100, 0x5fff });
+		ranges.push_back({ 0x6000, 0x67ff });
+		ranges.push_back({ 0x7000, 0x7fff });
+		return ranges;
+	}
+
+	if (pcb_id == CONY_BOARD || pcb_id == CONY1K_BOARD) {
+		ranges.push_back({ 0x4100, 0x4fff });
+		return ranges;
+	}
+
+	if (pcb_id == YOKO_BOARD) {
+		ranges.push_back({ 0x4100, 0x4fff });
+		return ranges;
+	}
+
+	if (pcb_id == BANDAI_DATACH) {
+		ranges.push_back({ 0x4100, 0x5fff });
+		return ranges;
+	}
+
+	if (pcb_id == FARID_SLROM8IN1) {
+		ranges.push_back({ 0x4100, 0x5fff });
+		ranges.push_back({ 0x6000, 0x7fff });
+		return ranges;
+	}
+
+	if (pcb_id == UNL_158B)
+	{
+		ranges.push_back({ 0x4100, 0x4fff });
+		return ranges;
+	}
+
+	if (pcb_id == GOUDER_37017) {
+		ranges.push_back({ 0x4100, 0x57ff });
+		ranges.push_back({ 0x6000, 0x77ff });
+		return ranges;
+	}
+
+	if (pcb_id == SACHEN_SA9602B) {
+		ranges.push_back({ 0x4100, 0x5fff });
+		ranges.push_back({ 0x6000, 0x7fff });
+		return ranges;
+	}
+
+	if (pcb_id == SACHEN_SHERO) {
+		ranges.push_back({ 0x4101, 0x5fff });
+		return ranges;
+	}
+
+	if (pcb_id == SACHEN_ZGDH) {
+		ranges.push_back({ 0x4100, 0x5fff });
+		return ranges;
+	}
+
+	if (pcb_id == BMC_HIK8IN1) {
+		ranges.push_back({ 0x4100, 0x4fff });
+		return ranges;
+	}
+
+	if (pcb_id == SMD133_BOARD) {
+		ranges.push_back({ 0x4100, 0x4fff });
+		return ranges;
+	}
+
+	if (pcb_id == KAY_BOARD)
+		ranges.push_back({ 0x4100, 0x4fff });
+
+	if (pcb_id == KAISER_KS7017) {
+		ranges.push_back({ 0x4020, 0x402f });
+		ranges.push_back({ 0x4031, 0x40ff });
+		ranges.push_back({ 0x4100, 0x5fff });
+	}
+
+	if (pcb_id == STD_EVENT2) {
+		ranges.push_back({ 0x4100, 0x4fff });
+	}
+
+	// Namcot 163 drives its sound-data and IRQ registers from $4800-$5FFF.
+	// Nothing drives reads from $4100-$47FF.
+	if (pcb_id == NAMCOT_163)
+		ranges.push_back({ 0x4100, 0x47ff });
+
+	// J.Y. ASIC boards decode registers throughout $5000-$5FFF.
+	// Only $4100-$4FFF is completely undriven.
+	if (pcb_id == JYCOMPANY_A || pcb_id == JYCOMPANY_B || pcb_id == JYCOMPANY_C)
+		ranges.push_back({ 0x4100, 0x4fff });
+
+	// Mario Baby only drives $4030 in cartridge expansion space.
+	// The remaining expansion addresses read as CPU open bus.
+	if (pcb_id == BTL_MARIOBABY) {
+		ranges.push_back({ 0x4020, 0x402f });
+		ranges.push_back({ 0x4031, 0x40ff });
+	}
+
+	if (pcb_id == UNL_KOF96)
+		ranges.push_back({ 0x4100, 0x4fff });
+
+	switch (pcb_id) {
+		case AVE_NINA01:
+		case AVE_NINA06:
+		case AVE_MAXI15:
+		case BANDAI_OEKAKIDS:
+		case BANDAI_FCG:
+		case BANDAI_LZ93:
+		case BANDAI_LZ93EX1:
+		case BANDAI_LZ93EX2:
+		case BANDAI_FJUMP2:
+		case BANDAI_DATACH:
+		case BANDAI_KARAOKE:
+		case BATMAP_000:
+		case BMC_BENSHIENG:
+		case BTL_AISENSHINICOL:
+		case BTL_MARIOBABY:
+		case BTL_SMB3:
+		case BTL_CONTRAJ:
+		case BTL_DRAGONNINJA:
+		case CAMERICA_ALADDIN:
+		case CAMERICA_BF9093:
+		case CAMERICA_BF9096:
+		case CAMERICA_BF9096_ALT:
+		case CAMERICA_GOLDENFIVE:
+		case CNE_DECATHLON:
+		case CNE_SHLZ:
+		case DIS_74X161X161X32:
+		case DIS_74X139X74:
+		case DIS_74X377:
+		case DIS_74X161X138:
+		case HENGG_SRICH:
+		case HENGG_XHZS:	//legacy need to move mapper 179 to mapper 176
+		case HES_BOARD:
+		case IREM_LROG017:
+		case IREM_HOLYDIVR:
+		case IREM_TAM_S1:
+		case IREM_G101:
+		case IREM_H3001:
+		case JALECO_JF11:
+		case JALECO_JF13:
+		case JALECO_JF16:
+		case JALECO_JF17:
+		case JALECO_JF17_ADPCM:
+		case JALECO_JF19:
+		case JALECO_JF19_ADPCM:
+		case JALECO_SS88006:
+		case JALECO_JF23:
+		case JALECO_JF24:
+		case JALECO_JF29:
+		case JALECO_JF33:
+		case JNCOTA_KT1001:
+		case KAISER_KS106C:
+		case KAISER_KS7058:
+		case KAISER_KS7022:
+		case KAISER_KS7032:
+		case KAISER_KS202:
+		case KAISER_KS7016:
+		case KAISER_KS7016B:
+		case KAISER_KS7021A:
+		case KAISER_KS7010:
+		case KAISER_KS7012:
+		case KAISER_KS7013B:
+		case KAISER_KS7030:
+		case KAISER_KS7031:
+		case KAISER_KS7037:
+		case KAISER_KS7057:
+		case NAMCOT_34X3:
+		case NAMCOT_3446:
+		case NAMCOT_3425:
+		case NAMCOT_175:
+		case NAMCOT_340:
+		case STD_EVENT:
+		case STD_DISKSYS:
+		case STD_PXROM:
+		case STD_SXROM:
+		case STD_SNROM:
+		case STD_SOROM:
+		case STD_SUROM:
+		case STD_SXROM_EXT:
+		case STD_SZROM:
 		case STD_NROM:
 		case STD_UXROM:
 		case STD_UN1ROM:
@@ -86,40 +399,160 @@ static std::vector<open_bus_range> compute_open_bus_ranges(nes_cart_slot_device 
 		case STD_AMROM:
 		case STD_BXROM:
 		case STD_GXROM:
+		case STD_TXROM:
+		case STD_TXSROM:
+		case STD_TKROM:
+		case STD_TQROM:
+		case STD_HKROM:
+		case NES_QJ:
+		case PAL_ZZ:
+		case KONAMI_VRC1:
+		case KONAMI_VRC2:
+		case KONAMI_VRC3:
+		case KONAMI_VRC4:
+		case KONAMI_VRC6:
+		case KONAMI_VRC7:
+		case SACHEN_SA0037:
 		case SUNSOFT_1:
 		case SUNSOFT_2:
 		case SUNSOFT_3:
+		case TENGEN_800032:
+		case TENGEN_800037:
+		case UNL_ACTION53:
+		case UNL_DH08:
+		case UNL_LE05:
+		case UNL_LH28_LH54:
+		case UNL_LH31:
+		case UNL_RT01:
+		case UNL_NINJARYU:
+		case BMC_JY012005:
+		case BMC_JY820845C:
+		case BMC_SRPG_5IN1:
+		case TXC_22110:
+		case STD_FXROM:
+		case NITRA_TDA:
+		case UNL_BMW8544:
+		case UNL_FS6:
+		case BTL_SBROS11:
+		case UNL_MALISB:
+		case BMC_FAMILY_4646:
+		case BTL_PIKACHUY2K:
+		case UNL_8237:
+		case UNL_8237A:
+		case KASING_BOARD:
+		case SUPERGAME_LIONKING:
+		case SUPERGAME_BOOGERMAN:
+		case UNL_H2288:
+		case TXC_TW:
+		case UNL_KOF97:
+		case UNL_SF3:
+		case COCOMA_BOARD:
+		case UNL_A9746:
+		case BMC_NT639:
+		case BMC_S24IN1SC03:
+		case BMC_SUPERBIG_7IN1:
+		case BMC_JY302:
+		case BMC_SFC12:
+		case BMC_A88S1:
+		case BMC_830832C:
+		case BMC_YY841101C:
+		case BMC_YY841155C:
+		case BMC_PJOY84:
 			ranges.push_back({ 0x4100, 0x5fff });
 			break;
+
 		default:
 			break;
 	}
 
-	if (!cart->get_prgram_size() && !cart->get_battery_size())
+	// $6000-$7FFF:
+	//
+	// If the loaded cart reports no PRG WRAM and no PRG NVWRAM, then the
+	// normal PRG-RAM area is undriven and should read as CPU open bus.
+	//
+	// The RAM sizes here already come from the loader's best source:
+	//   - softlist PCB data
+	//   - NES 2.0 header
+	//   - iNES/header fallback
+	//   - extrainfo/overrides
+	//
+	// Only exclude boards that are known to decode $6000-$7FFF for something
+	// other than normal PRG RAM, such as mapper registers, protection, EEPROM,
+	// or special status reads.
+
+	// MMC6/HKROM contains 1KB of internal RAM decoded in $7000-$7FFF.
+	// The cartridge does not drive reads from $6000-$6FFF.
+	if (pcb_id == STD_HKROM)
+		ranges.push_back({ 0x6000, 0x6fff });
+
+	const u32 prg_ram_size = cart->get_prgram_size() + cart->get_battery_size();
+
+	if (pcb_id == KONAMI_VRC4 && prg_ram_size == 0x0800)
+		ranges.push_back({ 0x7000, 0x7fff });
+
+	const bool no_prg_ram = prg_ram_size == 0;
+
+	//const bool no_prg_ram = !cart->get_prgram_size() && !cart->get_battery_size();
+
+	if (no_prg_ram)
 	{
 		bool range_6000_is_special = false;
+
 		switch (pcb_id)
 		{
-			case STD_EXROM:
-			case STD_HKROM:
-			case UNL_BMW8544:
-			case KONAMI_VRC6:
-				range_6000_is_special = true;
-				break;
 			case KONAMI_VRC2:
 				range_6000_is_special = true;
 				ranges.push_back({ 0x7000, 0x7fff });
 				break;
+			//case STD_EXROM:
+			case BANDAI_LZ93EX1:
+			case BANDAI_LZ93EX2:
+			case BANDAI_KARAOKE:
+			case STD_HKROM:
+			//case STD_SZROM:
+			case UNL_BMW8544:
 			case SUNSOFT_FME7:
 			case SUNSOFT_5:
+			case BTL_AISENSHINICOL:
+			case BTL_MARIOBABY:
+			case BTL_YUNG08:
+			case JYCOMPANY_A:
+			case JYCOMPANY_B:
+			case JYCOMPANY_C:
+			case SVISION16_BOARD:
+			case UNL_DH08:
+			case UNL_LE05:
+			case UNL_LH28_LH54:
+			case UNL_LH31:
+			case UNL_2708:
+			case UNL_AC08:
+			case UNL_MMALEE:
+			case GG_NROM:
+			case KAISER_KS7032:
+			case KAISER_KS7016:
+			case KAISER_KS7016B:
+			case KAISER_KS7010:
+			case KAISER_KS7030:
+			case KAISER_KS7031:
+			case KAISER_KS7037:
+			case KAISER_KS7057:
+			case KASING_BOARD:
+			case SUPERGAME_LIONKING:
+			case SUPERGAME_BOOGERMAN:
+			case UNL_603_5052:
+			case BMC_FK23C:
+			case BMC_FK23CA:
 				range_6000_is_special = true;
 				break;
+
 			default:
 				break;
 		}
+
 		if (!range_6000_is_special)
 			ranges.push_back({ 0x6000, 0x7fff });
 	}
+
 	return ranges;
 }
 
@@ -253,16 +686,20 @@ void nes_state::machine_start()
 		m_ppu->space(AS_PROGRAM).install_readwrite_handler(0x2000, 0x3eff, read8sm_delegate(*m_cartslot->m_cart, FUNC(device_nes_cart_interface::nt_r)), write8sm_delegate(*m_cartslot->m_cart, FUNC(device_nes_cart_interface::nt_w)));
 		m_ppu->set_latch(*m_cartslot->m_cart, FUNC(device_nes_cart_interface::ppu_latch));
 		m_ppu->set_ppu_to_mapper(*m_cartslot->m_cart, FUNC(device_nes_cart_interface::ppu_to_mapper));
-		
+
 		m_ppu->set_ppu_bus_address(*m_cartslot->m_cart, FUNC(device_nes_cart_interface::ppu_bus_address));
 		m_ppu->set_ppu_odd_frame_skip(*m_cartslot->m_cart, FUNC(device_nes_cart_interface::ppu_odd_frame_skip));
 		m_ppu->set_mmc1_ppu_phase(*m_cartslot->m_cart, FUNC(device_nes_cart_interface::mmc1_ppu_phase));
-		m_ppu->set_mmc5_ppu_read(*m_cartslot->m_cart, FUNC(device_nes_cart_interface::mmc5_clock_ppu_read));
-		m_ppu->set_mmc5_reset_scanline_irq(*m_cartslot->m_cart, FUNC(device_nes_cart_interface::mmc5_reset_scanline_irq_state));
+		const int callback_pcb_id = m_cartslot->get_pcb_id();
 
-		m_maincpu6502->set_mmc5_reset_scanline_irq(*m_cartslot->m_cart, FUNC(device_nes_cart_interface::mmc5_reset_scanline_irq_state));
-		m_maincpu6502->set_mmc5_ppuctrl_write(*m_cartslot->m_cart, FUNC(device_nes_cart_interface::mmc5_real_ppuctrl_write));
-		m_maincpu6502->set_mmc5_ppumask_write(*m_cartslot->m_cart, FUNC(device_nes_cart_interface::mmc5_real_ppumask_write));
+		if (callback_pcb_id == STD_EXROM || callback_pcb_id == GG_NROM)
+		{
+			m_ppu->set_mmc5_ppu_read(*m_cartslot->m_cart, FUNC(device_nes_cart_interface::mmc5_clock_ppu_read));
+			m_ppu->set_mmc5_reset_scanline_irq(*m_cartslot->m_cart, FUNC(device_nes_cart_interface::mmc5_reset_scanline_irq_state));
+			m_maincpu6502->set_mmc5_reset_scanline_irq(*m_cartslot->m_cart, FUNC(device_nes_cart_interface::mmc5_reset_scanline_irq_state));
+			m_maincpu6502->set_mmc5_ppuctrl_write(*m_cartslot->m_cart, FUNC(device_nes_cart_interface::mmc5_real_ppuctrl_write));
+			m_maincpu6502->set_mmc5_ppumask_write(*m_cartslot->m_cart, FUNC(device_nes_cart_interface::mmc5_real_ppumask_write));
+		}
 
 		// install additional handlers (read_h, read_ex, write_ex)
 		static const int r_h_pcbs[] =
@@ -281,6 +718,7 @@ void nes_state::machine_start()
 			BMC_VT5201,
 			BTL_PALTHENA,
 			CAMERICA_ALADDIN,
+			CNE_FSB,
 			GG_NROM,
 			KAISER_KS7010,
 			KAISER_KS7022,
@@ -300,6 +738,7 @@ void nes_state::machine_start()
 			UNL_EH8813A,
 			UNL_LH10,
 			UNL_LH32,
+			UNL_LH53,
 			UNL_RT01
 		};
 
@@ -314,8 +753,13 @@ void nes_state::machine_start()
 
 		static const int rw_ex_pcbs[] =
 		{
+			ACTENT_ACT52,
+			BMC_FK23C,
+			BMC_FK23CA,
 			BTL_09034A,
+			BTL_MARIOBABY,
 			KAISER_KS7017,
+			GG_NROM,
 			STD_DISKSYS,
 			UNL_603_5052
 		};
@@ -657,6 +1101,7 @@ void nes_state::setup_disk(nes_disksys_device *slot)
 		m_ppu->set_hblank_callback(*slot, FUNC(nes_disksys_device::hblank_irq));
 		m_ppu->set_latch(*slot, FUNC(device_nes_cart_interface::ppu_latch));
 		m_ppu->set_ppu_to_mapper(*slot, FUNC(device_nes_cart_interface::ppu_to_mapper));
+		m_ppu->set_ppu_bus_address(*slot, FUNC(device_nes_cart_interface::ppu_bus_address));
 	}
 }
 
