@@ -48,6 +48,7 @@ madam_device::madam_device(const machine_config &mconfig, const char *tag, devic
 	, m_irq_dply_cb(*this)
 	, m_dspp_dma_read_cb(*this, 0)
 	, m_dspp_dma_write_cb(*this)
+	, m_memory_config_cb(*this)
 	, m_is_pal(false)
 {
 }
@@ -147,11 +148,19 @@ void madam_device::map(address_map &map)
 	);
 
 	// 03300004 - Memory configuration 29 = 2MB DRAM, 1MB VRAM
+	// ---- ---- ---- ---- ---- ---- -xx- ---- DRAM set 0 size (0 none, 1 1MB, 2 4MB)
+	// ---- ---- ---- ---- ---- ---- ---x x--- DRAM set 1 size (0 none, 1 1MB, 2 4MB, 3 16MB)
+	// ---- ---- ---- ---- ---- ---- ---- -xxx VRAM size in MB
+	// The sets are decoded back to back from address zero with these sizes, fitted or not,
+	// which is what the boot ROM relies on to find out how much memory there is.
 	map(0x0004, 0x0007).lrw32(
 		NAME([this] () { return m_msysbits; }),
 		NAME([this] (offs_t offset, u32 data, u32 mem_mask) {
 			LOG("msysbits: %08x & %08x\n", data, mem_mask);
+			const u8 old_config = memory_config();
 			COMBINE_DATA(&m_msysbits);
+			if (memory_config() != old_config)
+				m_memory_config_cb(memory_config());
 		})
 	);
 	map(0x0008, 0x000b).rw(FUNC(madam_device::mctl_r), FUNC(madam_device::mctl_w));
@@ -202,14 +211,7 @@ void madam_device::map(address_map &map)
 	// SPRCNTU - Continue the CEL engine (W)
 	map(0x0108, 0x010b).w(FUNC(madam_device::cel_continue_w));
 //  map(0x010c, 0x010f)  SPRPAUS - Pause the CEL engine (W)
-	// TODO: these contains CEL master switches, to be converted as typed fn
-	map(0x0110, 0x0113).lrw32(
-		NAME([this] () { return m_ccobctl0; }),
-		NAME([this] (offs_t offset, u32 data, u32 mem_mask) {
-			LOGCEL("ccobtcl0: %08x & %08x\n", data, mem_mask);
-			COMBINE_DATA(&m_ccobctl0);
-		})
-	);
+	map(0x0110, 0x0113).lr32(NAME([this] () { return m_ccobctl0; })).w(FUNC(madam_device::ccobctl0_w));
 	map(0x0120, 0x0123).lrw32(
 		NAME([this] () { return m_ppmpc; }),
 		NAME([this] (offs_t offset, u32 data, u32 mem_mask) {
@@ -697,7 +699,9 @@ void madam_device::vdlp_continue_w(int state)
 			m_amy->clut_write(m_dma32_read_cb(m_vdlp.address + 0x10 + c));
 
 		m_vdlp.link = m_dma32_read_cb(m_vdlp.address + 0x0c);
-		m_vdlp.y_src = 0;
+		// - virtuoso does this per-scanline setup where even/odd selection needs to be taken
+		//   into account from the get-go.
+		m_vdlp.y_src = (m_vdlp.fb_address & 2) >> 1;
 
 		if (m_vdlp.scanlines == 0)
 			m_vdlp.address = m_vdlp.link;
@@ -811,6 +815,41 @@ void madam_device::cel_continue_w(offs_t offset, u32 data, u32 mem_mask)
 	// ...
 }
 
+// These contains CEL master switches
+// - <most SWs>: 0xe150'0000
+// - virtuoso: 0xc800'0000
+// xx-- ---- ---- ---- PPMP bit 15 out selector
+// --xx ---- ---- ---- PPMP bit 0 out selector
+// ---- x--- ---- ---- SWAPHV swap H/V before entering PPMP
+// ---- -x-- ---- ---- ASCALL Allow super clipping
+// ---- ---x ---- ---- CFBDSUB Use HV from CEL source
+// ---- ---- xx-- ---- CFBDLSB PPMP Blue LSB source
+// ---- ---- --xx ---- IPNLSB PPMP Blue LSB source
+void madam_device::ccobctl0_w(offs_t offset, u32 data, u32 mem_mask)
+{
+	// cache the effect, will often be pinged
+	if (ACCESSING_BITS_16_31 && data != m_ccobctl0)
+	{
+		LOGREGIS("ccobtcl0: %08x & %08x\n", data, mem_mask);
+		const u8 b15pos = BIT(data, 30, 2);
+		const u8 b0pos = BIT(data, 28, 2);
+
+		m_cel_master_sw.v_output_force_high = b15pos == 1 ? 1 : 0;
+		m_cel_master_sw.v_output_mask = b15pos == 0 ? 0 : 1;
+
+		const bool swaphv = BIT(data, 27);
+		m_cel_master_sw.v_output_bit = swaphv ? 0 : 15;
+		//m_cel_master_sw.h_output_bit = swaphv ? 15 : 0;
+
+		LOGREGIS("    b15pos=%d b0pos=%d swaphv=%d\n", b15pos, b0pos, swaphv);
+
+		m_cel_master_sw.ascall = BIT(data, 26);
+		if (m_cel_master_sw.ascall)
+			popmessage("3do_madam.cpp: enable ASCALL master switch");
+	}
+	COMBINE_DATA(&m_ccobctl0);
+}
+
 // TODO: timings are sketchy and not known
 // ARM lock line is directly tied to Madam, which is raised when CEL engine is running.
 // CEL is paused when any irq is issued at the end of current CEL (so during fetch phase)
@@ -904,19 +943,26 @@ TIMER_CALLBACK_MEMBER(madam_device::cel_tick_cb)
 				, ldplut
 				, m_cel.ccbpre
 				, yoxy
+				// ACSC/ALSC: CEL super clipping/line super clipping
+				// (both needs ASCALL to be enabled first)
 				, BIT(m_cel.current_ccb, 20)
 				, BIT(m_cel.current_ccb, 19)
+				// ACW/ACCW: enable clockwise/counterclockwise rendering
 				, BIT(m_cel.current_ccb, 18)
 				, BIT(m_cel.current_ccb, 17)
+				// TWD: terminate CEL if wrong direction is encountered
 				, BIT(m_cel.current_ccb, 16)
 			);
 			m_cel.pxor = !!BIT(m_cel.current_ccb, 11);
 			m_cel.useav = !!BIT(m_cel.current_ccb, 10);
 			m_cel.packed = !!BIT(m_cel.current_ccb, 9);
 			LOGCEL("        lce=%d ace=%d maria=%d pxor=%d useav=%d packed=%d\n"
+				// LCE: Lock the 2 corner engines
 				, BIT(m_cel.current_ccb, 15)
+				// ACE: Allow second corner option
 				, BIT(m_cel.current_ccb, 14)
 				//, BIT(m_cel.current_ccb, 13) spare
+				// MARIA: '1' Regional fill '0' Speed fill (i.e. disable Projector action?)
 				, BIT(m_cel.current_ccb, 12)
 				, m_cel.pxor
 				, m_cel.useav
@@ -931,6 +977,7 @@ TIMER_CALLBACK_MEMBER(madam_device::cel_tick_cb)
 			// - aquawrld forces PIXC to use the upper nibble in Mermaid mode, cfr. below
 			const u8 pover = (m_cel.current_ccb & 0x180) >> 7;
 
+			m_cel.plutpos = !!BIT(m_cel.current_ccb, 6);
 			// cache rather than storing the raw value for performance,
 			// assume reserved setting to read from decoder.
 			m_cel.pover_force_high = pover == 3 ? 0x0000'8000 : 0x0000'0000;
@@ -938,7 +985,7 @@ TIMER_CALLBACK_MEMBER(madam_device::cel_tick_cb)
 
 			LOGCEL("        pover=%d plutpos=%d bgnd=%d noblk=%d pluta=%d\n"
 				, pover
-				, BIT(m_cel.current_ccb, 6)
+				, m_cel.plutpos
 				, m_cel.bgnd
 				, BIT(m_cel.current_ccb, 4)
 				, m_cel.pluta
@@ -976,9 +1023,11 @@ TIMER_CALLBACK_MEMBER(madam_device::cel_tick_cb)
 			}
 			LOGCEL("    NEXTPTR %08x SOURCEPTR %08x PLUTPTR %08x\n", m_cel.next_ptr, m_cel.source_ptr, m_cel.plut_ptr);
 
-			// - cpquazar uses all the !ldsize/!ldprs/!ldpixc in gameplay, minus !yoxy
+			// TODO: verify what "current" means in context of X/Y base positions
+			// is it the previously CEL loaded address or the actual pointer at the end of a CEL drawing?
 			if (yoxy)
 			{
+				// +0x10 normal base
 				const s32 xpos = (s32)(m_dma32_read_cb(m_cel.address + 0x10));
 				const s32 ypos = (s32)(m_dma32_read_cb(m_cel.address + 0x14));
 				// TODO: can be in 17.15 format (?)
@@ -989,18 +1038,26 @@ TIMER_CALLBACK_MEMBER(madam_device::cel_tick_cb)
 			}
 			LOGCEL("    xpos=%f ypos=%f\n", m_cel.xpos, m_cel.ypos );
 
+			// from here onward the params are marked optional in "Working With a CCB"
+			// - cpquazar uses all the !ldsize/!ldprs/!ldpixc in gameplay, minus !yoxy
+			// - fifa, srmp4 and srmp5 depends on adjust base accordingly to not throw illegal setup
+			//   glitches
+			u32 opt_base = 0x18;
+
 			if (ldsize)
 			{
-				const s32 hdx = (s32)m_dma32_read_cb(m_cel.address + 0x18);
-				const s32 hdy = (s32)m_dma32_read_cb(m_cel.address + 0x1c);
-				const s32 vdx = (s32)m_dma32_read_cb(m_cel.address + 0x20);
-				const s32 vdy = (s32)m_dma32_read_cb(m_cel.address + 0x24);
+				// +0x18 normal base
+				const s32 hdx = (s32)m_dma32_read_cb(m_cel.address + opt_base + 0x00);
+				const s32 hdy = (s32)m_dma32_read_cb(m_cel.address + opt_base + 0x04);
+				const s32 vdx = (s32)m_dma32_read_cb(m_cel.address + opt_base + 0x08);
+				const s32 vdy = (s32)m_dma32_read_cb(m_cel.address + opt_base + 0x0c);
 				m_cel.hdx = (double)hdx / 1048576.0;
 				m_cel.hdy = (double)hdy / 1048576.0;
 				m_cel.vdx = (double)vdx / 65536.0;
 				m_cel.vdy = (double)vdy / 65536.0;
 
 				tick_time += 4;
+				opt_base += 0x10;
 			}
 			LOGCEL("    hdx=%f hdy=%f vdx=%f vdy=%f\n"
 				, m_cel.hdx, m_cel.hdy
@@ -1009,18 +1066,21 @@ TIMER_CALLBACK_MEMBER(madam_device::cel_tick_cb)
 
 			if (ldprs)
 			{
-				const s32 hddx = (s32)m_dma32_read_cb(m_cel.address + 0x28);
-				const s32 hddy = (s32)m_dma32_read_cb(m_cel.address + 0x2c);
+				// +0x28 normal base
+				const s32 hddx = (s32)m_dma32_read_cb(m_cel.address + opt_base + 0x00);
+				const s32 hddy = (s32)m_dma32_read_cb(m_cel.address + opt_base + 0x04);
 				m_cel.hddx = (double)hddx / 1048576.0;
 				m_cel.hddy = (double)hddy / 1048576.0;
 
 				tick_time += 2;
+				opt_base += 8;
 			}
 			LOGCEL("    hddx=%f hddy=%f\n", m_cel.hddx, m_cel.hddy);
 
 			if (ldpixc)
 			{
-				m_cel.pixc = m_dma32_read_cb(m_cel.address + 0x30);
+				// +0x30 normal base
+				m_cel.pixc = m_dma32_read_cb(m_cel.address + opt_base);
 				tick_time += 1;
 				LOGCEL("    pixc=%08x\n", m_cel.pixc);
 
@@ -1055,7 +1115,7 @@ TIMER_CALLBACK_MEMBER(madam_device::cel_tick_cb)
 
 					// 16 / 0: 2D secondary divider value (value + 1)
 					m_cel.pixc_2d[i] = BIT(m_cel.pixc, 0 + nibble);
-					LOGCEL("    P[%d]: 1S %d MS %d MF %d DF %d | 2S %d AV %d 2D %d\n"
+					LOGCEL("    P[%d]: 1S %d MS %d MF %d DF %d | 2S %d AV %02x 2D %d\n"
 						, i
 						, m_cel.pixc_1s[i], m_cel.pixc_ms[i], m_cel.pixc_mf[i], m_cel.pixc_df[i]
 						, m_cel.pixc_2s[i], m_cel.pixc_av[i], m_cel.pixc_2d[i]
@@ -1065,20 +1125,25 @@ TIMER_CALLBACK_MEMBER(madam_device::cel_tick_cb)
 					if (m_cel.useav && (m_cel.pixc_av[i] & 0x18) == 0x18)
 						popmessage("3do_madam.cpp: unemulated USEAV with PIXC AV[%d] SDV == 3", i);
 				}
+
+				opt_base += 4;
 			}
 
 			// fetch the Preamble words
 			// May as well do it here because ...
 			if (m_cel.ccbpre)
 			{
-				m_cel.pre0 = m_dma32_read_cb(m_cel.address + 0x34);
+				// +0x34/+0x38 normal bases
+				m_cel.pre0 = m_dma32_read_cb(m_cel.address + opt_base);
 				tick_time ++;
+				opt_base += 4;
 				LOGCEL("    pre0=%08x ", m_cel.pre0);
 				if (!m_cel.packed)
 				{
-					m_cel.pre1 = m_dma32_read_cb(m_cel.address + 0x38);
+					m_cel.pre1 = m_dma32_read_cb(m_cel.address + opt_base);
 					LOGCEL("pre1=%08x", m_cel.pre1);
 					tick_time ++;
+					opt_base += 4;
 				}
 				LOGCEL("\n");
 			}
@@ -1187,7 +1252,7 @@ TIMER_CALLBACK_MEMBER(madam_device::cel_tick_cb)
 					{
 						// According to "The Projector" section this floors down,
 						// discarding the fractional part
-						// TODO: understand how enlarging truly works (check acw/accw)
+						// TODO: convert to fn, need to recalc thru Projector
 						int ypos = (s32)(m_cel.ypos + y * m_cel.vdy + x * actual_hdy);
 
 						if (ypos != std::clamp<unsigned>(ypos, 0, yclip))
@@ -1211,10 +1276,11 @@ TIMER_CALLBACK_MEMBER(madam_device::cel_tick_cb)
 						const bool p_mode = BIT(src_data, 15);
 						const u8 pixc_mode = pixc_mode_setting[p_mode];
 
-						const u16 res_data = (this->*pixc_mix_table[pixc_mode])(xpos, ypos, src_data, p_mode, op_mode);
+						// TODO: Projector enlarging pixels should be done here
+						// The ACW/ACCW part ...
 
-						// TODO: output b15 and b0 as VH cornerweight selector
-						// (with force bits coming from m_ccobctl0)
+						u16 res_data = (this->*pixc_mix_table[pixc_mode])(xpos, ypos, src_data, p_mode, op_mode);
+						res_data = (this->*vh_interpolate_table[m_cel.plutpos])(xpos, ypos, res_data);
 
 						u32 dst_address = m_regctl3;
 						dst_address += ((ypos & ~1) * dst_pitch) << 2;
@@ -1500,7 +1566,7 @@ u16 madam_device::pixc_fb_cel(int xpos, int ypos, u32 cel_data, bool p_mode, u8 
 }
 
 /******************
- * Math
+ * PIXC Math
  *****************/
 
 const madam_device::pixc_math_func madam_device::pixc_math_table[4] =
@@ -1602,6 +1668,35 @@ u16 madam_device::pixc_math_pxor(u8 av_mode, bool avg, u8 r1s, u8 g1s, u8 b1s, u
 
 /******************
  *
+ * VH interpolator
+ *
+ *****************/
+
+const madam_device::vh_interpolate_func madam_device::vh_interpolate_table[2] =
+{
+	&madam_device::vh_interpolate_subposition,
+	&madam_device::vh_interpolate_plut
+};
+
+// TODO: stub
+u16 madam_device::vh_interpolate_subposition(int xpos, int ypos, u16 pix_data)
+{
+	return pix_data;
+}
+
+// TODO: enough for virtuoso and not much else
+// wants bit 0 as CLUT separator for the player avatar, which goes in AMY fixed at 0 due of swaphv
+u16 madam_device::vh_interpolate_plut(int xpos, int ypos, u16 pix_data)
+{
+	bool v_bit = BIT(pix_data, m_cel_master_sw.v_output_bit);
+	v_bit |= m_cel_master_sw.v_output_force_high;
+	v_bit &= m_cel_master_sw.v_output_mask;
+
+	return (v_bit << 15) | (pix_data & 0x7fff);
+}
+
+/******************
+ *
  * Decompression
  *
  *****************/
@@ -1668,6 +1763,7 @@ const madam_device::fetch_rle_func madam_device::fetch_rle_table[16] =
 
 // Stub for unemulated/illegal paths
 // bpp = 0 coded: ssf2xj in versus mode
+// TODO: verify me again, may be superseded by CEL relative addressing fix
 std::tuple<u32, u32> madam_device::get_unemulated(u32 ptr, u8 frac)
 {
 	return std::make_tuple(0, ptr + 1);
@@ -1736,10 +1832,10 @@ std::tuple<u32, u32> madam_device::get_coded_6bpp(u32 ptr, u8 frac)
 	// idx &= 0x1f;
 	idx >>= 1;
 	idx &= 0x3e;
-	// TODO: bit 5 is really p/w selector
 
 	const u16 plut_data = ((m_dma8_read_cb(plut_ptr + idx) << 8) | m_dma8_read_cb(plut_ptr + idx + 1));
 
+	// what the PLUT says should be ignored in this
 	return std::make_tuple((plut_data & 0x7fff) | p_mode, ptr);
 //	return std::make_tuple(plut_data, ptr);
 }
@@ -1799,7 +1895,7 @@ std::tuple<u32, u32> madam_device::get_uncoded_16bpp(u32 ptr, u8 frac)
 }
 
 // LZ77 / LZSS alike
-// NOTE: documentation claims that is actually faster to use packed CEL
+// NOTE: documentation claims that is actually faster to use packed CEL (RAM overhead?)
 u32 madam_device::cel_decompress()
 {
 	u32 tick_time = 1;
@@ -2002,7 +2098,8 @@ const madam_device::get_pixel_func madam_device::get_pixel_table[32 + 1] =
 
 u32 madam_device::get_pixel_invalid(int x, int y, u16 woffset)
 {
-	// arbitrary mesh pattern so it will be obvious if triggered
+	// arbitrary moire/mesh pattern so it will be obvious if triggered
+	// (outputs a yellow-blue checkered flag)
 	u16 src_data = BIT(x + y, 0) ? 0x001f : 0x7fe0;
 	return src_data;
 }
