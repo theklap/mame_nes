@@ -35,6 +35,7 @@ protected:
 	virtual void set_chr();
 
 	TIMER_CALLBACK_MEMBER(irq_timer_tick);
+	TIMER_CALLBACK_MEMBER(a12_timer_tick);
 
 	u8 m_latch;
 	u8 m_mmc_vrom_bank[8];
@@ -57,14 +58,16 @@ private:
 
 	emu_timer *irq_timer;
 	attotime timer_freq;
+	
+	emu_timer *a12_timer;
+	attotime a12_timer_freq;
 
-	uint64_t m_last_a12_low_cycle;
 	uint16_t m_prev_ppu_addr;
-	bool m_a12_low_seen;
+	uint8_t m_a12_m2_counter;
+	u8 m_irq_reload_extra;
+	bool m_irq_direct_after_mode_switch;
 
 	m6502_device *m_maincpu6502;
-	bool m_irq_force_clock;
-	
 };
 
 

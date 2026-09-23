@@ -19,8 +19,6 @@
 #include "emu.h"
 #include "tengen.h"
 #include "cpu/m6502/m6502.h"
-//#include "video/ppu2c0x.h"      // this has to be included so that IRQ functions can access ppu2c0x_device::BOTTOM_VISIBLE_SCANLINE
-
 
 #ifdef NES_PCB_DEBUG
 #define VERBOSE (LOG_GENERAL)
@@ -50,11 +48,8 @@ nes_tengen032_device::nes_tengen032_device(const machine_config &mconfig, device
 	, m_irq_delay_cpu_cycle(0)
 	, m_irq_cpu_delay(0)
 	, irq_timer(nullptr)
-	, m_last_a12_low_cycle(0)
 	, m_prev_ppu_addr(0)
-	, m_a12_low_seen(false)
 	, m_maincpu6502(nullptr)
-	, m_irq_force_clock(false)
 {
 }
 
@@ -77,6 +72,10 @@ void nes_tengen032_device::device_start()
 	irq_timer = timer_alloc(FUNC(nes_tengen032_device::irq_timer_tick), this);
 	timer_freq = clocks_to_attotime(4);
 	irq_timer->adjust(attotime::never);
+	
+	a12_timer = timer_alloc(FUNC(nes_tengen032_device::a12_timer_tick), this);
+	a12_timer_freq = clocks_to_attotime(1);
+	a12_timer->adjust(attotime::never);
 
 	save_item(NAME(m_mmc_prg_bank));
 	save_item(NAME(m_mmc_vrom_bank));
@@ -91,10 +90,10 @@ void nes_tengen032_device::device_start()
 	save_item(NAME(m_irq_delay_cpu_cycle));
 	save_item(NAME(m_irq_cpu_delay));
 
-	save_item(NAME(m_last_a12_low_cycle));
 	save_item(NAME(m_prev_ppu_addr));
-	save_item(NAME(m_a12_low_seen));
-	save_item(NAME(m_irq_force_clock));
+	save_item(NAME(m_a12_m2_counter));
+	save_item(NAME(m_irq_reload_extra));
+	save_item(NAME(m_irq_direct_after_mode_switch));
 }
 
 void nes_tengen032_device::pcb_reset()
@@ -117,17 +116,18 @@ void nes_tengen032_device::pcb_reset()
 	m_irq_delay_cpu_cycle = 0;
 	m_irq_cpu_delay = 0;
 
-	m_last_a12_low_cycle = 0;
 	m_prev_ppu_addr = 0;
-	m_a12_low_seen = false;
 
+	m_a12_m2_counter = 0;
+	m_irq_reload_extra = 0;
+	m_irq_direct_after_mode_switch = false;
+	
+	const attotime m2_falling_edge = attotime::from_ticks(1, clock() * 2);
+	a12_timer->adjust(m2_falling_edge, 0, a12_timer_freq);
 	irq_timer->adjust(attotime::never);
 
 	set_irq_line(CLEAR_LINE);
 	m_maincpu6502->cancel_delayed_mapper_irq();
-
-	//machine().root_device().subdevice<ppu2c0x_device>("ppu")->set_mapper(type() == NES_TENGEN_800037 ? 158 : 64);
-	m_irq_force_clock = false;
 }
 
 void nes_tengen037_device::pcb_reset() {
@@ -165,9 +165,12 @@ void nes_tengen032_device::ppu_to_mapper(int scanline, unsigned dot, int ppu_tic
 				m_irq_cpu_delay = 0;
 				m_irq_delay_cpu_cycle = 0;
 
-				// After the normal RAMBO-1 CPU-cycle delay expires,
-				// wait two additional PPU cycles before queuing the IRQ.
-				delay_irq = 2;
+				if (m_irq_direct_after_mode_switch) {
+					m_irq_direct_after_mode_switch = false;
+					set_irq_line(ASSERT_LINE);
+				} else {
+					delay_irq = 2;
+				}
 			} else {
 				m_irq_cpu_delay -= int(elapsed_cpu_cycles);
 				m_irq_delay_cpu_cycle = current_cpu_cycle;
@@ -176,85 +179,56 @@ void nes_tengen032_device::ppu_to_mapper(int scanline, unsigned dot, int ppu_tic
 	} else if (delay_irq > 0) {
 		--delay_irq;
 
-		if (delay_irq == 0)
+		if (delay_irq == 0) {
 			m_maincpu6502->queue_delayed_mapper_irq(2);
+			delay_irq = -1;
+		}
 	}
 }
 
 inline void nes_tengen032_device::irq_clock() {
-	if (m_irq_reset) {
-		m_irq_reset = 0;
+	const bool reloading = m_irq_reset;
+	bool trigger_irq = false;
 
-		// A nonzero reload value is forced odd on the first clock after $C001.
-		m_irq_count = m_irq_count_latch ? (m_irq_count_latch | 0x01) : 0x00;
-	} else if (m_irq_count == 0) {
-		m_irq_count = m_irq_count_latch;
+	if (m_irq_count == 0) {
+		m_irq_count = m_irq_count_latch | (reloading ? m_irq_reload_extra : 0);
+
+		if (reloading && m_irq_count == 0 && m_irq_enable)
+			trigger_irq = true;
 	} else {
 		--m_irq_count;
+
+		if (m_irq_count == 0 && m_irq_enable)
+			trigger_irq = true;
 	}
 
-	if (m_irq_enable && m_irq_count == 0 && m_irq_cpu_delay == 0 && delay_irq == 0) {
-		// Scanline/A12 mode waits two CPU cycles.
-		// CPU-cycle mode waits four CPU cycles.
+	m_irq_reset = 0;
+
+	if (trigger_irq && m_irq_cpu_delay == 0 && delay_irq == 0) {
 		m_irq_cpu_delay = m_irq_mode ? 4 : 2;
 		m_irq_delay_cpu_cycle = m_maincpu6502->total_cycles();
 	}
 }
 
-void nes_tengen032_device::ppu_bus_address(uint16_t ppu_addr, uint64_t ppu_cycles, int ppu_tick, bool odd_frame)
-{
-	ppu_addr &= 0x3fff;
-
-	if (m_irq_mode) {
-		m_prev_ppu_addr = ppu_addr;
-		m_a12_low_seen = false;
-		return;
-	}
-
-	const bool prev_a12 = BIT(m_prev_ppu_addr, 12);
-	const bool a12 = BIT(ppu_addr, 12);
-
-	if (!a12)
-	{
-		if (prev_a12)
-		{
-			m_last_a12_low_cycle = ppu_cycles;
-			m_a12_low_seen = true;
-		}
-		else if (!m_a12_low_seen)
-		{
-			m_last_a12_low_cycle = ppu_cycles;
-			m_a12_low_seen = true;
-		}
-	}
-
-	if (!prev_a12 && a12)
-	{
-		const uint64_t low_time = ppu_cycles - m_last_a12_low_cycle;
-
-		if (!m_irq_mode && m_a12_low_seen && low_time > 9)
-			irq_clock();
-
-		m_a12_low_seen = false;
-	}
-
+void nes_tengen032_device::ppu_bus_address(uint16_t ppu_addr, uint64_t ppu_cycles, int ppu_tick, bool odd_frame) {
 	m_prev_ppu_addr = ppu_addr;
 }
 
-/*TIMER_CALLBACK_MEMBER(nes_tengen032_device::irq_timer_tick)
-{
+TIMER_CALLBACK_MEMBER(nes_tengen032_device::a12_timer_tick) {
+	if (BIT(m_prev_ppu_addr, 12)) {
+		if (!m_irq_mode && m_a12_m2_counter == 0) {
+			irq_clock();
+		}
+
+		m_a12_m2_counter = 16;
+	} else if (m_a12_m2_counter > 0) {
+		--m_a12_m2_counter;
+	}
+}
+
+TIMER_CALLBACK_MEMBER(nes_tengen032_device::irq_timer_tick) {
 	if (m_irq_mode)
 		irq_clock();
-}*/
-TIMER_CALLBACK_MEMBER(nes_tengen032_device::irq_timer_tick) {
-	if (m_irq_mode || m_irq_force_clock) {
-		irq_clock();
-
-		if (m_irq_force_clock) {
-			m_irq_force_clock = false;
-			irq_timer->adjust(attotime::never);
-		}
-	}
 }
 
 void nes_tengen032_device::set_prg()
@@ -342,14 +316,14 @@ void nes_tengen032_device::write_h(offs_t offset, u8 data)
 			m_irq_count_latch = data;
 			break;
 
-		/*case 0x4001: { // $C001 - select clock source and reset counter timing
-			m_irq_mode = BIT(data, 0);
-			m_irq_reset = 1;
+		case 0x4001: {
+			const bool old_irq_mode = m_irq_mode;
 
-			// Discard A12 timing accumulated under the previous clock source.
-			m_last_a12_low_cycle = 0;
-			m_prev_ppu_addr = 0;
-			m_a12_low_seen = false;
+			m_irq_mode = BIT(data, 0);
+			m_irq_count = 0;
+			m_irq_reset = 1;
+			m_irq_reload_extra = m_a12_m2_counter ? 0 : 1;
+			m_irq_direct_after_mode_switch = old_irq_mode && !m_irq_mode;
 
 			if (m_irq_mode)
 				irq_timer->adjust(timer_freq, 0, timer_freq);
@@ -357,40 +331,14 @@ void nes_tengen032_device::write_h(offs_t offset, u8 data)
 				irq_timer->adjust(attotime::never);
 
 			break;
-		}*/
-		case 0x4001: { // $C001 - select clock source and reset counter timing
-	const bool old_irq_mode = m_irq_mode;
-	const bool new_irq_mode = BIT(data, 0);
-
-	// When switching from CPU-cycle mode to A12 mode, RAMBO-1
-	// completes the pending four-cycle divider period once.
-	// Skulls & Crossbones depends on this.
-	if (old_irq_mode && !new_irq_mode)
-		m_irq_force_clock = true;
-	else if (new_irq_mode)
-		m_irq_force_clock = false;
-
-	m_irq_mode = new_irq_mode;
-	m_irq_reset = 1;
-
-	m_last_a12_low_cycle = 0;
-	m_prev_ppu_addr = 0;
-	m_a12_low_seen = false;
-
-	if (m_irq_mode)
-		irq_timer->adjust(timer_freq, 0, timer_freq);
-	else if (!m_irq_force_clock)
-		irq_timer->adjust(attotime::never);
-
-	break;
-}
+		}
 
 		case 0x6000: // $E000 - acknowledge and disable
 			m_irq_enable = 0;
 			m_irq_cpu_delay = 0;
 			m_irq_delay_cpu_cycle = 0;
 			delay_irq = 0;
-
+			m_irq_direct_after_mode_switch = false;
 			set_irq_line(CLEAR_LINE);
 			m_maincpu6502->cancel_delayed_mapper_irq();
 			break;
