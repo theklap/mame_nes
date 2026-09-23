@@ -11,14 +11,14 @@
 #define LOG_CEL     (1U << 5)
 #define LOG_REGIS   (1U << 6)
 #define LOG_MULT    (1U << 8) // MULT matrix ops
-#define LOG_MULTV   (1U << 9) // verbose, mult register access
+#define LOG_MULTV   (1U << 9) // MULT register access (verbose)
 
 //#include "input.h"
 
 #define VERBOSE (LOG_GENERAL | LOG_MMU)
 //#define VERBOSE (LOG_VDLP)
 //#define VERBOSE (LOG_CEL | LOG_REGIS)
-//#define VERBOSE (LOG_MULT | LOG_MULTV)
+//#define VERBOSE (LOG_MULT)
 //#define LOG_OUTPUT_FUNC osd_printf_info
 
 #include "logmacro.h"
@@ -816,8 +816,6 @@ void madam_device::cel_continue_w(offs_t offset, u32 data, u32 mem_mask)
 }
 
 // These contains CEL master switches
-// - <most SWs>: 0xe150'0000
-// - virtuoso: 0xc800'0000
 // xx-- ---- ---- ---- PPMP bit 15 out selector
 // --xx ---- ---- ---- PPMP bit 0 out selector
 // ---- x--- ---- ---- SWAPHV swap H/V before entering PPMP
@@ -825,9 +823,12 @@ void madam_device::cel_continue_w(offs_t offset, u32 data, u32 mem_mask)
 // ---- ---x ---- ---- CFBDSUB Use HV from CEL source
 // ---- ---- xx-- ---- CFBDLSB PPMP Blue LSB source
 // ---- ---- --xx ---- IPNLSB PPMP Blue LSB source
+// - <most SWs>: 0xe150'0000
+// - virtuoso:   0xc800'0000
+// - goalfh:     0xe550'0000 (enables ASCALL at startup, disables it in story mode)
 void madam_device::ccobctl0_w(offs_t offset, u32 data, u32 mem_mask)
 {
-	// cache the effect, will often be pinged
+	// cache the effect, will often be pinged with same value
 	if (ACCESSING_BITS_16_31 && data != m_ccobctl0)
 	{
 		LOGREGIS("ccobtcl0: %08x & %08x\n", data, mem_mask);
@@ -844,8 +845,6 @@ void madam_device::ccobctl0_w(offs_t offset, u32 data, u32 mem_mask)
 		LOGREGIS("    b15pos=%d b0pos=%d swaphv=%d\n", b15pos, b0pos, swaphv);
 
 		m_cel_master_sw.ascall = BIT(data, 26);
-		if (m_cel_master_sw.ascall)
-			popmessage("3do_madam.cpp: enable ASCALL master switch");
 	}
 	COMBINE_DATA(&m_ccobctl0);
 }
@@ -885,9 +884,10 @@ TIMER_CALLBACK_MEMBER(madam_device::cel_tick_cb)
 			else
 			{
 				// - crshburn uses this as soon as it starts using the engine
+				// - madden wants this at +8 for helmets in main menu
+				// NOTE: this, spabs and ppabs are offset against the address where they fetch
+				// i.e. address would be internally incrementing at every single enabled iteraction
 				LOGCEL("    RELNEXT %08x\n", next_addr);
-				// TODO: is offset dependant on preamble words?
-				// also three relative pointers all with their own offset, wtf
 				m_cel.next_ptr = m_cel.address + (s32)next_addr + 8;
 			}
 
@@ -939,7 +939,7 @@ TIMER_CALLBACK_MEMBER(madam_device::cel_tick_cb)
 			const bool ldplut = !!BIT(m_cel.current_ccb, 23);
 			m_cel.ccbpre = !!BIT(m_cel.current_ccb, 22);
 			const bool yoxy = !!BIT(m_cel.current_ccb, 21);
-			LOGCEL("        ldplut=%d ccbpre=%d yoxy=%d acsc=%d alsc=%d acw=%d accw=%d twd=%d\n"
+			LOGCEL("        ldplut=%d ccbpre=%d yoxy=%d |acsc=%d alsc=%d & ascall=%d| acw=%d accw=%d twd=%d\n"
 				, ldplut
 				, m_cel.ccbpre
 				, yoxy
@@ -947,6 +947,7 @@ TIMER_CALLBACK_MEMBER(madam_device::cel_tick_cb)
 				// (both needs ASCALL to be enabled first)
 				, BIT(m_cel.current_ccb, 20)
 				, BIT(m_cel.current_ccb, 19)
+				, m_cel_master_sw.ascall
 				// ACW/ACCW: enable clockwise/counterclockwise rendering
 				, BIT(m_cel.current_ccb, 18)
 				, BIT(m_cel.current_ccb, 17)
@@ -996,16 +997,18 @@ TIMER_CALLBACK_MEMBER(madam_device::cel_tick_cb)
 				popmessage("3do_madam.cpp: unsupported PLUTA CEL %d", m_cel.pluta);
 
 			// relative spabs/ppabs offsets are trusted against orbatak
-			// TODO: negative values, used by bam PLUT entries (can't decode it properly yet)
+			// - bam uses negative PLUT addresses
 			const u32 source_addr = m_dma32_read_cb(m_cel.address + 0x08);
 			if (spabs)
 				m_cel.source_ptr = source_addr;
 			else
 			{
 				LOGCEL("    RELSOURCE %08x\n", source_addr);
-				m_cel.source_ptr = m_cel.address + (s32)source_addr - 4;
+				m_cel.source_ptr = m_cel.address + (s32)source_addr + 0xc;
 			}
 			tick_time ++;
+
+			LOGCEL("    NEXTPTR %08x SOURCEPTR %08x ", m_cel.next_ptr, m_cel.source_ptr, m_cel.plut_ptr);
 
 			// plut fetch is optional
 			// TODO: find use cases when not
@@ -1016,12 +1019,14 @@ TIMER_CALLBACK_MEMBER(madam_device::cel_tick_cb)
 					m_cel.plut_ptr = plut_addr;
 				else
 				{
-					LOGCEL("    RELPLUT %08x\n", plut_addr);
+					LOGCEL("RELPLUT %08x -> ", plut_addr);
 					m_cel.plut_ptr = m_cel.address + (s32)plut_addr + 0x10;
 				}
+				// PLUTPTR tends to hold garbage when unused, avoid printing to make it less confusing.
+				LOGCEL("PLUTPTR %08x", m_cel.plut_ptr);
 				tick_time ++;
 			}
-			LOGCEL("    NEXTPTR %08x SOURCEPTR %08x PLUTPTR %08x\n", m_cel.next_ptr, m_cel.source_ptr, m_cel.plut_ptr);
+			LOGCEL("\n");
 
 			// TODO: verify what "current" means in context of X/Y base positions
 			// is it the previously CEL loaded address or the actual pointer at the end of a CEL drawing?
@@ -1115,7 +1120,7 @@ TIMER_CALLBACK_MEMBER(madam_device::cel_tick_cb)
 
 					// 16 / 0: 2D secondary divider value (value + 1)
 					m_cel.pixc_2d[i] = BIT(m_cel.pixc, 0 + nibble);
-					LOGCEL("    P[%d]: 1S %d MS %d MF %d DF %d | 2S %d AV %02x 2D %d\n"
+					LOGCEL("    P[%d] 1S: %d MS %d MF %d DF %d | 2S: %d AV %02x 2D %d\n"
 						, i
 						, m_cel.pixc_1s[i], m_cel.pixc_ms[i], m_cel.pixc_mf[i], m_cel.pixc_df[i]
 						, m_cel.pixc_2s[i], m_cel.pixc_av[i], m_cel.pixc_2d[i]
@@ -1204,13 +1209,12 @@ TIMER_CALLBACK_MEMBER(madam_device::cel_tick_cb)
 				, bpp
 				, BPP_VALUES[bpp]
 			);
-			const u16 woffset8 =  ((m_cel.pre1 >> 24) & 0xff) + 2;
-			const u16 woffset10 = ((m_cel.pre1 >> 16) & 0x3ff) + 2;
-			// TODO: should be bits 31-24 -> 7-0
+			// woffset8 should be bits 31-24 -> 7-0
 			// (doc claims integer, signed?)
 			// - demoman triggers this on flame transitions with 0xff, no noticeable difference (?)
-			//if (bpp < 5 && BIT(m_cel.pre1, 31))
-			//	popmessage("3do_madam.cpp: CEL check woffset8 (bpp=%d pre1=%08x)", bpp, m_cel.pre1);
+			const u16 woffset8 =  ((m_cel.pre1 >> 24) & 0xff) + 2;
+			const u16 woffset10 = ((m_cel.pre1 >> 16) & 0x3ff) + 2;
+			// NOTE: matters only for unpacked CELs
 			const u16 woffset = bpp >= 5 ? woffset10 : woffset8;
 			const bool lrform = !!BIT(m_cel.pre1, 11);
 			const u16 tlhpcnt = ((m_cel.pre1 >> 0) & 0x7ff) + 1;
@@ -1280,7 +1284,8 @@ TIMER_CALLBACK_MEMBER(madam_device::cel_tick_cb)
 						// The ACW/ACCW part ...
 
 						u16 res_data = (this->*pixc_mix_table[pixc_mode])(xpos, ypos, src_data, p_mode, op_mode);
-						res_data = (this->*vh_interpolate_table[m_cel.plutpos])(xpos, ypos, res_data);
+						// NOTE: x/y may be the CEL origin not the fb destination ...
+						res_data = (this->*vh_interpolate_table[m_cel.plutpos])(xpos, ypos, src_data, res_data);
 
 						u32 dst_address = m_regctl3;
 						dst_address += ((ypos & ~1) * dst_pitch) << 2;
@@ -1335,10 +1340,14 @@ std::tuple<u8, u8, u8> madam_device::convert_cel_primary_source(u32 cel_data, bo
 
 	u8 pmv_r, pmv_g, pmv_b, pdv;
 	std::tie(pmv_r, pmv_g, pmv_b, pdv) = (this->*pixc_ms_table[ms_mode])(cel_data, p_mode);
+	const u8 sdv = m_cel.pixc_2d[p_mode];
 
-	r = std::min(std::max((r * pmv_r) >> pdv, 0), 0x1f);
-	g = std::min(std::max((g * pmv_g) >> pdv, 0), 0x1f);
-	b = std::min(std::max((b * pmv_b) >> pdv, 0), 0x1f);
+	// NOTE: the primary source also needs to be scaled down by the secondary divider
+	// - gex sets 2D 1 in one of the P ends (i.e. 0x1f001f01) for background shading
+	// - cpquazar needs it for status bar to not look too bright
+	r = std::min(std::max((r * pmv_r) >> (pdv + sdv), 0), 0x1f);
+	g = std::min(std::max((g * pmv_g) >> (pdv + sdv), 0), 0x1f);
+	b = std::min(std::max((b * pmv_b) >> (pdv + sdv), 0), 0x1f);
 
 	return std::make_tuple(r, g, b);
 }
@@ -1373,14 +1382,15 @@ std::tuple<u8, u8, u8> madam_device::convert_fb_primary_source(u16 fb_data, u32 
 
 	u8 pmv_r, pmv_g, pmv_b, pdv;
 	std::tie(pmv_r, pmv_g, pmv_b, pdv) = (this->*pixc_ms_table[ms_mode])(cel_data, p_mode);
+	const u8 sdv = m_cel.pixc_2d[p_mode];
 
 	s16 r = (fb_data & 0x7c00) >> 10;
 	s16 g = (fb_data & 0x03e0) >> 5;
 	s16 b = (fb_data & 0x001f) >> 0;
 
-	r = std::min(std::max((r * pmv_r) >> pdv, 0), 0x1f);
-	g = std::min(std::max((g * pmv_g) >> pdv, 0), 0x1f);
-	b = std::min(std::max((b * pmv_b) >> pdv, 0), 0x1f);
+	r = std::min(std::max((r * pmv_r) >> (pdv + sdv), 0), 0x1f);
+	g = std::min(std::max((g * pmv_g) >> (pdv + sdv), 0), 0x1f);
+	b = std::min(std::max((b * pmv_b) >> (pdv + sdv), 0), 0x1f);
 
 	return std::make_tuple(r, g, b);
 }
@@ -1478,6 +1488,7 @@ u16 madam_device::pixc_cel_0(int xpos, int ypos, u32 cel_data, bool p_mode, u8 o
 	return (this->*pixc_math_table[op_mode])(m_cel.pixc_av[p_mode], 0, r, g, b, 0, 0, 0);
 }
 
+// TODO: find use cases
 u16 madam_device::pixc_cel_ccb(int xpos, int ypos, u32 cel_data, bool p_mode, u8 op_mode)
 {
 	u8 r, g, b;
@@ -1485,13 +1496,14 @@ u16 madam_device::pixc_cel_ccb(int xpos, int ypos, u32 cel_data, bool p_mode, u8
 	const u8 sdv = m_cel.pixc_2d[p_mode];
 	const u8 av = m_cel.pixc_av[p_mode] >> sdv;
 
-	return (this->*pixc_math_table[op_mode])(m_cel.pixc_av[p_mode], 1, r, g, b, av, av, av);
+	return (this->*pixc_math_table[op_mode])(m_cel.pixc_av[p_mode], 0, r, g, b, av, av, av);
 }
 
 // - retfire gameplay
 // - roadrash main menu blend
 // - waywarr character select
-// FIXME: ramping in cpquazar
+// - cpquazar gameplay status bar (denote slightly transparent)
+// - plumber choice screen
 u16 madam_device::pixc_cel_fb(int xpos, int ypos, u32 cel_data, bool p_mode, u8 op_mode)
 {
 	u8 cel_r, cel_g, cel_b;
@@ -1542,6 +1554,7 @@ u16 madam_device::pixc_fb_ccb(int xpos, int ypos, u32 cel_data, bool p_mode, u8 
 	return (this->*pixc_math_table[op_mode])(m_cel.pixc_av[p_mode], 1, r, g, b, av, av, av);
 }
 
+// TODO: find use cases
 u16 madam_device::pixc_fb_fb(int xpos, int ypos, u32 cel_data, bool p_mode, u8 op_mode)
 {
 	const u16 fb_data = get_fb_pixel(xpos, ypos);
@@ -1554,6 +1567,7 @@ u16 madam_device::pixc_fb_fb(int xpos, int ypos, u32 cel_data, bool p_mode, u8 o
 }
 
 // - sailormn title screen blink
+// TODO: megarace useav for blended score bar in gameplay
 u16 madam_device::pixc_fb_cel(int xpos, int ypos, u32 cel_data, bool p_mode, u8 op_mode)
 {
 	u8 fb_r, fb_g, fb_b;
@@ -1679,16 +1693,16 @@ const madam_device::vh_interpolate_func madam_device::vh_interpolate_table[2] =
 };
 
 // TODO: stub
-u16 madam_device::vh_interpolate_subposition(int xpos, int ypos, u16 pix_data)
+u16 madam_device::vh_interpolate_subposition(int xpos, int ypos, u16 cel_data, u16 pix_data)
 {
 	return pix_data;
 }
 
 // TODO: enough for virtuoso and not much else
-// wants bit 0 as CLUT separator for the player avatar, which goes in AMY fixed at 0 due of swaphv
-u16 madam_device::vh_interpolate_plut(int xpos, int ypos, u16 pix_data)
+// wants bit 15 as CLUT separator for the player avatar, which goes in AMY fixed at 0 due of swaphv
+u16 madam_device::vh_interpolate_plut(int xpos, int ypos, u16 cel_data, u16 pix_data)
 {
-	bool v_bit = BIT(pix_data, m_cel_master_sw.v_output_bit);
+	bool v_bit = BIT(cel_data, m_cel_master_sw.v_output_bit);
 	v_bit |= m_cel_master_sw.v_output_force_high;
 	v_bit &= m_cel_master_sw.v_output_mask;
 
@@ -1707,6 +1721,7 @@ const madam_device::get_woffset_func madam_device::get_woffset_table[2] =
 	&madam_device::get_woffset10
 };
 
+// TODO: verify rollover i.e. if a max woffset10 goes at 0x401 or goes back at +1
 u16 madam_device::get_woffset8(u32 ptr)
 {
 	return m_dma8_read_cb(ptr) + 2;
@@ -1715,16 +1730,7 @@ u16 madam_device::get_woffset8(u32 ptr)
 u16 madam_device::get_woffset10(u32 ptr)
 {
 	const u8 vh = m_dma8_read_cb(ptr);
-	// TODO: bam CEL setups are suspect
-	// All its source pointers in intro/title/main menu going *inside* "PDAT" file headers,
-	// including the unpacked versions. Doc claims to not set the other woffset bits,
-	// i.e. don't set woffset8 bits 31-24 when using woffset10 25-16 and viceversa ...
-	//if (vh & 0xfc)
-	//  return 2;
-
 	const u8 vl = m_dma8_read_cb(ptr + 1);
-	// TODO: verify rollover
-	// (bam also needs this)
 	return ((vh << 8 | vl) & 0x3ff) + 2;
 }
 
@@ -1900,6 +1906,9 @@ u32 madam_device::cel_decompress()
 {
 	u32 tick_time = 1;
 	u32 source_ptr = m_cel.source_ptr;
+
+	// NOTE: Must start at "PDAT" $+8 ($+4 being the calculated size including header)
+	LOGCEL("    packed source_ptr: [%08x]\n", source_ptr);
 
 	const u16 vcnt = ((m_cel.pre0 >> 6) & 0x3ff) + 1;
 	const bool uncoded = !!BIT(m_cel.pre0, 4);
@@ -2174,9 +2183,12 @@ u32 madam_device::get_pixel_6bpp_coded_lrform0(int x, int y, u16 woffset)
 	cel_address += (x / 4) * 3;
 	u8 src_shift = (~x & 3) * 6;
 
-	u16 plut_data = ((m_dma8_read_cb(cel_address + 0) << 16) + (m_dma8_read_cb(cel_address + 1) << 8) + (m_dma8_read_cb(cel_address + 2))) >> (src_shift) & 0x3f;
+	u16 plut_data = ((
+		(m_dma8_read_cb(cel_address + 0) << 16) |
+		(m_dma8_read_cb(cel_address + 1) << 8) |
+		(m_dma8_read_cb(cel_address + 2))) >> src_shift) & 0x3f;
 
-	const u16 p_mode = BIT(plut_data, 5);
+	const u16 p_mode = BIT(plut_data, 5) << 15;
 
 	plut_data &= 0x1f;
 	plut_data <<= 1;
@@ -2297,68 +2309,87 @@ void madam_device::mult_start_process_w(offs_t offset, u32 data, u32 mem_mask)
 			break;
 		}
 		// 1: 4x4 MAC
-		// TODO: 3datlas, vgoalsc96 main menu
-		// ...
-
+		// - 3datlas, vgoalsc96 main menu, jparkint Brachiosaur stage
 		// 2: 3x3 MAC
 		// - slayer, docthauz, retfire
+		// 3: 3x3 MAC w/divide and multiply
+		// - poed, aitd, vgoalsc96 gameplay, goalfh
+		case 1:
 		case 2:
+		case 3:
 		{
 			int x, y;
-			double matrix_stack[3][3];
-			//const u8 op_size = 3 + (data == 1);
+			s64 matrix_stack[4][4];
+			const u8 op_size = 3 + (data == 1);
+			const std::string op_types[] = { "4x4 MAC", "3x3 MAC", "3x3 MAC with N/Z" };
 
 			// populate the *previous* operation result
 			// i.e. perform a swap first
-			for (x = 0; x < 3; x++)
+			for (x = 0; x < op_size; x++)
 				m_mult[16 + 8 + x] = m_mult[16 + 12 + x];
 
-			LOGMULT("3x3 MAC: ");
-			for (y = 0; y < 3; y++)
+			LOGMULT("%s: ", op_types[data - 1]);
+			for (y = 0; y < op_size; y++)
 			{
-				for (x = 0; x < 3; x++)
+				for (x = 0; x < op_size; x++)
 				{
-					matrix_stack[x][y] = (double)m_mult[x + y * 4] / 65536.0;
-					LOGMULT("%f ", matrix_stack[x][y]);
+					matrix_stack[x][y] = m_mult[x + y * 4];
+					LOGMULT("%f ", (double)matrix_stack[x][y] / 65536.0);
 				}
 				LOGMULT("| ");
 			}
 			LOGMULT("\n");
-			double b_bank[3];
-			double result[3] { 0.0, 0.0, 0.0 };
+			s64 b_bank[4];
+			s64 result[4] { 0, 0, 0, 0 };
 
-			for (x = 0; x < 3; x++)
-				b_bank[x] = (double)m_mult[16 + x] / 65536.0;
+			for (x = 0; x < op_size; x++)
+				b_bank[x] = m_mult[16 + x];
 
-			LOGMULT("bank [%d]: %f %f %f\n", 16, b_bank[0], b_bank[1], b_bank[2]);
+			LOGMULT("bank [%d]: %f %f %f\n", 16,
+				(double)b_bank[0] / 65536.0, (double)b_bank[1] / 65536.0, (double)b_bank[2] / 65536.0);
 
 			// perform dot product
-			for (x = 0; x < 3; x++)
+			for (x = 0; x < op_size; x++)
 			{
-				for (y = 0; y < 3; y++)
+				for (y = 0; y < op_size; y++)
 				{
 					result[y] += matrix_stack[x][y] * b_bank[x];
 				}
 			}
+
+			// perform N/Z normalization here
+			// perspective division, scale coordinates by near-clipping plane (N) divided by depth (Z)
+			// (x * (N/Z), y * (N/Z), Z)
+			if (data == 3)
+			{
+				s64 n_base = (((s64)m_mult[32] << 32) | ((u32)m_mult[32 + 1]));
+				s64 z = result[2];
+				// TODO: verify what happens with Z == 0
+				// In fixed-point this is application specific.
+				// - poed triggers this at game startup
+				s64 n_z = 0;
+
+				if (z != 0)
+					n_z = n_base / z;
+				LOGMULT("N/Z = %f\n", (double)n_z / 65536.0);
+				result[0] = (result[0] * n_z) >> 16;
+				result[1] = (result[1] * n_z) >> 16;
+			}
+
 			LOGMULT("-----\nresult [%d] = ", 16 + 12);
 
 			// TODO: how 4th value gets populated by a 3x3? Untouched? Zero? Other?
-			// Requires a SW that mixes 4x4 with 3x3 ops
-			for (x = 0; x < 3; x++)
+			// Requires a SW that mixes 4x4 with 3x3 ops (i.e. one after another)
+			for (x = 0; x < op_size; x++)
 			{
-				m_mult[16 + 12 + x] = (s32)(result[x] * 65536.0);
-				LOGMULT("%f ", result[x]);
+				m_mult[16 + 12 + x] = (s32)(result[x] >> 16);
+				LOGMULT("%f ", (double)result[x] / 65536.0);
 				//LOGMULT("%08x ", m_mult[bank_src + 8 + x]);
 			}
 			LOGMULT("\n\n");
 			//m_mult_control ^= 0x10;
 			break;
 		}
-		// 3: 3x3 MAC w/divide and multiply
-		// TODO: vgoalsc96, goalfh
-		// Sets N parameter at [32] as input (in 32.32 format?), should apply a normalization to
-		// the resulting matrix (i.e. applying mode=1 3x3 Matrix as-is will have radar-like dims)
-		// ...
 
 		// 4: 4x1 MAC
 		// 5: 1x1 MAC (4 sets)

@@ -1751,6 +1751,18 @@ end
 
 ---------------------------------------------------
 --
+--@src/devices/sound/gsc38gg307.h,SOUNDS["GSC38GG307"] = true
+--------------------------------------------------
+
+if SOUNDS["GSC38GG307"] then
+	files {
+		MAME_DIR .. "src/devices/sound/gsc38gg307.cpp",
+		MAME_DIR .. "src/devices/sound/gsc38gg307.h",
+	}
+end
+
+--------------------------------------------------
+--
 --@src/devices/sound/iopspu.h,SOUNDS["IOPSPU"] = true
 ---------------------------------------------------
 
