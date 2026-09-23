@@ -131,7 +131,6 @@ void nes_txrom_device::mmc3_start()
 	save_item(NAME(m_last_a12_low_cpu));
 	save_item(NAME(m_prev_ppu_addr));
 	save_item(NAME(m_a12_low_seen));
-	save_item(NAME(m_mmc3_odd_skip_a12_pending));
 }
 
 void nes_txrom_device::mmc3_common_initialize( int prg_mask, int chr_mask, int nec_irq_behavior )
@@ -168,7 +167,6 @@ void nes_txrom_device::mmc3_common_initialize( int prg_mask, int chr_mask, int n
 	m_irq_reload = false;
 	m_last_a12_low_cpu = 0;
 	m_prev_ppu_addr = 0;
-	m_mmc3_odd_skip_a12_pending = false;
 	m_a12_low_seen = false;
 	
 	// 0 = Sharp/new behavior, nonzero = NEC/old behavior.
@@ -252,20 +250,13 @@ void nes_txrom_device::ppu_bus_address(uint16_t ppu_addr, uint64_t cpu_cycles, i
 	{
 		const uint64_t low_time = cpu_cycles - m_last_a12_low_cpu;
 
-		if (m_a12_low_seen && (low_time > 9 || (m_mmc3_odd_skip_a12_pending && low_time >= 8)))
+		if (m_a12_low_seen && low_time > 9)
 			mmc3_irq_clock();
 
-		m_mmc3_odd_skip_a12_pending = false;
 		m_a12_low_seen = false;
 	}
 
 	m_prev_ppu_addr = ppu_addr;
-}
-
-void nes_txrom_device::ppu_odd_frame_skip()
-{
-	//enable to see the wario woods glitch, otherwise my cpu/ppu alignment does not produce it.
-	//m_mmc3_odd_skip_a12_pending = true;
 }
 
 void nes_txrom_device::mmc3_irq_clock()

@@ -63,7 +63,7 @@ public:
 	typedef device_delegate<void (offs_t offset)> latch_delegate;
 	typedef device_delegate<void (int scanline, unsigned dot, int ppu_tick, uint16_t ppu_address)> ppu_to_mapper_delegate;
 	typedef device_delegate<void (uint16_t address, uint64_t ppu_cycle, int ppu_tick, bool odd_frame)> ppu_bus_address_delegate;
-	typedef device_delegate<void ()> ppu_odd_frame_skip_delegate;
+	//typedef device_delegate<void ()> ppu_odd_frame_skip_delegate;
 	typedef device_delegate<void (bool upper_chr, uint16_t ppu_address)> mmc1_ppu_phase_delegate;
 	typedef device_delegate<void (uint16_t address)> mmc5_ppu_read_delegate;
 	typedef device_delegate<void ()> mmc5_reset_scanline_irq_delegate;
@@ -243,12 +243,12 @@ public:
 		m_ppu_bus_address_callback.resolve();
 	}
 	
-	template <typename... T>
+	/*template <typename... T>
 	void set_ppu_odd_frame_skip(T &&... args)
 	{
 		m_ppu_odd_frame_skip.set(std::forward<T>(args)...);
 		m_ppu_odd_frame_skip.resolve();
-	}
+	}*/
 	
 	template <typename... T>
 	void set_mmc1_ppu_phase(T &&... args)
@@ -425,7 +425,7 @@ protected:
 	latch_delegate m_latch;
 	ppu_to_mapper_delegate m_ppu_to_mapper;
 	ppu_bus_address_delegate m_ppu_bus_address_callback;
-	ppu_odd_frame_skip_delegate m_ppu_odd_frame_skip;
+	//ppu_odd_frame_skip_delegate m_ppu_odd_frame_skip;
 	mmc1_ppu_phase_delegate m_mmc1_ppu_phase;
 	mmc5_ppu_read_delegate m_mmc5_ppu_read;
 	mmc5_reset_scanline_irq_delegate m_mmc5_reset_scanline_irq;
@@ -491,6 +491,7 @@ protected:
 	uint64_t frame;
 	bool skip_dot;
 	int ppu_tick_in_cpu_cycle;
+	uint64_t ppu_cycle_offset;
 	uint8_t frame_start_ppu_phase;
 
 	// Current PPU address bus value.

@@ -24,7 +24,6 @@ public:
 
 	virtual void ppu_to_mapper(int scanline, unsigned dot, int ppu_tick, uint16_t ppu_address) override; //called from ppu
 	virtual void ppu_bus_address(uint16_t ppu_addr, uint64_t cpu_cycles, int ppu_tick, bool m_odd_frame) override; //called from ppu
-	virtual void ppu_odd_frame_skip() override;	//called from ppu
 	virtual void pcb_reset() override; 
 
 protected:
@@ -113,7 +112,6 @@ protected:
 	
 	bool m_a12_low_seen = false;
 	int m_ppu_tick;
-	bool m_mmc3_odd_skip_a12_pending;
 };
 
 

@@ -75,7 +75,7 @@ void ppu2c0x_device::device_config_complete() {
 	m_latch.set(nullptr);
 	m_ppu_to_mapper.set(nullptr);
 	m_ppu_bus_address_callback.set(nullptr);
-	m_ppu_odd_frame_skip.set(nullptr);
+	//m_ppu_odd_frame_skip.set(nullptr);
 	m_mmc1_ppu_phase.set(nullptr);
 	m_mmc5_ppu_read.set(nullptr);
 	m_mmc5_reset_scanline_irq.set(nullptr);
@@ -102,7 +102,7 @@ ppu2c0x_device::ppu2c0x_device(const machine_config& mconfig, device_type type, 
 	m_latch(*this),
 	m_ppu_to_mapper(*this),
 	m_ppu_bus_address_callback(*this),
-	m_ppu_odd_frame_skip(*this),
+	//m_ppu_odd_frame_skip(*this),
 	m_mmc1_ppu_phase(*this),
 	m_mmc5_ppu_read(*this),
 	m_mmc5_reset_scanline_irq(*this),
@@ -265,6 +265,7 @@ void ppu2c0x_device::init_runtime_reset_state() {
 	
 	ppu_tick_in_cpu_cycle = 0;
 	frame_start_ppu_phase = 0;
+	ppu_cycle_offset = 0;
 
 	// --------------------------------------------------
 	// PPU external bus / open bus / $2007 buffer
@@ -628,6 +629,7 @@ void ppu2c0x_device::device_start() {
 	save_item(NAME(s_after_wrap));
 	save_item(NAME(ppu_tick_in_cpu_cycle));
 	save_item(NAME(frame_start_ppu_phase));
+	save_item(NAME(ppu_cycle_offset));
 
 	// --------------------------------------------------
 	// PPU data/bus state
@@ -991,8 +993,8 @@ void ppu2c0x_device::ppu_bus_address_drive(uint16_t addr, ppu_bus_source source)
 	ppu_address_bus = addr;
 	ppu_ad_latch = addr & 0xff;
 
-	const uint64_t cpu_cycle = m_cpu->total_cycles() + (source == ppu_bus_source::CPU_ACCESS ? 1 : 0);
-	const uint64_t ppu_cycle = (cpu_cycle * 3) + ppu_tick_in_cpu_cycle;
+		const uint64_t cpu_cycle = m_cpu->total_cycles() + (source == ppu_bus_source::CPU_ACCESS ? 1 : 0);
+	const uint64_t ppu_cycle = (cpu_cycle * 3) + ppu_tick_in_cpu_cycle + ppu_cycle_offset;
 
 	if (!m_ppu_bus_address_callback.isnull())
 		m_ppu_bus_address_callback(addr, ppu_cycle, ppu_tick_in_cpu_cycle, odd_frame);
@@ -1488,6 +1490,7 @@ void ppu2c0x_device::tick(int x) {
 	}
 
 	if (skip_dot && scanline == 0 && dot == 0) {
+		ppu_cycle_offset = 2; //blinking in warrio woods
 		dot++;
 		skip_dot = false;
 		screen().reset_origin(scanline, dot);
@@ -1528,8 +1531,8 @@ void ppu2c0x_device::tick(int x) {
 
 		//if (m_has_mmc3_a12 && m_mmc3)
 		//	m_mmc3->notify_ppu_odd_skip();
-		if (!m_ppu_odd_frame_skip.isnull())
-			m_ppu_odd_frame_skip();
+		//if (!m_ppu_odd_frame_skip.isnull())
+		//	m_ppu_odd_frame_skip();
 	}
 
 	++dot;
@@ -1554,6 +1557,7 @@ void ppu2c0x_device::tick(int x) {
 			frame_start_ppu_phase = ppu_tick_in_cpu_cycle;
 			suppress_vblank_flag = false;
 			odd_frame = !odd_frame;
+			ppu_cycle_offset = 0;
 			screen().reset_origin(scanline, dot);
 			frame++;
 		}

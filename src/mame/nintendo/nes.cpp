@@ -688,7 +688,7 @@ void nes_state::machine_start()
 		m_ppu->set_ppu_to_mapper(*m_cartslot->m_cart, FUNC(device_nes_cart_interface::ppu_to_mapper));
 
 		m_ppu->set_ppu_bus_address(*m_cartslot->m_cart, FUNC(device_nes_cart_interface::ppu_bus_address));
-		m_ppu->set_ppu_odd_frame_skip(*m_cartslot->m_cart, FUNC(device_nes_cart_interface::ppu_odd_frame_skip));
+		//m_ppu->set_ppu_odd_frame_skip(*m_cartslot->m_cart, FUNC(device_nes_cart_interface::ppu_odd_frame_skip));
 		m_ppu->set_mmc1_ppu_phase(*m_cartslot->m_cart, FUNC(device_nes_cart_interface::mmc1_ppu_phase));
 		const int callback_pcb_id = m_cartslot->get_pcb_id();
 
