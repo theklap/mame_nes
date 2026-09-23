@@ -54,7 +54,8 @@ typedef device_delegate<void (uint8_t data)> mmc5_register_write_delegate;
 		mintf = std::move(interface);
 	}
 
-	bool get_sync() const { return sync; }
+	bool get_sync() const { return m_sync; }
+	uint16_t get_internal_pc() const { return m_PC; }
 
 	auto sync_cb() { return sync_w.bind(); }
 
