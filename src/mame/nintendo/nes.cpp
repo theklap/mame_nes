@@ -323,6 +323,7 @@ static std::vector<open_bus_range> compute_open_bus_ranges(
 		case BANDAI_KARAOKE:
 		case BATMAP_000:
 		case BMC_BENSHIENG:
+		case BMC_1200IN1:
 		case BTL_AISENSHINICOL:
 		case BTL_MARIOBABY:
 		case BTL_SMB3:

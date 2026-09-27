@@ -1227,7 +1227,13 @@ void nes_bmc_th22913_device::pcb_reset()
  Active Entertainment Action 52 board emulation
 
  iNES: mapper 228
-
+ 
+ Games
+ -----
+ action52
+ action52a
+ action52b
+ cheeta2
  -------------------------------------------------*/
 
 u8 nes_action52_device::read_ex(offs_t offset) {
@@ -1250,10 +1256,6 @@ void nes_action52_device::write_h(offs_t offset, u8 data) {
 	const u8 bank = BIT(offset, 6, 7);
 	const u8 mode = !BIT(offset, 5);
 	const u8 chr = ((offset & 0x0f) << 2) | (data & 0x03);
-
-	logerror("ACT52: CPU=%04X DATA=%02X PRG=%02X MODE=%u CHR=%02X MIR=%s\n",
-		u16(offset + 0x8000), data, bank, mode, chr,
-		BIT(offset, 13) ? "H" : "V");
 
 	prg16_89ab(bank & ~mode);
 	prg16_cdef(bank | mode);
@@ -3190,31 +3192,37 @@ void nes_bmc_1200in1_device::chr_w(offs_t offset, uint8_t data)
 
 void nes_bmc_1200in1_device::write_h(offs_t offset, uint8_t data)
 {
-	int bank = ((offset >> 2) & 0x1f) |  ((offset & 0x0100) >> 3);
+	int bank = ((offset >> 2) & 0x1f) | ((offset & 0x0100) >> 3);
+	const bool battery_variant = !m_battery.empty();
 
 	LOG("bmc_1200in1 write_h, offset: %04x, data: %02x\n", offset, data);
 
-	if (offset & 0x80)
-	{
-//      m_vram_protect = 1;
-		prg16_89ab(bank);
-		prg16_cdef(bank + (offset & 1));
-	}
-	else
-	{
-		int low_mask = (offset & 1) ? 0x3e : 0xff;
+	m_vram_protect = !battery_variant && BIT(offset, 7);
 
-//      m_vram_protect = 0;
-		if (!BIT(offset, 9))
+	if (BIT(offset, 7) || battery_variant)
+	{
+		if (BIT(offset, 0))
 		{
-			prg16_89ab(bank & low_mask);
-			prg16_cdef(bank & 0x38);
+			bank &= ~1;
+			prg16_89ab(bank);
+			prg16_cdef(bank + 1);
 		}
 		else
 		{
-			prg16_89ab(bank & low_mask);
-			prg16_cdef(bank | 0x07);
+			prg16_89ab(bank);
+			prg16_cdef(bank);
 		}
+	}
+	else
+	{
+		const int low_mask = BIT(offset, 0) ? 0x3e : 0xff;
+
+		prg16_89ab(bank & low_mask);
+
+		if (BIT(offset, 9))
+			prg16_cdef(bank | 0x07);
+		else
+			prg16_cdef(bank & 0x38);
 	}
 
 	set_nt_mirroring(BIT(offset, 1) ? PPU_MIRROR_HORZ : PPU_MIRROR_VERT);

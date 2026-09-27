@@ -155,7 +155,7 @@ void nes_tengen037_device::pcb_reset() {
  In MAME: Supported.
 
  -------------------------------------------------*/
-void nes_tengen032_device::ppu_to_mapper(int scanline, unsigned dot, int ppu_tick, uint16_t ppu_address) {
+/*void nes_tengen032_device::ppu_to_mapper(int scanline, unsigned dot, int ppu_tick, uint16_t ppu_address) {
 	if (m_irq_cpu_delay > 0) {
 		const u64 current_cpu_cycle = m_maincpu6502->total_cycles();
 		const u64 elapsed_cpu_cycles = current_cpu_cycle - m_irq_delay_cpu_cycle;
@@ -184,6 +184,16 @@ void nes_tengen032_device::ppu_to_mapper(int scanline, unsigned dot, int ppu_tic
 			delay_irq = -1;
 		}
 	}
+}*/
+void nes_tengen032_device::ppu_to_mapper(int scanline, unsigned dot, int ppu_tick, uint16_t ppu_address) {
+	if (delay_irq > 0) {
+		--delay_irq;
+
+		if (delay_irq == 0) {
+			m_maincpu6502->queue_delayed_mapper_irq(2);
+			delay_irq = -1;
+		}
+	}
 }
 
 inline void nes_tengen032_device::irq_clock() {
@@ -204,9 +214,28 @@ inline void nes_tengen032_device::irq_clock() {
 
 	m_irq_reset = 0;
 
-	if (trigger_irq && m_irq_cpu_delay == 0 && delay_irq == 0) {
+	/*if (trigger_irq && m_irq_cpu_delay == 0 && delay_irq == 0) {
 		m_irq_cpu_delay = m_irq_mode ? 4 : 2;
 		m_irq_delay_cpu_cycle = m_maincpu6502->total_cycles();
+	}*/
+	/*if (trigger_irq && m_irq_cpu_delay == 0 && delay_irq == 0) {
+		if (!m_irq_mode && m_irq_direct_after_mode_switch) {
+			//m_irq_cpu_delay = 0;
+			//delay_irq = -1;
+			m_irq_direct_after_mode_switch = false;
+			set_irq_line(ASSERT_LINE);
+		} else {
+			m_irq_cpu_delay = m_irq_mode ? 3 : 1;
+			m_irq_delay_cpu_cycle = m_maincpu6502->total_cycles();
+		}
+	}*/
+	if (trigger_irq && m_irq_cpu_delay == 0 && delay_irq == 0) {
+		if (!m_irq_mode && m_irq_direct_after_mode_switch) {
+			m_irq_direct_after_mode_switch = false;
+			set_irq_line(ASSERT_LINE);
+		} else {
+			m_irq_cpu_delay = m_irq_mode ? 4 : 2;
+		}
 	}
 }
 
@@ -214,11 +243,34 @@ void nes_tengen032_device::ppu_bus_address(uint16_t ppu_addr, uint64_t ppu_cycle
 	m_prev_ppu_addr = ppu_addr;
 }
 
-TIMER_CALLBACK_MEMBER(nes_tengen032_device::a12_timer_tick) {
+/*TIMER_CALLBACK_MEMBER(nes_tengen032_device::a12_timer_tick) {
 	if (BIT(m_prev_ppu_addr, 12)) {
 		if (!m_irq_mode && m_a12_m2_counter == 0) {
 			irq_clock();
 		}
+
+		m_a12_m2_counter = 16;
+	} else if (m_a12_m2_counter > 0) {
+		--m_a12_m2_counter;
+	}
+}*/
+TIMER_CALLBACK_MEMBER(nes_tengen032_device::a12_timer_tick) {
+	if (m_irq_cpu_delay > 0) {
+		--m_irq_cpu_delay;
+
+		if (m_irq_cpu_delay == 0) {
+			if (m_irq_direct_after_mode_switch) {
+				m_irq_direct_after_mode_switch = false;
+				set_irq_line(ASSERT_LINE);
+			} else {
+				delay_irq = 2;
+			}
+		}
+	}
+
+	if (BIT(m_prev_ppu_addr, 12)) {
+		if (!m_irq_mode && m_a12_m2_counter == 0)
+			irq_clock();
 
 		m_a12_m2_counter = 16;
 	} else if (m_a12_m2_counter > 0) {
