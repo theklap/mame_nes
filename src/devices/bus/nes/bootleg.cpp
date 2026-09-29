@@ -22,7 +22,7 @@
 
 #include "emu.h"
 #include "bootleg.h"
-#include "cpu/m6502/m6502.h"
+#include "cpu/m6502/rp2a03.h"
 #include "video/ppu2c0x.h"      // this has to be included so that IRQ functions can access ppu2c0x_device::BOTTOM_VISIBLE_SCANLINE
 
 #define LOG_HIFREQ (1U << 1)
@@ -270,7 +270,7 @@ void nes_mbaby_device::device_start()
 	irq_timer = timer_alloc(FUNC(nes_mbaby_device::irq_timer_tick), this);
 	irq_timer->adjust(attotime::zero, 0, clocks_to_attotime(1));
 
-	m_maincpu6502 = machine().root_device().subdevice<m6502_device>("maincpu");
+	m_maincpu6502 = machine().root_device().subdevice<rp2a03_core_device>("maincpu");
 
 	save_item(NAME(m_irq_enable));
 	save_item(NAME(m_irq_count));
@@ -315,7 +315,7 @@ void nes_smb3p_device::device_start() {
 	irq_timer = timer_alloc(FUNC(nes_smb3p_device::irq_timer_tick), this);
 	irq_timer->adjust(attotime::zero, 0, clocks_to_attotime(1));
 
-	m_maincpu6502 = machine().root_device().subdevice<m6502_device>("maincpu");
+	m_maincpu6502 = machine().root_device().subdevice<rp2a03_core_device>("maincpu");
 
 	save_item(NAME(m_irq_enable));
 	save_item(NAME(m_irq_count));
@@ -342,7 +342,7 @@ void nes_batmanfs_device::device_start()
 	irq_timer = timer_alloc(FUNC(nes_batmanfs_device::irq_timer_tick), this);
 	irq_timer->adjust(attotime::zero, 0, clocks_to_attotime(1));
 
-	m_maincpu6502 = machine().root_device().subdevice<m6502_device>("maincpu");
+	m_maincpu6502 = machine().root_device().subdevice<rp2a03_core_device>("maincpu");
 
 	save_item(NAME(m_irq_count));
 	save_item(NAME(m_irq_enable));
@@ -371,7 +371,7 @@ void nes_btl_cj_device::pcb_reset()
 void nes_btl_dn_device::device_start() {
 	common_start();
 
-	m_maincpu6502 = machine().root_device().subdevice<m6502_device>("maincpu");
+	m_maincpu6502 = machine().root_device().subdevice<rp2a03_core_device>("maincpu");
 
 	save_item(NAME(m_irq_count));
 	save_item(NAME(m_irq_delay));
@@ -397,7 +397,7 @@ void nes_smb2j_device::device_start() {
 	irq_timer = timer_alloc(FUNC(nes_smb2j_device::irq_timer_tick), this);
 	irq_timer->adjust(attotime::zero, 0, clocks_to_attotime(1));
 
-	m_maincpu6502 = machine().root_device().subdevice<m6502_device>("maincpu");
+	m_maincpu6502 = machine().root_device().subdevice<rp2a03_core_device>("maincpu");
 
 	save_item(NAME(m_irq_enable));
 	save_item(NAME(m_irq_count));
@@ -425,7 +425,7 @@ void nes_smb2ja_device::device_start() {
 	irq_timer = timer_alloc(FUNC(nes_smb2ja_device::irq_timer_tick), this);
 	irq_timer->adjust(attotime::zero, 0, clocks_to_attotime(1));
 
-	m_maincpu6502 = machine().root_device().subdevice<m6502_device>("maincpu");
+	m_maincpu6502 = machine().root_device().subdevice<rp2a03_core_device>("maincpu");
 
 	save_item(NAME(m_irq_enable));
 	save_item(NAME(m_irq_count));
@@ -453,7 +453,7 @@ void nes_smb2jb_device::device_start() {
 	irq_timer = timer_alloc(FUNC(nes_smb2jb_device::irq_timer_tick), this);
 	irq_timer->adjust(attotime::zero, 0, clocks_to_attotime(1));
 
-	m_maincpu6502 = machine().root_device().subdevice<m6502_device>("maincpu");
+	m_maincpu6502 = machine().root_device().subdevice<rp2a03_core_device>("maincpu");
 
 	save_item(NAME(m_irq_enable));
 	save_item(NAME(m_irq_count));
@@ -511,7 +511,7 @@ void nes_0353_device::pcb_reset()
 void nes_09034a_device::device_start() {
 	common_start();
 
-	m_maincpu6502 = machine().root_device().subdevice<m6502_device>("maincpu");
+	m_maincpu6502 = machine().root_device().subdevice<rp2a03_core_device>("maincpu");
 
 	irq_timer = timer_alloc(FUNC(nes_09034a_device::irq_timer_tick), this);
 	irq_timer->adjust(attotime::zero, 0, clocks_to_attotime(1));
@@ -540,7 +540,7 @@ void nes_l001_device::device_start()
 	irq_timer = timer_alloc(FUNC(nes_l001_device::irq_timer_tick), this);
 	irq_timer->adjust(attotime::zero, 0, clocks_to_attotime(1));
 
-	m_maincpu6502 = machine().root_device().subdevice<m6502_device>("maincpu");
+	m_maincpu6502 = machine().root_device().subdevice<rp2a03_core_device>("maincpu");
 
 	save_item(NAME(m_irq_count));
 	save_item(NAME(m_irq_delay));
@@ -667,7 +667,7 @@ void nes_lh53_device::device_start()
 	common_start();
 	irq_timer = timer_alloc(FUNC(nes_lh53_device::irq_timer_tick), this);
 	irq_timer->adjust(attotime::zero, 0, clocks_to_attotime(1));
-	m_maincpu6502 = machine().root_device().subdevice<m6502_device>("maincpu");
+	m_maincpu6502 = machine().root_device().subdevice<rp2a03_core_device>("maincpu");
 
 	save_item(NAME(m_irq_delay));
 	save_item(NAME(m_irq_enable));
@@ -734,7 +734,7 @@ void nes_yung08_device::device_start()
 	irq_timer = timer_alloc(FUNC(nes_yung08_device::irq_timer_tick), this);
 	irq_timer->adjust(attotime::zero, 0, clocks_to_attotime(1));
 
-	m_maincpu6502 = machine().root_device().subdevice<m6502_device>("maincpu");
+	m_maincpu6502 = machine().root_device().subdevice<rp2a03_core_device>("maincpu");
 
 	save_item(NAME(m_irq_count));
 	save_item(NAME(m_irq_latch));

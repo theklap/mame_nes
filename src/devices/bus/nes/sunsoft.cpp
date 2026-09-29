@@ -23,7 +23,7 @@
 
 #include "emu.h"
 #include "sunsoft.h"
-#include "cpu/m6502/m6502.h"
+#include "cpu/m6502/rp2a03.h"
 
 #include "sound/ay8910.h"
 #include "speaker.h"

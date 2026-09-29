@@ -277,6 +277,15 @@ public:
 	
 	void set_submapper(u8 val) { m_submapper = val; }
 	u8 get_submapper() const { return m_submapper; }
+	
+	void set_console_type(u8 val) { m_console_type = val; }
+	u8 get_console_type() const { return m_console_type; }
+	void set_vs_system_type(u8 val) { m_vs_system_type = val; }
+	u8 get_vs_system_type() const { return m_vs_system_type; }
+	void set_misc_rom_count(u8 val) { m_misc_rom_count = val; }
+	u8 get_misc_rom_count() const { return m_misc_rom_count; }
+	void set_default_expansion_device(u8 val) { m_default_expansion_device = val; }
+	u8 get_default_expansion_device() const { return m_default_expansion_device; }
 
 protected:
 	device_nes_cart_interface(const machine_config &mconfig, device_t &device);
@@ -293,6 +302,11 @@ protected:
 	uint32_t m_prg_size;
 	uint32_t m_vrom_size;
 	u8 m_submapper = 0;
+	
+	u8 m_console_type = 0;
+	u8 m_vs_system_type = 0;
+	u8 m_misc_rom_count = 0;
+	u8 m_default_expansion_device = 0;
 
 
 private:

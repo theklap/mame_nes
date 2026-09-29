@@ -84,16 +84,54 @@ RDY_GATED_DEVICES = {"m6502", "m6510"}
 CMOS_DEVICES = {"w65c02", "r65c02", "r65c19", "w65c02s", "m65ce02", "m4510", "w65816"}
 
 
+def prepare_rp2a03_instructions(name, instructions):
+    instructions = list(instructions)
+
+    replacements = {
+        "\twrite(m_SP, m_irq_taken ? m_P & ~F_B : m_P);": "\twrite(m_SP, m_irq_taken ? ((m_P & ~F_B) | F_T) : (m_P | F_B | F_T));",
+        "\twrite(m_SP, m_P);": "\twrite(m_SP, (m_P | F_B | F_T));",
+        "\tm_TMP = read(m_SP) | (F_B|F_E);": "\tm_TMP = read(m_SP) & 0xCF;// | (F_B|F_E);",
+        "\tm_P = read(m_SP) | (F_B|F_E);": "\tm_P = read(m_SP) & 0xCF;// | (F_B|F_E);",
+        "\tm_A = m_TMP2 | 0x51;": "\tm_A = m_TMP2 & m_SP;",
+        "\tm_X = 0xff;": "\tm_X = m_A;\n\tm_SP = set_l(m_SP, m_A);",
+        "\tset_nz(m_TMP2);": "\tset_nz(m_A);" if name == "las_aby" else "\tset_nz(m_TMP2);"
+    }
+    instructions = [replacements.get(ins, ins) for ins in instructions]
+
+    halted_values = {
+        "sha_aby": ("m_A & m_X", "m_A & m_X & ((m_TMP >> 8)+1)"),
+        "sha_idy": ("m_A & m_X", "m_A & m_X & ((m_TMP >> 8)+1)"),
+        "shs_aby": ("m_A & m_X", "m_A & m_X & ((m_TMP >> 8)+1)"),
+        "shx_aby": ("m_X", "m_X & ((m_TMP >> 8)+1)"),
+        "shy_abx": ("m_Y", "m_Y & ((m_TMP >> 8)+1)")
+    }
+    if name in halted_values:
+        halted, running = halted_values[name]
+        original = "\tm_TMP2 = %s;" % running
+        replacement = "\tif(inst_halted) {\n\t\tm_TMP2 = %s;\n\t} else {\n\t\tm_TMP2 = %s;\n\t}" % (halted, running)
+        instructions = [replacement if ins == original else ins for ins in instructions]
+
+    return instructions
+
+
 def save_opcodes(f, device, opcodes):
     rdy_gated = device in RDY_GATED_DEVICES
     interrupt_sampled = device not in CMOS_DEVICES
+    rp2a03_cycle_hook = device == "rp2a03_core"
+
+    if rp2a03_cycle_hook:
+        interrupt_sampled = False
+
     for name, instructions in opcodes:
+        if rp2a03_cycle_hook:
+            instructions = prepare_rp2a03_instructions(name, instructions)
         single_cycle = sum(identify_line_type(ins) in ("MEMORY_READ", "MEMORY_WRITE") for ins in instructions) == 1
         emit(f, "void %s_device::%s_full()" % (device, name))
         emit(f, "{")
         substate = 1
-        for ins in instructions:
+        for ins_index, ins in enumerate(instructions):
             line_type = identify_line_type(ins)
+            next_line_type = next((identify_line_type(next_ins) for next_ins in instructions[ins_index + 1:] if identify_line_type(next_ins) in ("MEMORY_READ", "MEMORY_WRITE")), None)
             if line_type == "EAT":
                 emit(f, "\tdebugger_wait_hook();")
                 emit(f, "\tm_icount = 0;")
@@ -112,7 +150,13 @@ def save_opcodes(f, device, opcodes):
                 if interrupt_sampled and samples_interrupt(ins, single_cycle):
                     emit(f, "\tsample_interrupt();")
                 emit(f, ins)
+                if rp2a03_cycle_hook and name == "brk_imp" and line_type == "MEMORY_READ" and "read_pc()" in ins:
+                    emit(f, "\tnext_read = false;")
+                elif rp2a03_cycle_hook and not name.startswith(("rra_nd_", "isb_nd_")) and next_line_type and next_line_type != line_type:
+                    emit(f, "\tnext_read = %s;" % ("true" if next_line_type == "MEMORY_READ" else "false"))
                 emit(f, "\tm_icount--;")
+                if rp2a03_cycle_hook and line_type == "MEMORY_READ" and not (name == "rol_zpx" and ins.strip() == "m_TMP = read_pc();"):
+                    emit(f, "\tdo_halt();")
                 emit(f, "\tif(m_icount <= 0) {")
                 emit(f, "\t\tif(access_to_be_redone()) {")
                 emit(f, "\t\t\tm_icount++;")
@@ -132,8 +176,9 @@ def save_opcodes(f, device, opcodes):
         emit(f, "\tswitch(m_inst_substate) {")
         emit(f, "case 0:")
         substate = 1
-        for ins in instructions:
+        for ins_index, ins in enumerate(instructions):
             line_type = identify_line_type(ins)
+            next_line_type = next((identify_line_type(next_ins) for next_ins in instructions[ins_index + 1:] if identify_line_type(next_ins) in ("MEMORY_READ", "MEMORY_WRITE")), None)
             if line_type == "EAT":
                 emit(f, "\tdebugger_wait_hook();")
                 emit(f, "\tm_icount = 0;")
@@ -155,7 +200,13 @@ def save_opcodes(f, device, opcodes):
                 if interrupt_sampled and samples_interrupt(ins, single_cycle):
                     emit(f, "\tsample_interrupt();")
                 emit(f, ins)
+                if rp2a03_cycle_hook and name == "brk_imp" and line_type == "MEMORY_READ" and "read_pc()" in ins:
+                    emit(f, "\tnext_read = false;")
+                elif rp2a03_cycle_hook and not name.startswith(("rra_nd_", "isb_nd_")) and next_line_type and next_line_type != line_type:
+                    emit(f, "\tnext_read = %s;" % ("true" if next_line_type == "MEMORY_READ" else "false"))
                 emit(f, "\tm_icount--;")
+                if rp2a03_cycle_hook and line_type == "MEMORY_READ":
+                    emit(f, "\tdo_halt();")
                 emit(f, "\tif(m_icount <= 0) {")
                 emit(f, "\t\tif(access_to_be_redone()) {")
                 emit(f, "\t\t\tm_icount++;")

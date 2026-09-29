@@ -28,7 +28,7 @@
 #include "emu.h"
 #include "bandai.h"
 
-#include "cpu/m6502/m6502.h"
+#include "cpu/m6502/rp2a03.h"
 
 #define LOG_UNHANDLED (1U << 1)
 
@@ -133,7 +133,7 @@ void nes_oekakids_device::pcb_reset()
 void nes_fcg_device::device_start()
 {
 	common_start();
-	m_maincpu6502 = machine().root_device().subdevice<m6502_device>("maincpu");
+	m_maincpu6502 = machine().root_device().subdevice<rp2a03_core_device>("maincpu");
 	irq_timer = timer_alloc(FUNC(nes_fcg_device::irq_timer_tick), this);
 	irq_timer->adjust(attotime::zero, 0, clocks_to_attotime(1));
 
@@ -163,7 +163,7 @@ void nes_fcg_device::pcb_reset()
 void nes_lz93d50_24c01_device::device_start()
 {
 	common_start();
-	m_maincpu6502 = machine().root_device().subdevice<m6502_device>("maincpu");
+	m_maincpu6502 = machine().root_device().subdevice<rp2a03_core_device>("maincpu");
 	irq_timer = timer_alloc(FUNC(nes_lz93d50_24c01_device::irq_timer_tick), this);
 	irq_timer->adjust(attotime::zero, 0, clocks_to_attotime(1));
 
@@ -197,7 +197,7 @@ void nes_lz93d50_24c01_device::pcb_reset()
 void nes_fjump2_device::device_start()
 {
 	common_start();
-	m_maincpu6502 = machine().root_device().subdevice<m6502_device>("maincpu");
+	m_maincpu6502 = machine().root_device().subdevice<rp2a03_core_device>("maincpu");
 	irq_timer = timer_alloc(FUNC(nes_fjump2_device::irq_timer_tick), this);
 	irq_timer->adjust(attotime::zero, 0, clocks_to_attotime(1));
 

@@ -10,7 +10,7 @@
 
 
 // ======================> nes_sunsoft_1_device
-class m6502_device;
+class rp2a03_core_device;
 class nes_sunsoft_1_device : public nes_nrom_device
 {
 public:
@@ -124,7 +124,7 @@ private:
 	int delay_irq;
 
 	emu_timer *irq_timer;
-	required_device<m6502_device> m_maincpu6502;
+	required_device<rp2a03_core_device> m_maincpu6502;
 
 	uint8_t m_latch;
 	uint8_t m_wram_bank;

@@ -8,7 +8,7 @@
 #include "nxrom.h"
 
 // ======================> nes_txrom_device
-class m6502_device;
+class rp2a03_core_device;
 class nes_txrom_device : public nes_nrom_device
 {
 public:
@@ -108,7 +108,7 @@ protected:
 	uint16_t m_prev_ppu_addr;
 
 	// Cached CPU pointer used for delayed IRQ queue/cancel and timing.
-	m6502_device* m_maincpu6502 = nullptr;
+	rp2a03_core_device *m_maincpu6502 = nullptr;
 	
 	bool m_a12_low_seen = false;
 	int m_ppu_tick;

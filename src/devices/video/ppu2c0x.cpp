@@ -17,7 +17,7 @@ Total rewrite by Matthew Sutton for Accuracy NTSC and PAL
 
 #include "emu.h"
 #include "video/ppu2c0x.h"
-#include "cpu/m6502/m6502.h"
+#include "cpu/m6502/rp2a03.h"
 #include "sound/nes_apu.h"
 #include <numbers>
 //#include "bus/nes/mmc5.h"
@@ -522,7 +522,7 @@ void ppu2c0x_device::device_start() {
 	// --------------------------------------------------
 	// Device pointers
 	// --------------------------------------------------
-	m_maincpu6502 = machine().root_device().subdevice<m6502_device>("maincpu");
+	m_maincpu6502 = machine().root_device().subdevice<rp2a03_core_device>("maincpu");
 	//m_mmc5 = machine().root_device().subdevice<nes_exrom_device>("nes_slot:exrom");
 
 	// --------------------------------------------------

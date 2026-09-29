@@ -65,7 +65,7 @@ void nes_cony_device::device_start()
 	m_irq_source = 0x00;
 	m_irq_last_a12 = false;
 
-	m_maincpu6502 = machine().root_device().subdevice<m6502_device>("maincpu");
+	m_maincpu6502 = machine().root_device().subdevice<rp2a03_core_device>("maincpu");
 
 	irq_timer = timer_alloc(FUNC(nes_cony_device::irq_timer_tick), this);
 	irq_timer->adjust(attotime::zero, 0, clocks_to_attotime(1));

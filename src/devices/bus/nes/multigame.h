@@ -368,20 +368,19 @@ private:
 class nes_bmc_970630c_device : public nes_nrom_device
 {
 public:
-	// construction/destruction
 	nes_bmc_970630c_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock);
 
 	virtual u8 read_h(offs_t offset) override;
 	virtual void write_h(offs_t offset, u8 data) override;
-
 	virtual void pcb_reset() override;
 
 protected:
-	// device-level overrides
 	virtual void device_start() override;
+	virtual ioport_constructor device_input_ports() const override;
 
 private:
 	u8 m_latch;
+	required_ioport m_solder_pad;
 };
 
 
@@ -510,6 +509,13 @@ public:
 
 	virtual u8 read_l(offs_t offset) override;
 	virtual void write_m(offs_t offset, u8 data) override;
+
+protected:
+	// device-level overrides
+	virtual ioport_constructor device_input_ports() const override ATTR_COLD;
+
+private:
+	required_ioport m_jumper;
 };
 
 

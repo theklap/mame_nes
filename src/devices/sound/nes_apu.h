@@ -14,7 +14,7 @@
 #include "nes_defs.h"
 
 class cpu_device;
-class m6502_device;
+class rp2a03_core_device;
 //class nes_exrom_device;
 class ppu2c0x_device;
 
@@ -219,7 +219,7 @@ private:
 	//============================================================
 
 	cpu_device     *m_maincpu_dev;
-	m6502_device   *m_maincpu6502;
+	rp2a03_core_device *m_maincpu6502;
 	ppu2c0x_device *m_ppu_dev;
 	//nes_exrom_device *m_mmc5;
 

@@ -691,10 +691,24 @@ void nes_cart_slot_device::call_load_ines()
 
 	m_cart->set_submapper(submapper); 
 	
+	m_cart->set_console_type(0);
+	m_cart->set_vs_system_type(0);
+	m_cart->set_misc_rom_count(0);
+	m_cart->set_default_expansion_device(0);
+
+	if (ines20) {
+		const u8 console_type = header[7] & 0x03;
+
+		m_cart->set_console_type(console_type == 3 ? header[13] & 0x0f : console_type);
+		m_cart->set_vs_system_type(console_type == 1 ? header[13] : 0);
+		m_cart->set_misc_rom_count(header[14] & 0x03);
+		m_cart->set_default_expansion_device(header[15] & 0x7f);
+	}
+		
 	// handle submappers
 	if (submapper)
 	{
-		// 001: MMC1 (other submappers are deprecated)
+		// 001: MMC1
 		if (mapper == 1) {
 			if (submapper == 5) {
 				logerror("NES 2.0 submapper: SEROM/SHROM/SH1ROM.\n");
@@ -853,6 +867,22 @@ else if (mapper == 25)
 		{
 			int ce_state = (submapper & 0x0c) >> 2;
 			m_cart->set_ce(0x03, ce_state);
+		}
+		// 196: Fight Street VI
+		else if (mapper == 196 && submapper == 1) {
+			pcb_id = UNL_FS6;
+		}
+		// 210: Namcot 175 / Namcot 340
+		else if (mapper == 210) {
+			if (submapper == 1) {
+				pcb_id = NAMCOT_175;
+			}
+			else if (submapper == 2) {
+				pcb_id = NAMCOT_340;
+			}
+			else {
+				logerror("Unimplemented NES 2.0 submapper %d for mapper 210\n", submapper);
+			}
 		}
 		// iNES Mapper 232
 		else if (mapper == 232 && submapper == 1)
@@ -1328,6 +1358,16 @@ else if (mapper == 25)
 
 		static const char *timing[] = { "NTSC", "PAL", "Multi-region", "Dendy" };
 		logerror("-- CPU/PPU Timing: %s\n", timing[header[12] & 3]);
+		
+		logerror("-- Console type: %u\n", m_cart->get_console_type());
+
+		if (m_cart->get_console_type() == 1) {
+			logerror("-- Vs. PPU type: %u\n", m_cart->get_vs_system_type() & 0x0f);
+			logerror("-- Vs. hardware type: %u\n", m_cart->get_vs_system_type() >> 4);
+		}
+
+		logerror("-- Miscellaneous ROMs: %u\n", m_cart->get_misc_rom_count());
+		logerror("-- Default expansion device: %u\n", m_cart->get_default_expansion_device());
 	}
 	else
 		logerror("-- TV System: %s\n", ((header[10] & 3) == 0) ? "NTSC" : (header[10] & 1) ? "Both NTSC and PAL" : "PAL");
@@ -1371,6 +1411,24 @@ else if (mapper == 25)
 	// Read in any chr chunks
 	if (m_cart->get_vrom_size())
 		fread(m_cart->get_vrom_base(), m_cart->get_vrom_size());
+
+	if (ines20 && m_cart->get_misc_rom_count()) {
+		const uint64_t data_size = 0x10 + (m_cart->get_trainer() ? 0x200 : 0) + (prg16k ? 0x4000 : m_cart->get_prg_size()) + m_cart->get_vrom_size();
+
+		if (length() <= data_size) {
+			fatalerror("NES 2.0 header specifies %u miscellaneous ROMs, but no miscellaneous ROM data is present.\n", m_cart->get_misc_rom_count());
+		}
+
+		const uint64_t misc_rom_size = length() - data_size;
+
+		if (misc_rom_size > 0xffffffffULL) {
+			fatalerror("NES 2.0 miscellaneous ROM data larger than 4GB is unsupported.\n");
+		}
+
+		m_cart->misc_rom_alloc(size_t(misc_rom_size));
+		fseek(data_size, SEEK_SET);
+		fread(m_cart->get_misc_rom_base(), size_t(misc_rom_size));
+	}
 
 #if SPLIT_CHR
 	if (state->m_chr_chunks > 0)
@@ -1480,9 +1538,15 @@ const char * nes_cart_slot_device::get_default_card_ines(get_default_card_softwa
 	// handle submappers
 	if (submapper)
 	{
-		// 001: MMC1 (other submappers are deprecated)
-		if (mapper == 1 && submapper == 5)
-			logerror("Unimplemented NES 2.0 submapper: SEROM/SHROM/SH1ROM.\n");
+		// 001: MMC1
+		if (mapper == 1) {
+			if (submapper == 5) {
+				logerror("NES 2.0 submapper: SEROM/SHROM/SH1ROM.\n");
+			}
+			else if (submapper == 7) {
+				pcb_id = KAISER_KS7058;
+			}
+		}
 		else if (mapper == 4 && submapper == 1)
 		{
 			pcb_id = STD_HKROM;
@@ -1523,6 +1587,19 @@ const char * nes_cart_slot_device::get_default_card_ines(get_default_card_softwa
 		else if (mapper == 116 && submapper == 2)
 		{
 			pcb_id = SOMARI_HUANG2; // Mapper 116 is used for 2 diff boards
+		}
+		// 196: Fight Street VI
+		else if (mapper == 196 && submapper == 1) {
+			pcb_id = UNL_FS6;
+		}
+		// 210: Namcot 175 / Namcot 340
+		else if (mapper == 210) {
+			if (submapper == 1) {
+				pcb_id = NAMCOT_175;
+			}
+			else if (submapper == 2) {
+				pcb_id = NAMCOT_340;
+			}
 		}
 		// iNES Mapper 232
 		else if (mapper == 232 && submapper == 1)

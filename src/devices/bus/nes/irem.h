@@ -7,7 +7,7 @@
 
 #include "nxrom.h"
 
-class m6502_device;
+class rp2a03_core_device;
 
 
 // ======================> nes_lrog017_device
@@ -104,7 +104,7 @@ private:
 	u8 m_irq_delay;
 
 	emu_timer *irq_timer;
-	m6502_device *m_maincpu6502;
+	rp2a03_core_device *m_maincpu6502;
 };
 
 

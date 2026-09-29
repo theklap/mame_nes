@@ -8,7 +8,7 @@
 #include "nxrom.h"
 #include "sound/namco_163.h"
 
-class m6502_device;
+class rp2a03_core_device;
 
 
 // ======================> nes_namcot3433_device
@@ -139,7 +139,7 @@ private:
 	int delay_irq;
 
 	emu_timer *irq_timer;
-	m6502_device *m_maincpu6502;
+	rp2a03_core_device *m_maincpu6502;
 
 	uint8_t m_wram_protect;
 	uint8_t m_latch;

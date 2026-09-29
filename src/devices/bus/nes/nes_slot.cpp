@@ -86,7 +86,7 @@
 #include "hashfile.h"
 #include "nes_slot.h"
 
-#include "cpu/m6502/m6502.h"
+#include "cpu/m6502/rp2a03.h"
 
 #define NES_BATTERY_SIZE 0x2000
 
@@ -264,7 +264,7 @@ uint8_t device_nes_cart_interface::get_open_bus()
 	// CPU-side mapper open bus should reflect the 6502 external/open-bus latch.
 	// Do not use the CPU internal data bus here; $4015 reads update internal
 	// only and must not refresh mapper/cart open bus.
-	auto &cpu = downcast<m6502_device &>(*m_maincpu);
+	auto &cpu = downcast<rp2a03_core_device &>(*m_maincpu);
 
 	return cpu.get_open_bus();
 }

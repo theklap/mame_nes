@@ -20,7 +20,7 @@
 
 #include "emu.h"
 #include "jaleco.h"
-#include "cpu/m6502/m6502.h"
+#include "cpu/m6502/rp2a03.h"
 
 #include "speaker.h"
 
@@ -162,7 +162,7 @@ void nes_jf17_device::pcb_reset()
 void nes_ss88006_device::device_start()
 {
 	common_start();
-	m_maincpu6502 = machine().root_device().subdevice<m6502_device>("maincpu");
+	m_maincpu6502 = machine().root_device().subdevice<rp2a03_core_device>("maincpu");
 	irq_timer = timer_alloc(FUNC(nes_ss88006_device::irq_timer_tick), this);
 	irq_timer->adjust(attotime::zero, 0, clocks_to_attotime(1));
 

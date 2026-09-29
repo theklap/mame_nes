@@ -9,7 +9,7 @@
 
 
 // ======================> nes_sxrom_device
-class m6502_device;
+class rp2a03_core_device;
 class nes_sxrom_device : public nes_nrom_device
 {
 public:
@@ -46,7 +46,7 @@ protected:
 private:
 	u8 m_latch;
 	u8 m_count;
-	m6502_device* m_maincpu6502 = nullptr;
+	rp2a03_core_device *m_maincpu6502 = nullptr;
 };
 
 

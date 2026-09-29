@@ -8,7 +8,7 @@
 #include "nxrom.h"
 
 
-class m6502_device;
+class rp2a03_core_device;
 
 
 // ======================> nes_tengen032_device
@@ -67,7 +67,7 @@ private:
 	u8 m_irq_reload_extra;
 	bool m_irq_direct_after_mode_switch;
 
-	m6502_device *m_maincpu6502;
+	rp2a03_core_device *m_maincpu6502;
 };
 
 

@@ -24,7 +24,7 @@ revision also remains unverified.
 
 #include "emu.h"
 #include "mmc1.h"
-#include "cpu/m6502/m6502.h"
+#include "cpu/m6502/rp2a03.h"
 
 #ifdef NES_PCB_DEBUG
 #define VERBOSE (LOG_GENERAL)
@@ -76,7 +76,7 @@ void nes_sxrom_device::device_start() {
 	save_item(NAME(m_mmc1_upper_chr));
 	save_item(NAME(m_mmc1_ppu_addr));
 
-	m_maincpu6502 = machine().root_device().subdevice<m6502_device>("maincpu");
+	m_maincpu6502 = machine().root_device().subdevice<rp2a03_core_device>("maincpu");
 }
 
 void nes_sxrom_device::pcb_reset() {

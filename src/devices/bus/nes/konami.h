@@ -9,7 +9,7 @@
 #include "sound/vrc6.h"
 #include "sound/ymopl.h"
 
-class m6502_device;
+class rp2a03_core_device;
 // ======================> nes_konami_vrc1_device
 
 class nes_konami_vrc1_device : public nes_nrom_device
@@ -77,7 +77,7 @@ protected:
 	TIMER_CALLBACK_MEMBER(irq_timer_tick);
 
 private:
-	m6502_device* m_maincpu6502 = nullptr;
+	rp2a03_core_device *m_maincpu6502 = nullptr;
 	u16 m_irq_count, m_irq_count_latch;
 	int m_irq_enable, m_irq_enable_latch;
 	int m_irq_mode;
@@ -103,7 +103,7 @@ public:
 	virtual void ppu_to_mapper(int scanline, unsigned dot, int ppu_tick, uint16_t ppu_address) override;
 
 protected:
-	m6502_device* m_maincpu6502 = nullptr;
+	rp2a03_core_device *m_maincpu6502 = nullptr;
 	// construction/destruction
 	nes_konami_vrc4_device(const machine_config &mconfig, device_type type, const char *tag, device_t *owner, u32 clock);
 

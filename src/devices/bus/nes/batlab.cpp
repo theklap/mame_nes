@@ -14,7 +14,7 @@ Here we emulate the following homebrew PCBs
 #include "emu.h"
 #include "batlab.h"
 
-#include "cpu/m6502/m6502.h"
+#include "cpu/m6502/rp2a03.h"
 #include "video/ppu2c0x.h"
 
 #define LOG_HIFREQ (1U << 1)
@@ -68,7 +68,7 @@ void nes_batmap_srrx_device::device_start()
 {
 	common_start();
 
-	m_maincpu6502 = machine().root_device().subdevice<m6502_device>("maincpu");
+	m_maincpu6502 = machine().root_device().subdevice<rp2a03_core_device>("maincpu");
 
 	save_item(NAME(m_reg));
 	save_item(NAME(m_dpcm_addr));

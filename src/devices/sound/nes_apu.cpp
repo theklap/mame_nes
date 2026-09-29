@@ -29,7 +29,7 @@
 #include "emu.h"
 #include "nes_apu.h"
 #include "video/ppu2c0x.h"
-#include "cpu/m6502/m6502.h"
+#include "cpu/m6502/rp2a03.h"
 #include <numbers>
 //#include "bus/nes/mmc5.h"
 
@@ -88,7 +88,8 @@ void nesapu_device::device_clock_changed()
 
 void nesapu_device::calculate_rates()
 {
-	m_is_pal = clock() == PAL_APU_CLOCK;
+	//m_is_pal = clock() == PAL_APU_CLOCK;
+	m_is_pal = clock() == PAL_APU_CLOCK.value();
 
 	if (m_is_pal)
 	{
@@ -113,7 +114,7 @@ void nesapu_device::calculate_rates()
 void nesapu_device::device_start()
 {
 	m_maincpu_dev = machine().root_device().subdevice<cpu_device>("maincpu");
-	m_maincpu6502 = machine().root_device().subdevice<m6502_device>("maincpu");
+	m_maincpu6502 = machine().root_device().subdevice<rp2a03_core_device>("maincpu");
 	m_ppu_dev = machine().root_device().subdevice<ppu2c0x_device>("ppu");
 	//m_mmc5 = machine().root_device().subdevice<nes_exrom_device>("nes_slot:exrom");
 	pal_cpu_ppu = 0;

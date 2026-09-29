@@ -7,7 +7,7 @@
 
 
 // ======================> nes_sc127_device
-class m6502_device;
+class rp2a03_core_device;
 
 // ======================> nes_mbaby_device
 class nes_mbaby_device : public nes_nrom_device
@@ -37,7 +37,7 @@ private:
 	u8 m_latch;
 
 	emu_timer *irq_timer;
-	m6502_device *m_maincpu6502;
+	rp2a03_core_device *m_maincpu6502;
 };
 
 
@@ -89,7 +89,7 @@ private:
 	u8 m_irq_delay;
 
 	emu_timer *irq_timer;
-	m6502_device *m_maincpu6502;
+	rp2a03_core_device *m_maincpu6502;
 };
 
 
@@ -128,7 +128,7 @@ private:
 	uint8_t m_irq_delay;
 	uint8_t m_a12_low_ticks;
 
-	m6502_device *m_maincpu6502;
+	rp2a03_core_device *m_maincpu6502;
 };
 
 
@@ -163,7 +163,7 @@ private:
 	u8 m_irq_delay;
 
 	emu_timer *irq_timer;
-	m6502_device *m_maincpu6502;
+	rp2a03_core_device *m_maincpu6502;
 };
 
 
@@ -192,7 +192,7 @@ private:
 	u8 m_irq_delay;
 
 	emu_timer *irq_timer;
-	m6502_device *m_maincpu6502;
+	rp2a03_core_device *m_maincpu6502;
 };
 
 
@@ -226,7 +226,7 @@ protected:
 	u8 m_reg;
 
 	emu_timer *irq_timer;
-	m6502_device *m_maincpu6502;
+	rp2a03_core_device *m_maincpu6502;
 
 private:
 
@@ -305,7 +305,7 @@ private:
 	int m_irq_delay;
 
 	emu_timer *irq_timer;
-	m6502_device *m_maincpu6502;
+	rp2a03_core_device *m_maincpu6502;
 };
 
 
@@ -333,7 +333,7 @@ private:
 	u8 m_irq_delay;
 
 	emu_timer *irq_timer;
-	m6502_device *m_maincpu6502;
+	rp2a03_core_device *m_maincpu6502;
 };
 
 
@@ -362,7 +362,7 @@ private:
 	u8 m_irq_delay;
 
 	emu_timer *irq_timer;
-	m6502_device *m_maincpu6502;
+	rp2a03_core_device *m_maincpu6502;
 };
 
 
@@ -613,7 +613,7 @@ private:
 
 	emu_timer *irq_timer;
 	attotime timer_freq;
-	m6502_device *m_maincpu6502 = nullptr;
+	rp2a03_core_device *m_maincpu6502 = nullptr;
 };
 
 
@@ -720,7 +720,7 @@ private:
 	u8 m_irq_delay;
 
 	emu_timer *irq_timer;
-	m6502_device *m_maincpu6502;
+	rp2a03_core_device *m_maincpu6502;
 };
 
 

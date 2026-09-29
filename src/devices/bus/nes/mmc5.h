@@ -10,7 +10,7 @@
 #include "sound/mmc5snd.h"
 
 // ======================> nes_exrom_device
-class m6502_device;
+class rp2a03_core_device;
 class nes_exrom_device : public nes_nrom_device
 {
 public:
@@ -44,7 +44,7 @@ public:
 	bool mmc5_use_extended_sprite_banking();
 
 private:
-	m6502_device* m_maincpu6502 = nullptr;
+	rp2a03_core_device *m_maincpu6502 = nullptr;
 	
 protected:
 	// device-level overrides

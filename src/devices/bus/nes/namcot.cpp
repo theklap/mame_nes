@@ -23,7 +23,7 @@
 
 #include "emu.h"
 #include "namcot.h"
-#include "cpu/m6502/m6502.h"
+#include "cpu/m6502/rp2a03.h"
 #include "ui/uimain.h"
 
 #include "speaker.h"
@@ -169,7 +169,7 @@ void nes_namcot175_device::pcb_reset() {
 void nes_namcot163_device::device_start() {
 	nes_namcot340_device::device_start();
 
-	m_maincpu6502 = machine().root_device().subdevice<m6502_device>("maincpu");
+	m_maincpu6502 = machine().root_device().subdevice<rp2a03_core_device>("maincpu");
 
 	irq_timer = timer_alloc(FUNC(nes_namcot163_device::irq_timer_tick), this);
 	irq_timer->adjust(attotime::zero, 0, clocks_to_attotime(1));
@@ -495,7 +495,7 @@ void nes_namcot340_device::n340_hiwrite(offs_t offset, uint8_t data) {
  the three switchable 8 KiB PRG-ROM banks.
 
  Writes to $C000-$C7FF control external PRG-RAM.
- Bit 0 disables PRG-RAM reads and writes when set.
+ Bit 0 enables PRG-RAM reads and writes when set.
  Family Circuit '91 contains 2 KiB of battery-backed
  PRG-RAM mirrored throughout $6000-$7FFF.
 
@@ -508,28 +508,24 @@ void nes_namcot340_device::n340_hiwrite(offs_t offset, uint8_t data) {
  -------------------------------------------------*/
 
 uint8_t nes_namcot175_device::read_m(offs_t offset) {
-	if (!m_wram_protect) {
-		if (!m_battery.empty()) {
+	if (BIT(m_wram_protect, 0)) {
+		if (!m_battery.empty())
 			return m_battery[offset & (m_battery.size() - 1)];
-		}
 
-		if (!m_prgram.empty()) {
+		if (!m_prgram.empty())
 			return m_prgram[offset & (m_prgram.size() - 1)];
-		}
 	}
 
 	return get_open_bus();
 }
 
 void nes_namcot175_device::write_m(offs_t offset, uint8_t data) {
-	if (!m_wram_protect) {
-		if (!m_battery.empty()) {
+	if (BIT(m_wram_protect, 0)) {
+		if (!m_battery.empty())
 			m_battery[offset & (m_battery.size() - 1)] = data;
-		}
 
-		if (!m_prgram.empty()) {
+		if (!m_prgram.empty())
 			m_prgram[offset & (m_prgram.size() - 1)] = data;
-		}
 	}
 }
 

@@ -20,7 +20,7 @@
 
 #include "emu.h"
 #include "mmc3.h"
-#include "cpu/m6502/m6502.h"
+#include "cpu/m6502/rp2a03.h"
 
 #define LOG_UNHANDLED (1U << 1)
 
@@ -110,7 +110,7 @@ nes_zz_device::nes_zz_device(const machine_config &mconfig, const char *tag, dev
 void nes_txrom_device::mmc3_start()
 {
 	common_start();
-	m_maincpu6502 = machine().root_device().subdevice<m6502_device>("maincpu");
+	m_maincpu6502 = machine().root_device().subdevice<rp2a03_core_device>("maincpu");
 	
 	save_item(NAME(m_mmc_prg_bank));
 	save_item(NAME(m_mmc_vrom_bank));

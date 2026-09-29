@@ -10,7 +10,7 @@
 
 #include "emu.h"
 #include "mmc5.h"
-#include "cpu/m6502/m6502.h"
+#include "cpu/m6502/rp2a03.h"
 
 #include "speaker.h"
 
@@ -136,7 +136,7 @@ void nes_exrom_device::device_start() {
 	save_item(NAME(m_ppu_read_count));
 	save_item(NAME(m_ppu_fetch_locked));
 
-	m_maincpu6502 = machine().root_device().subdevice<m6502_device>("maincpu");
+	m_maincpu6502 = machine().root_device().subdevice<rp2a03_core_device>("maincpu");
 
 	m_cpu_cycle_timer = timer_alloc(FUNC(nes_exrom_device::cpu_cycle_tick), this);
 

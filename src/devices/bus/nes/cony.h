@@ -6,7 +6,7 @@
 #pragma once
 
 #include "nxrom.h"
-#include "cpu/m6502/m6502.h"
+#include "cpu/m6502/rp2a03.h"
 
 
 // ======================> nes_cony_device
@@ -48,7 +48,7 @@ protected:
 	u8 m_irq_source;
 	bool m_irq_last_a12;
 
-	m6502_device *m_maincpu6502;
+	rp2a03_core_device *m_maincpu6502;
 	emu_timer *irq_timer;
 
 	u8 m_mmc_prg_bank[4];

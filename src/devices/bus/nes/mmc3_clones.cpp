@@ -13,7 +13,7 @@
 
 #include "emu.h"
 #include "mmc3_clones.h"
-#include "cpu/m6502/m6502.h"
+#include "cpu/m6502/rp2a03.h"
 
 #define LOG_HIFREQ (1U << 1)
 

@@ -8,7 +8,7 @@
 #include "nxrom.h"
 #include "mmc1.h"
 
-class m6502_device;
+class rp2a03_core_device;
 // ======================> nes_ks106c_device
 
 class nes_ks106c_device : public nes_nrom_device
@@ -99,7 +99,7 @@ private:
 	u8 m_irq_delay;
 
 	emu_timer *irq_timer;
-	m6502_device *m_maincpu6502;
+	rp2a03_core_device *m_maincpu6502;
 };
 
 
@@ -183,7 +183,7 @@ private:
 	u8 m_irq_delay;
 
 	emu_timer *irq_timer;
-	m6502_device *m_maincpu6502;
+	rp2a03_core_device *m_maincpu6502;
 };
 
 

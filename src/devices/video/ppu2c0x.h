@@ -43,7 +43,7 @@ extern bool g_nes_p1_a_pressed_edge;
 //class nes_sxrom_device;
 //class nes_tengen032_device;
 //class nes_sc127_device;
-class m6502_device;
+class rp2a03_core_device;
 //class nes_batmap_srrx_device;
 
 
@@ -748,7 +748,7 @@ protected:
 	}
 
 private:
-	m6502_device* m_maincpu6502 = nullptr;
+	rp2a03_core_device *m_maincpu6502 = nullptr;
 
 	inline uint16_t apply_grayscale_and_emphasis(uint8_t color);
 

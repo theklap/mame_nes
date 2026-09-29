@@ -9,7 +9,7 @@
 
 
 // ======================> nes_racermate_device
-class m6502_device;
+class rp2a03_core_device;
 
 class nes_racermate_device : public nes_nrom_device
 {
@@ -34,7 +34,7 @@ private:
 	uint8_t m_irq_delay;
 	bool m_irq_enabled;
 	
-	m6502_device *m_maincpu6502;
+	rp2a03_core_device *m_maincpu6502;
 };
 
 

@@ -20,7 +20,7 @@
 
 #include "emu.h"
 #include "racermate.h"
-#include "cpu/m6502/m6502.h"
+#include "cpu/m6502/rp2a03.h"
 
 
 #ifdef NES_PCB_DEBUG
@@ -54,7 +54,7 @@ void nes_racermate_device::device_start()
 {
 	common_start();
 
-	m_maincpu6502 = machine().root_device().subdevice<m6502_device>("maincpu");
+	m_maincpu6502 = machine().root_device().subdevice<rp2a03_core_device>("maincpu");
 
 	save_item(NAME(m_latch));
 	save_item(NAME(m_irq_count));

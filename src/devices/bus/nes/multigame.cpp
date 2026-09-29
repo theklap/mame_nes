@@ -124,6 +124,34 @@ INPUT_PORTS_START( vt5201 )
 	PORT_CONFSETTING(0x03, "3")
 INPUT_PORTS_END
 
+static INPUT_PORTS_START(bmc_970630c)
+	PORT_START("SOLDER_PAD")
+	PORT_CONFNAME(0x0f, 0x00, "Menu Solder Pad")
+	PORT_CONFSETTING(0x00, "0")
+	PORT_CONFSETTING(0x01, "1")
+	PORT_CONFSETTING(0x02, "2")
+	PORT_CONFSETTING(0x03, "3")
+	PORT_CONFSETTING(0x04, "4")
+	PORT_CONFSETTING(0x05, "5")
+	PORT_CONFSETTING(0x06, "6")
+	PORT_CONFSETTING(0x07, "7")
+	PORT_CONFSETTING(0x08, "8")
+	PORT_CONFSETTING(0x09, "9")
+	PORT_CONFSETTING(0x0a, "A")
+	PORT_CONFSETTING(0x0b, "B")
+	PORT_CONFSETTING(0x0c, "C")
+	PORT_CONFSETTING(0x0d, "D")
+	PORT_CONFSETTING(0x0e, "E")
+	PORT_CONFSETTING(0x0f, "F")
+INPUT_PORTS_END
+
+INPUT_PORTS_START(bmc_hp898f)
+	PORT_START("JUMPER")
+	PORT_CONFNAME(0x40, 0x00, "Solder Pad")
+	PORT_CONFSETTING(0x00, "0")
+	PORT_CONFSETTING(0x40, "1")
+INPUT_PORTS_END
+
 //-------------------------------------------------
 //  input_ports - device-specific input ports
 //-------------------------------------------------
@@ -135,6 +163,15 @@ ioport_constructor nes_bmc_8157_device::device_input_ports() const
 
 ioport_constructor nes_vt5201_device::device_input_ports() const {
 	return INPUT_PORTS_NAME(vt5201);
+}
+
+ioport_constructor nes_bmc_970630c_device::device_input_ports() const {
+	return INPUT_PORTS_NAME(bmc_970630c);
+}
+
+ioport_constructor nes_bmc_hp898f_device::device_input_ports() const
+{
+	return INPUT_PORTS_NAME(bmc_hp898f);
 }
 
 
@@ -239,8 +276,10 @@ nes_bmc_850437c_device::nes_bmc_850437c_device(const machine_config &mconfig, co
 {
 }
 
-nes_bmc_970630c_device::nes_bmc_970630c_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock)
-	: nes_nrom_device(mconfig, NES_BMC_970630C, tag, owner, clock), m_latch(0)
+nes_bmc_970630c_device::nes_bmc_970630c_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock) :
+	nes_nrom_device(mconfig, NES_BMC_970630C, tag, owner, clock),
+	m_latch(0),
+	m_solder_pad(*this, "SOLDER_PAD")
 {
 }
 
@@ -281,6 +320,7 @@ nes_bmc_gn91b_device::nes_bmc_gn91b_device(const machine_config &mconfig, const 
 
 nes_bmc_hp898f_device::nes_bmc_hp898f_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock)
 	: nes_nrom_device(mconfig, NES_BMC_HP898F, tag, owner, clock)
+	, m_jumper(*this, "JUMPER")
 {
 }
 
@@ -1725,11 +1765,11 @@ void nes_bmc_810544c_device::write_h(offs_t offset, u8 data)
 {
 	LOG("bmc_810544c write_h, offset: %04x, data: %02x\n", offset, data);
 
-	u8 bank = bitswap<4>(offset, 9, 8, 7, 5);
-	u8 mode = BIT(offset, 6);
+	const u8 bank = bitswap<4>(offset, 9, 8, 7, 5);
+	const u8 mode = BIT(offset, 6);
+
 	prg16_89ab(bank & ~mode);
 	prg16_cdef(bank | mode);
-
 	chr8(offset & 0x0f, CHRROM);
 	set_nt_mirroring(BIT(offset, 4) ? PPU_MIRROR_HORZ : PPU_MIRROR_VERT);
 }
@@ -1753,8 +1793,9 @@ void nes_bmc_830425c_device::write_h(offs_t offset, u8 data)
 	if ((offset & 0x7fe0) == 0x70e0)
 		m_latch = offset & 0x1f;
 
-	u8 outer = (m_latch & 0x0f) << 3;
-	u8 mode = !BIT(m_latch, 4) << 3 | 0x07;
+	const u8 outer = (m_latch & 0x0f) << 3;
+	const u8 mode = ((!BIT(m_latch, 4)) << 3) | 0x07;
+
 	prg16_89ab(outer | (data & mode));
 	prg16_cdef(outer | mode);
 }
@@ -1771,26 +1812,27 @@ void nes_bmc_830425c_device::write_h(offs_t offset, u8 data)
 
  -------------------------------------------------*/
 
-void nes_bmc_830928c_device::write_h(offs_t offset, u8 data)
-{
+void nes_bmc_830928c_device::write_h(offs_t offset, u8 data) {
 	LOG("bmc_830928c write_h, offset: %04x, data: %02x\n", offset, data);
 
-	// this pcb is subject to bus conflict
+	// This PCB is subject to bus conflicts.
 	data = account_bus_conflict(offset, data);
 
-	if (!BIT(m_latch, 5))
-	{
+	if (!BIT(m_latch, 5)) {
 		m_latch = offset & 0x3f;
 		set_nt_mirroring(BIT(m_latch, 4) ? PPU_MIRROR_HORZ : PPU_MIRROR_VERT);
 	}
 
-	u8 outer = (m_latch & 0x07) << 3;
-	if (BIT(m_latch, 3))    // BNROM mode
-		prg32(outer >> 1 | (data & 0x03));
-	else                    // UNROM mode
-	{
+	const u8 outer = (m_latch & 0x07) << 3;
+
+	if (BIT(m_latch, 3)) {
+		// BNROM mode.
+		prg32((outer >> 1) | (data & 0x03));
+	}
+	else {
+		// UNROM mode.
 		prg16_89ab(outer | (data & 0x07));
-		prg16_cdef(outer | 7);
+		prg16_cdef(outer | 0x07);
 	}
 }
 
@@ -1806,13 +1848,14 @@ void nes_bmc_830928c_device::write_h(offs_t offset, u8 data)
 
  -------------------------------------------------*/
 
-void nes_bmc_850437c_device::write_h(offs_t offset, u8 data)
-{
+void nes_bmc_850437c_device::write_h(offs_t offset, u8 data) {
 	LOG("bmc_850437c write_h, offset: %04x, data: %02x\n", offset, data);
 
-	m_reg[(offset & 0x6000) == 0x2000] = data;    // outer banking is always at 0xa000, mask is a guess
+	// Outer banking is written at $A000-$BFFF; the exact decode mask is unverified.
+	m_reg[(offset & 0x6000) == 0x2000] = data;
 
-	u8 bank = (m_reg[1] & 0x07) << 3 | (m_reg[0] & 0x07);
+	const u8 bank = ((m_reg[1] & 0x07) << 3) | (m_reg[0] & 0x07);
+
 	prg16_89ab(bank);
 	prg16_cdef(bank | 0x07);
 
@@ -1856,14 +1899,13 @@ void nes_bmc_970630c_device::write_h(offs_t offset, u8 data)
 	m_latch = BIT(offset, 8);
 }
 
-u8 nes_bmc_970630c_device::read_h(offs_t offset)
-{
+u8 nes_bmc_970630c_device::read_h(offs_t offset) {
 	LOGMASKED(LOG_HIFREQ, "bmc_970630c read_h, offset: %04x\n", offset);
 
 	if (m_latch)
-		return 0;    // TODO: menu supposedly varies by solder pad value returned here, but it doesn't seem to work...
-	else
-		return hi_access_rom(offset);
+		return hi_access_rom((offset & ~offs_t(0x0f)) | (m_solder_pad->read() & 0x0f));
+
+	return hi_access_rom(offset);
 }
 
 /*-------------------------------------------------
@@ -1878,12 +1920,12 @@ u8 nes_bmc_970630c_device::read_h(offs_t offset)
 
  -------------------------------------------------*/
 
-void nes_ntd03_device::write_h(offs_t offset, u8 data)
-{
+void nes_ntd03_device::write_h(offs_t offset, u8 data) {
 	LOG("ntd03 write_h, offset: %04x, data: %02x\n", offset, data);
 
-	u8 bank = bitswap<5>(offset, 14, 13, 12, 11, 6);
-	u8 mode = !BIT(offset, 7);
+	const u8 bank = bitswap<5>(offset, 14, 13, 12, 11, 6);
+	const u8 mode = !BIT(offset, 7);
+
 	prg16_89ab(bank & ~mode);
 	prg16_cdef(bank | mode);
 
@@ -1903,24 +1945,26 @@ void nes_ntd03_device::write_h(offs_t offset, u8 data)
 
  -------------------------------------------------*/
 
-void nes_bmc_ctc09_device::write_h(offs_t offset, u8 data)
-{
+void nes_bmc_ctc09_device::write_h(offs_t offset, u8 data) {
 	LOG("bmc_ctc09 write_h, offset: %04x, data: %02x\n", offset, data);
 
-	if (BIT(offset, 14))
-	{
-		if (BIT(data, 4))
-		{
-			u8 bank = ((data & 0x07) << 1) | BIT(data, 3);
-			prg16_89ab(bank);
-			prg16_cdef(bank);
+	if (BIT(offset, 14)) {
+		if (BIT(data, 4)) {
+			const u8 bank = ((data & 0x07) << 1) | BIT(data, 3);
+			const u8 mode = !BIT(offset, 0);
+
+			prg16_89ab(bank & ~mode);
+			prg16_cdef(bank | mode);
 		}
-		else
+		else {
 			prg32(data & 0x07);
+		}
+
 		set_nt_mirroring(BIT(data, 5) ? PPU_MIRROR_HORZ : PPU_MIRROR_VERT);
 	}
-	else
+	else {
 		chr8(data & 0x0f, CHRROM);
+	}
 }
 
 /*-------------------------------------------------
@@ -1939,8 +1983,7 @@ void nes_bmc_ctc09_device::write_h(offs_t offset, u8 data)
 
  -------------------------------------------------*/
 
-u8 nes_bmc_ds927_device::read_h(offs_t offset)
-{
+u8 nes_bmc_ds927_device::read_h(offs_t offset) {
 	LOGMASKED(LOG_HIFREQ, "bmc_ds927 read_h, offset: %04x\n", offset);
 
 	int bits = m_mode == 1 ? 1 : 2;
@@ -1951,40 +1994,39 @@ u8 nes_bmc_ds927_device::read_h(offs_t offset)
 	return hi_access_rom(offset);
 }
 
-void nes_bmc_ds927_device::write_h(offs_t offset, u8 data)
-{
+void nes_bmc_ds927_device::write_h(offs_t offset, u8 data) {
 	LOG("bmc_ds927 write_h, offset: %04x, data: %02x\n", offset, data);
 
-	if (offset < 0x6000)
-	{
+	if (offset < 0x6000) {
 		m_latch = data;
 		m_mode = bitswap<2>(data, 3, 1);
 
-		int bank = BIT(offset, 1, 7);
+		const int bank = BIT(offset, 1, 7);
 
-		switch (m_mode)
-		{
+		switch (m_mode) {
 			case 0:
 				prg16_89ab(bank >> 1);
 				prg16_cdef(0);
 				break;
+
 			case 1:
 				for (int i = 0; i < 4; i++)
 					prg8_x(i, bank);
 				break;
+
 			case 2:
 			case 3:
 				prg8_89(bank);
-				prg8_ab(bank | 1);
-				prg8_cd(bank | 2);
-				prg8_ef(bank | 3 | (data & 0x04));
+				prg8_ab(bank | 0x01);
+				prg8_cd(bank | 0x02);
+				prg8_ef(bank | 0x03 | (data & 0x04) | ((BIT(data, 2) && BIT(data, 6)) << 3));
 				break;
 		}
+
+		set_nt_mirroring(BIT(data, 0) ? PPU_MIRROR_HORZ : PPU_MIRROR_VERT);
 	}
 
-	set_nt_mirroring(BIT(data, 0) ? PPU_MIRROR_HORZ : PPU_MIRROR_VERT);
-
-	int bits = m_mode == 1 ? 1 : 2;
+	const int bits = m_mode == 1 ? 1 : 2;
 
 	if (BIT(offset, 13, bits) == BIT(m_latch, 4, bits))
 		m_prgram[offset & 0x1fff] = data;
@@ -2047,7 +2089,7 @@ void nes_bmc_gka_device::write_h(offs_t offset, u8 data)
 void nes_bmc_gkb_device::write_h(offs_t offset, u8 data)
 {
 	LOG("bmc_gkb write_h, offset: %04x, data: %02x\n", offset, data);
-
+	
 	u8 bank = offset & 0x07;
 	u8 mode = !BIT(offset, 6);
 	prg16_89ab(bank & ~mode);
@@ -2127,8 +2169,9 @@ u8 nes_bmc_hp898f_device::read_l(offs_t offset)
 	LOG("bmc_hp898f read_l, offset: %04x\n", offset);
 
 	offset += 0x100;
+
 	if (offset & 0x1000)
-		return 0;    // FIXME: some carts read jumpers that change menu
+		return (get_open_bus() & 0xbf) | m_jumper->read();
 
 	return get_open_bus();
 }
@@ -2164,6 +2207,7 @@ void nes_bmc_hp898f_device::write_m(offs_t offset, u8 data)
 void nes_bmc_k3036_device::write_h(offs_t offset, u8 data)
 {
 	LOG("bmc_k3036 write_h, offset: %04x, data: %02x\n", offset, data);
+
 	u8 bank = offset & 0x1f;
 	prg16_89ab(bank);
 	prg16_cdef(bank | (BIT(offset, 5) ? 0 : 7));

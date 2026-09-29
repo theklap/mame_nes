@@ -30,7 +30,7 @@
 
 #include "emu.h"
 #include "kaiser.h"
-#include "cpu/m6502/m6502.h"
+#include "cpu/m6502/rp2a03.h"
 
 #define LOG_HIFREQ (1U << 1)
 
@@ -199,7 +199,7 @@ void nes_ks7032_device::device_start()
 	common_start();
 	irq_timer = timer_alloc(FUNC(nes_ks7032_device::irq_timer_tick), this);
 	irq_timer->adjust(attotime::zero, 0, clocks_to_attotime(1));
-	m_maincpu6502 = machine().root_device().subdevice<m6502_device>("maincpu");
+	m_maincpu6502 = machine().root_device().subdevice<rp2a03_core_device>("maincpu");
 
 	save_item(NAME(m_latch));
 	save_item(NAME(m_irq_enable));
@@ -263,7 +263,7 @@ void nes_ks7017_device::device_start()
 	irq_timer = timer_alloc(FUNC(nes_ks7017_device::irq_timer_tick), this);
 	irq_timer->adjust(attotime::zero, 0, clocks_to_attotime(1));
 
-	m_maincpu6502 = machine().root_device().subdevice<m6502_device>("maincpu");
+	m_maincpu6502 = machine().root_device().subdevice<rp2a03_core_device>("maincpu");
 
 	save_item(NAME(m_latch));
 	save_item(NAME(m_irq_enable));

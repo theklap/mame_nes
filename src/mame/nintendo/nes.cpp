@@ -43,7 +43,7 @@ public:
 	required_device<cpu_device> m_maincpu;
 	optional_device<nes_control_port_device> m_ctrl1;
 	optional_device<nes_control_port_device> m_ctrl2;
-	m6502_device *m_maincpu6502 = nullptr;
+	rp2a03_core_device *m_maincpu6502 = nullptr;
 	bool first = false;
 	int64_t last_2016_read = 0;
 	bool m_p1_a_prev = false;
@@ -275,6 +275,11 @@ static std::vector<open_bus_range> compute_open_bus_ranges(
 		ranges.push_back({ 0x4100, 0x4fff });
 		return ranges;
 	}
+	
+	if (pcb_id == BMC_DS927) {
+		ranges.push_back({ 0x4100, 0x7fff });
+		return ranges;
+	}
 
 	if (pcb_id == KAY_BOARD)
 		ranges.push_back({ 0x4100, 0x4fff });
@@ -459,6 +464,15 @@ static std::vector<open_bus_range> compute_open_bus_ranges(
 		case BMC_YY841101C:
 		case BMC_YY841155C:
 		case BMC_PJOY84:
+		case BMC_810544C:
+		case BMC_830425C:
+		case BMC_830928C:
+		case BMC_850437C:
+		case BMC_970630C:
+		case BMC_NTD_03:
+		case BMC_CTC09:
+		case BMC_GKA:
+		case BMC_GKB:
 			ranges.push_back({ 0x4100, 0x5fff });
 			break;
 
@@ -543,6 +557,7 @@ static std::vector<open_bus_range> compute_open_bus_ranges(
 			case UNL_603_5052:
 			case BMC_FK23C:
 			case BMC_FK23CA:
+			case BMC_GKA:
 				range_6000_is_special = true;
 				break;
 
@@ -649,7 +664,7 @@ void nes_state::machine_reset()
 
 void nes_state::machine_start()
 {
-	m_maincpu6502 = downcast<m6502_device *>(&*m_maincpu);
+	m_maincpu6502 = downcast<rp2a03_core_device *>(&*m_maincpu);
 	address_space &space = m_maincpu->space(AS_PROGRAM);
 
 	// Fill main RAM with an arbitrary pattern (alternating 0x00/0xff) for software that depends on its contents at boot up (tsk tsk!)
@@ -1012,7 +1027,7 @@ void nes_state::famicom(machine_config &config)
 {
 	nes(config);
 
-	downcast<m6502_device &>(*m_maincpu).set_famicom_controller_timing(true);
+	downcast<rp2a03_core_device &>(*m_maincpu).set_famicom_controller_timing(true);
 
 	NES_CONTROL_PORT(config.replace(), m_ctrl1, fc_control_port1_devices, "joypad").set_screen_tag(m_screen);
 	NES_CONTROL_PORT(config.replace(), m_ctrl2, fc_control_port2_devices, "joypad").set_screen_tag(m_screen);

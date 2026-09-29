@@ -7,7 +7,7 @@
 
 #include "mmc3.h"
 
-class m6502_device;
+class rp2a03_core_device;
 
 // ======================> nes_batmap_000_device
 
@@ -58,7 +58,7 @@ private:
 	uint16_t m_prev_ppu_addr;
 	bool m_a12_low_seen;
 
-	m6502_device *m_maincpu6502;
+	rp2a03_core_device *m_maincpu6502;
 };
 
 DECLARE_DEVICE_TYPE(NES_BATMAP_000,  nes_batmap_000_device)
