@@ -253,7 +253,7 @@ void cham24_state::cham24(machine_config &config)
 	PPU_2C02(config, m_ppu);
 	m_ppu->set_addrmap(0, &cham24_state::cham24_ppu_map);
 	m_ppu->set_cpu_tag(m_maincpu);
-	m_ppu->int_callback().set_inputline(m_maincpu, INPUT_LINE_NMI);
+	//m_ppu->int_callback().set_inputline(m_maincpu, INPUT_LINE_NMI);
 
 	// sound hardware
 	SPEAKER(config, "mono").front_center();
