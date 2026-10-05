@@ -62,9 +62,9 @@ device_memory_interface::space_config_vector ppu2c0x_device::memory_space_config
 
 void ppu2c0x_device::device_config_complete() {
 	/* reset the callbacks */
-	m_scanline_callback_proc.set(nullptr);
-	m_hblank_callback_proc.set(nullptr);
-	m_vidaccess_callback_proc.set(nullptr);
+	//m_scanline_callback_proc.set(nullptr);
+	//m_hblank_callback_proc.set(nullptr);
+	//m_vidaccess_callback_proc.set(nullptr);
 	m_latch.set(nullptr);
 	m_ppu_to_mapper.set(nullptr);
 	m_ppu_bus_address_callback.set(nullptr);
@@ -97,10 +97,11 @@ ppu2c0x_device::ppu2c0x_device(const machine_config& mconfig, device_type type, 
 	m_mmc1_ppu_phase(*this),
 	m_mmc5_ppu_read(*this),
 	m_mmc5_reset_scanline_irq(*this),
-	m_scanline_callback_proc(*this),
-	m_hblank_callback_proc(*this),
-	m_vidaccess_callback_proc(*this),
-	m_int_callback(*this),
+	//m_scanline_callback_proc(*this),
+	//m_hblank_callback_proc(*this),
+	//m_vidaccess_callback_proc(*this),
+	//m_int_callback(*this),
+	m_nmi_detect_callback(*this),
 	m_refresh_latch(0),
 	m_add(1),
 	m_videomem_addr(0),
@@ -1398,10 +1399,10 @@ void ppu2c0x_device::tick(int x) {
 	m_scanline = scanline;
 
 	//Start HBlank
-	if (scanline <= 239 && dot == 257) {
-		if (!m_hblank_callback_proc.isnull())
-			m_hblank_callback_proc(scanline, ppustatus_vblank, (bg_pipeline_enabled || spr_pipeline_enabled));
-	}
+	//if (scanline <= 239 && dot == 257) {
+	//	if (!m_hblank_callback_proc.isnull())
+	//		m_hblank_callback_proc(scanline, ppustatus_vblank, (bg_pipeline_enabled || spr_pipeline_enabled));
+	//}
 }
 
 /*************************************
@@ -1468,8 +1469,7 @@ void ppu2c0x_device::set_nmi(bool s) {
 			// we delay 2 ppu clicks, gives enough time to cancel it
 			nmi_pending = true;
 			nmi_delay = 2;
-			//Playchoice10 shit
-			m_int_callback(1);
+			m_nmi_detect_callback(1);
 		}
 	} else {
 		if (nmi_delay > 0 && nmi_pending) {
@@ -1477,8 +1477,6 @@ void ppu2c0x_device::set_nmi(bool s) {
 		}
 		nmi_pending = false;
 		nmi_delay = 0;
-		//Playchoice10 shit
-		m_int_callback(0);
 	}
 }
 
@@ -3404,7 +3402,7 @@ uint32_t ppu2c0x_device::screen_update(screen_device& screen, bitmap_rgb32& bitm
 	return 0;
 }
 
-void ppu2c0x_device::spriteram_dma(address_space &space, const uint8_t page) {
+/*void ppu2c0x_device::spriteram_dma(address_space &space, const uint8_t page) {
 	const int address = page << 8;
 
 	for (int i = 0; i < 0x100; i++)
@@ -3415,7 +3413,7 @@ void ppu2c0x_device::spriteram_dma(address_space &space, const uint8_t page) {
 
 	// should last 513 CPU cycles.
 	space.device().execute().adjust_icount(-513);
-}
+}*/
 void ppu2c0x_device::read_tile_plane_data(int address, int color) {}
 void ppu2c0x_device::shift_tile_plane_data(uint8_t& pix) {}
 void ppu2c0x_device::draw_tile_pixel(uint8_t pix, int color, uint32_t back_pen, uint32_t*& dest) {}

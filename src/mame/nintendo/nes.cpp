@@ -987,7 +987,7 @@ void nes_state::nes(machine_config &config)
 
 	PPU_2C02(config, m_ppu);
 	m_ppu->set_cpu_tag(m_maincpu);
-	m_ppu->int_callback().set_inputline(m_maincpu, INPUT_LINE_NMI);
+	//m_ppu->int_callback().set_inputline(m_maincpu, INPUT_LINE_NMI);
 
 	// sound hardware
 	SPEAKER(config, "mono").front_center();
@@ -1015,7 +1015,7 @@ void nes_state::nespal(machine_config &config)
 
 	PPU_2C07(config.replace(), m_ppu);
 	m_ppu->set_cpu_tag(m_maincpu);
-	m_ppu->int_callback().set_inputline(m_maincpu, INPUT_LINE_NMI);
+	//m_ppu->int_callback().set_inputline(m_maincpu, INPUT_LINE_NMI);
 
 	m_cartslot->set_clock(PAL_APU_CLOCK);
 
@@ -1061,7 +1061,7 @@ void nes_state::nespalc(machine_config &config)
 	// UMC 6538 and friends -- extends time for rendering dummy scanlines
 	PPU_PALC(config.replace(), m_ppu);
 	m_ppu->set_cpu_tag(m_maincpu);
-	m_ppu->int_callback().set_inputline(m_maincpu, INPUT_LINE_NMI);
+	//m_ppu->int_callback().set_inputline(m_maincpu, INPUT_LINE_NMI);
 
 	m_cartslot->set_clock(PALC_APU_CLOCK);
 
@@ -1113,8 +1113,8 @@ void nes_state::setup_disk(nes_disksys_device *slot)
 		slot->pcb_start(machine(), m_ciram.get(), false);
 		m_ppu->space(AS_PROGRAM).install_readwrite_handler(0, 0x1fff, read8sm_delegate(*slot, FUNC(device_nes_cart_interface::chr_r)), write8sm_delegate(*slot, FUNC(device_nes_cart_interface::chr_w)));
 		m_ppu->space(AS_PROGRAM).install_readwrite_handler(0x2000, 0x3eff, read8sm_delegate(*slot, FUNC(device_nes_cart_interface::nt_r)), write8sm_delegate(*slot, FUNC(device_nes_cart_interface::nt_w)));
-		m_ppu->set_scanline_callback(*slot, FUNC(device_nes_cart_interface::scanline_irq));
-		m_ppu->set_hblank_callback(*slot, FUNC(nes_disksys_device::hblank_irq));
+		//m_ppu->set_scanline_callback(*slot, FUNC(device_nes_cart_interface::scanline_irq));
+		//m_ppu->set_hblank_callback(*slot, FUNC(nes_disksys_device::hblank_irq));
 		m_ppu->set_latch(*slot, FUNC(device_nes_cart_interface::ppu_latch));
 		m_ppu->set_ppu_to_mapper(*slot, FUNC(device_nes_cart_interface::ppu_to_mapper));
 		m_ppu->set_ppu_bus_address(*slot, FUNC(device_nes_cart_interface::ppu_bus_address));
@@ -1188,7 +1188,7 @@ void nes_state::famitvc1(machine_config &config)
 
 	PPU_2C03B(config.replace(), m_ppu);
 	m_ppu->set_cpu_tag(m_maincpu);
-	m_ppu->int_callback().set_inputline(m_maincpu, INPUT_LINE_NMI);
+	//m_ppu->int_callback().set_inputline(m_maincpu, INPUT_LINE_NMI);
 
 	m_cartslot->set_must_be_loaded(false);
 }
@@ -1240,7 +1240,7 @@ void nes_state::fctitler(machine_config &config)
 	// PPU is really RC2C05-99, but it can't be like the other 2C05s since they swap PPUCTRL and PPUMASK registers
 	PPU_2C03B(config.replace(), m_ppu);
 	m_ppu->set_cpu_tag(m_maincpu);
-	m_ppu->int_callback().set_inputline(m_maincpu, INPUT_LINE_NMI);
+	//m_ppu->int_callback().set_inputline(m_maincpu, INPUT_LINE_NMI);
 }
 
 

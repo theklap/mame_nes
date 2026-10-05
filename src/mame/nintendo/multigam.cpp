@@ -151,6 +151,7 @@ protected:
 private:
 	required_device<rp2a03_device> m_maincpu;
 	required_device<ppu2c0x_device> m_ppu;
+	rp2a03_core_device *m_maincpu6502 = nullptr;
 	required_ioport m_p1;
 	required_ioport m_p2;
 	optional_ioport m_dsw;
@@ -168,8 +169,14 @@ private:
 	uint32_t m_in_dsw;
 	uint32_t m_in_dsw_shift;
 	int m_game_gfx_bank;
-	int m_multigam3_mmc3_scanline_counter;
-	int m_multigam3_mmc3_scanline_latch;
+	int m_multigam3_mmc3_irq_count;
+	int m_multigam3_mmc3_irq_latch;
+	bool m_multigam3_mmc3_irq_reload;
+	bool m_multigam3_mmc3_irq_enable;
+	bool m_multigam3_mmc3_a12_low_seen;
+	uint16_t m_multigam3_mmc3_prev_ppu_addr;
+	uint64_t m_multigam3_mmc3_last_a12_low_ppu;
+	int m_multigam3_mmc3_delay_irq;
 	int m_multigam3_mmc3_banks[2];
 	int m_multigam3_mmc3_4screen;
 	int m_multigam3_mmc3_last_bank;
@@ -220,7 +227,10 @@ private:
 	void multigam_init_mmc1(uint8_t *prg_base, int prg_size, int chr_bank_base);
 	void supergm3_set_bank();
 	void multigm3_decrypt(uint8_t* mem, int memsize, const uint8_t* decode_nibble);
-	void multigam3_mmc3_scanline_cb(int scanline, bool vblank, bool blanked);
+	void multigam3_mmc3_irq_clock();
+	void multigam3_mmc3_ppu_bus_address(uint16_t address, uint64_t ppu_cycle, int ppu_tick, bool odd_frame);
+	void multigam3_mmc3_ppu_to_mapper(int scanline, unsigned dot, int ppu_tick, uint16_t ppu_address);
+	void multigam3_mmc3_disable_irq();
 	void multigam_map(address_map &map) ATTR_COLD;
 	void multigm3_map(address_map &map) ATTR_COLD;
 	void multigmt_map(address_map &map) ATTR_COLD;
@@ -384,7 +394,7 @@ void multigam_state::multigam_map(address_map &map)
 	map(0x0000, 0x07ff).ram(); /* NES RAM */
 	map(0x0800, 0x0fff).ram(); /* additional RAM */
 	map(0x2000, 0x3fff).rw(m_ppu, FUNC(ppu2c0x_device::read), FUNC(ppu2c0x_device::write));
-	map(0x4014, 0x4014).w(m_ppu, FUNC(ppu2c0x_device::spriteram_dma));
+	//map(0x4014, 0x4014).w(m_ppu, FUNC(ppu2c0x_device::spriteram_dma));
 	map(0x4016, 0x4016).rw(FUNC(multigam_state::multigam_IN0_r), FUNC(multigam_state::multigam_IN0_w));   /* IN0 - input port 1 */
 	map(0x4017, 0x4017).r(FUNC(multigam_state::multigam_IN1_r));      /* IN1 - input port 2 / PSG second control register */
 	map(0x5000, 0x5ffe).rom();
@@ -403,7 +413,7 @@ void multigam_state::multigmt_map(address_map &map)
 	map(0x2000, 0x3fff).rw(m_ppu, FUNC(ppu2c0x_device::read), FUNC(ppu2c0x_device::write));
 	map(0x3000, 0x3000).w(FUNC(multigam_state::multigam_switch_prg_rom));
 	map(0x3fff, 0x3fff).w(FUNC(multigam_state::multigam_switch_gfx_rom));
-	map(0x4014, 0x4014).w(m_ppu, FUNC(ppu2c0x_device::spriteram_dma));
+	//map(0x4014, 0x4014).w(m_ppu, FUNC(ppu2c0x_device::spriteram_dma));
 	map(0x4016, 0x4016).rw(FUNC(multigam_state::multigam_IN0_r), FUNC(multigam_state::multigam_IN0_w));   /* IN0 - input port 1 */
 	map(0x4017, 0x4017).r(FUNC(multigam_state::multigam_IN1_r));     /* IN1 - input port 2 / PSG second control register */
 	map(0x5000, 0x5ffe).rom();
@@ -430,16 +440,64 @@ void multigam_state::ppu_map(address_map &map)
 *******************************************************/
 
 
-void multigam_state::multigam3_mmc3_scanline_cb(int scanline, bool vblank, bool blanked)
+void multigam_state::multigam3_mmc3_irq_clock()
 {
-	if (!vblank && !blanked)
+	if (m_multigam3_mmc3_irq_count == 0 || m_multigam3_mmc3_irq_reload)
 	{
-		if (--m_multigam3_mmc3_scanline_counter == -1)
+		m_multigam3_mmc3_irq_count = m_multigam3_mmc3_irq_latch;
+		m_multigam3_mmc3_irq_reload = false;
+	}
+	else
+	{
+		--m_multigam3_mmc3_irq_count;
+	}
+
+	if (m_multigam3_mmc3_irq_enable && m_multigam3_mmc3_irq_count == 0)
+		m_multigam3_mmc3_delay_irq = 2;
+}
+
+void multigam_state::multigam3_mmc3_ppu_bus_address(uint16_t address, uint64_t ppu_cycle, int ppu_tick, bool odd_frame)
+{
+	address &= 0x3fff;
+
+	const bool prev_a12 = BIT(m_multigam3_mmc3_prev_ppu_addr, 12);
+	const bool a12 = BIT(address, 12);
+
+	if (!a12)
+	{
+		if (prev_a12 || !m_multigam3_mmc3_a12_low_seen)
 		{
-			m_multigam3_mmc3_scanline_counter = m_multigam3_mmc3_scanline_latch;
-			m_maincpu->set_input_line(M6502_IRQ_LINE, ASSERT_LINE);
+			m_multigam3_mmc3_last_a12_low_ppu = ppu_cycle;
+			m_multigam3_mmc3_a12_low_seen = true;
 		}
 	}
+
+	if (!prev_a12 && a12)
+	{
+		if (m_multigam3_mmc3_a12_low_seen &&
+			ppu_cycle - m_multigam3_mmc3_last_a12_low_ppu > 9)
+		{
+			multigam3_mmc3_irq_clock();
+		}
+
+		m_multigam3_mmc3_a12_low_seen = false;
+	}
+
+	m_multigam3_mmc3_prev_ppu_addr = address;
+}
+
+void multigam_state::multigam3_mmc3_ppu_to_mapper(int scanline, unsigned dot, int ppu_tick, uint16_t ppu_address)
+{
+	if (m_multigam3_mmc3_delay_irq > 0 && --m_multigam3_mmc3_delay_irq == 0)
+		m_maincpu6502->queue_delayed_mapper_irq(2);
+}
+
+void multigam_state::multigam3_mmc3_disable_irq()
+{
+	m_multigam3_mmc3_irq_enable = false;
+	m_multigam3_mmc3_delay_irq = 0;
+	m_maincpu6502->cancel_delayed_mapper_irq();
+	m_maincpu6502->set_input_line(M6502_IRQ_LINE, CLEAR_LINE);
 }
 
 void multigam_state::multigam3_mmc3_rom_switch_w(offs_t offset, uint8_t data)
@@ -570,27 +628,31 @@ void multigam_state::multigam3_mmc3_rom_switch_w(offs_t offset, uint8_t data)
 			}
 		break;
 
-		case 0x4000: /* scanline counter */
-			m_multigam3_mmc3_scanline_counter = data;
-		break;
+		case 0x4000: // $C000: IRQ latch
+			m_multigam3_mmc3_irq_latch = data;
+			break;
 
-		case 0x4001: /* scanline latch */
-			m_multigam3_mmc3_scanline_latch = data;
-		break;
+		case 0x4001: // $C001: request IRQ counter reload
+			m_multigam3_mmc3_irq_count = 0;
+			m_multigam3_mmc3_irq_reload = true;
+			break;
 
-		case 0x6000: /* disable irqs */
-			m_maincpu->set_input_line(M6502_IRQ_LINE, CLEAR_LINE);
-			m_ppu->set_scanline_callback(nullptr);
-		break;
+		case 0x6000: // $E000: disable and acknowledge IRQ
+			m_multigam3_mmc3_irq_enable = false;
+			m_maincpu6502->set_input_line(M6502_IRQ_LINE, CLEAR_LINE);
+			m_maincpu6502->cancel_delayed_mapper_irq();
+			m_multigam3_mmc3_delay_irq = 0;
+			break;
 
-		case 0x6001: /* enable irqs */
-			m_ppu->set_scanline_callback(*this, FUNC(multigam_state::multigam3_mmc3_scanline_cb));
-		break;
+		case 0x6001: // $E001: enable IRQ
+			m_multigam3_mmc3_irq_enable = true;
+			break;
 	}
 }
 
 void multigam_state::multigam_init_mmc3(uint8_t *prg_base, int prg_size, int chr_bank_base)
 {
+	multigam3_mmc3_disable_irq();
 	uint8_t* dst = memregion("maincpu")->base();
 
 	// Tom & Jerry in Super Game III enables 6000 ram, but does not read/write it
@@ -604,13 +666,22 @@ void multigam_state::multigam_init_mmc3(uint8_t *prg_base, int prg_size, int chr
 
 	m_multigam3_mmc3_banks[0] = 0x1e;
 	m_multigam3_mmc3_banks[1] = 0x1f;
-	m_multigam3_mmc3_scanline_counter = 0;
-	m_multigam3_mmc3_scanline_latch = 0;
 	m_multigam3_mmc3_4screen = 0;
 	m_multigam3_mmc3_last_bank = 0xff;
 	m_multigam3_mmc3_prg_base = prg_base;
 	m_multigam3_mmc3_chr_bank_base = chr_bank_base;
 	m_multigam3_mmc3_prg_size = prg_size;
+	m_multigam3_mmc3_irq_count = 0;
+	m_multigam3_mmc3_irq_latch = 0;
+	m_multigam3_mmc3_irq_reload = false;
+	m_multigam3_mmc3_irq_enable = false;
+	m_multigam3_mmc3_a12_low_seen = false;
+	m_multigam3_mmc3_prev_ppu_addr = 0;
+	m_multigam3_mmc3_last_a12_low_ppu = 0;
+	m_multigam3_mmc3_delay_irq = 0;
+
+	m_ppu->set_ppu_bus_address(*this, FUNC(multigam_state::multigam3_mmc3_ppu_bus_address));
+	m_ppu->set_ppu_to_mapper(*this, FUNC(multigam_state::multigam3_mmc3_ppu_to_mapper));
 }
 
 void multigam_state::multigm3_mapper2_w(offs_t offset, uint8_t data)
@@ -645,6 +716,7 @@ void multigam_state::multigm3_switch_prg_rom(address_space &space, uint8_t data)
 	}
 	else
 	{
+		multigam3_mmc3_disable_irq();
 		space.install_write_handler(0x8000, 0xffff, write8sm_delegate(*this, FUNC(multigam_state::multigm3_mapper2_w)) );
 		m_bank_ram->set_base(memregion("maincpu")->base() + 0x6000);
 	}
@@ -675,7 +747,7 @@ void multigam_state::multigm3_map(address_map &map)
 	map(0x0000, 0x07ff).ram(); /* NES RAM */
 	map(0x0800, 0x0fff).ram(); /* additional RAM */
 	map(0x2000, 0x3fff).rw(m_ppu, FUNC(ppu2c0x_device::read), FUNC(ppu2c0x_device::write));
-	map(0x4014, 0x4014).w(m_ppu, FUNC(ppu2c0x_device::spriteram_dma));
+	//map(0x4014, 0x4014).w(m_ppu, FUNC(ppu2c0x_device::spriteram_dma));
 	map(0x4016, 0x4016).rw(FUNC(multigam_state::multigam_IN0_r), FUNC(multigam_state::multigam_IN0_w));   /* IN0 - input port 1 */
 	map(0x4017, 0x4017).r(FUNC(multigam_state::multigam_IN1_r));      /* IN1 - input port 2 / PSG second control register */
 	map(0x5001, 0x5001).w(FUNC(multigam_state::multigm3_switch_prg_rom));
@@ -704,13 +776,14 @@ void multigam_state::multigam3_mapper02_rom_switch_w(uint8_t data)
 
 void multigam_state::multigam_init_mapper02(uint8_t* prg_base, int prg_size)
 {
+	multigam3_mmc3_disable_irq();
 	uint8_t* mem = memregion("maincpu")->base();
 	memcpy(mem + 0x8000, prg_base + prg_size - 0x8000, 0x8000);
 	m_maincpu->space(AS_PROGRAM).install_write_handler(0x8000, 0xffff, write8smo_delegate(*this, FUNC(multigam_state::multigam3_mapper02_rom_switch_w)));
 
 	m_mapper02_prg_base = prg_base;
 	m_mapper02_prg_size = prg_size;
-	m_ppu->set_scanline_callback(nullptr);
+	//m_ppu->set_scanline_callback(nullptr);
 }
 
 /******************************************************
@@ -855,6 +928,7 @@ void multigam_state::mmc1_rom_switch_w(offs_t offset, uint8_t data)
 
 void multigam_state::multigam_init_mmc1(uint8_t *prg_base, int prg_size, int chr_bank_base)
 {
+	multigam3_mmc3_disable_irq();
 	uint8_t* dst = memregion("maincpu")->base();
 
 	memcpy(&dst[0x8000], prg_base + (prg_size - 0x8000), 0x8000);
@@ -867,7 +941,7 @@ void multigam_state::multigam_init_mmc1(uint8_t *prg_base, int prg_size, int chr
 	m_mmc1_prg_size = prg_size;
 	m_mmc1_chr_bank_base = chr_bank_base;
 
-	m_ppu->set_scanline_callback(nullptr);
+	//m_ppu->set_scanline_callback(nullptr);
 }
 
 
@@ -921,9 +995,10 @@ void multigam_state::supergm3_set_bank()
 	if ((m_supergm3_prg_bank & 0x80) == 0)
 	{
 		// title screen
+		multigam3_mmc3_disable_irq();
 		memcpy(mem + 0x8000, mem + 0x18000, 0x8000);
 		m_bank_ram->set_base(mem + 0x6000);
-		m_ppu->set_scanline_callback(nullptr);
+		//m_ppu->set_scanline_callback(nullptr);
 	}
 	else if ((m_supergm3_prg_bank & 0x40) == 0)
 	{
@@ -949,6 +1024,8 @@ void multigam_state::supergm3_set_bank()
 
 void multigam_state::supergm3_prg_bank_w(uint8_t data)
 {
+	//stop the active APU channels
+	m_maincpu->space(AS_PROGRAM).write_byte(0x4015, 0x00);
 	m_supergm3_prg_bank = data;
 }
 
@@ -969,7 +1046,7 @@ void multigam_state::supergm3_map(address_map &map)
 	map(0x0000, 0x07ff).ram(); /* NES RAM */
 	map(0x0800, 0x0fff).ram(); /* additional RAM */
 	map(0x2000, 0x3fff).rw(m_ppu, FUNC(ppu2c0x_device::read), FUNC(ppu2c0x_device::write));
-	map(0x4014, 0x4014).w(m_ppu, FUNC(ppu2c0x_device::spriteram_dma));
+	//map(0x4014, 0x4014).w(m_ppu, FUNC(ppu2c0x_device::spriteram_dma));
 	map(0x4016, 0x4016).rw(FUNC(multigam_state::multigam_IN0_r), FUNC(multigam_state::multigam_IN0_w));   /* IN0 - input port 1 */
 	map(0x4017, 0x4017).r(FUNC(multigam_state::multigam_IN1_r));      /* IN1 - input port 2 / PSG second control register */
 	map(0x4fff, 0x4fff).portr("IN0");
@@ -1142,6 +1219,8 @@ void multigam_state::common_start()
 		m_nt_page[i]->configure_entries(0, 2, m_nt_ram.get(), 0x400);
 
 	set_mirroring(PPU_MIRROR_VERT);
+	
+	m_maincpu6502 = downcast<rp2a03_core_device *>(&*m_maincpu);
 }
 
 void multigam_state::machine_start()
@@ -1186,7 +1265,7 @@ void multigam_state::multigam(machine_config &config)
 	PPU_2C02(config, m_ppu);
 	m_ppu->set_addrmap(0, &multigam_state::ppu_map);
 	m_ppu->set_cpu_tag("maincpu");
-	m_ppu->int_callback().set_inputline(m_maincpu, INPUT_LINE_NMI);
+	//m_ppu->int_callback().set_inputline(m_maincpu, INPUT_LINE_NMI);
 
 	/* sound hardware */
 	SPEAKER(config, "mono").front_center();

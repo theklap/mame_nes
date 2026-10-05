@@ -131,7 +131,7 @@ void m82_state::m82_map(address_map &map)
 {
 	map(0x0000, 0x07ff).mirror(0x1800).ram();
 	map(0x2000, 0x3fff).rw(m_ppu, FUNC(ppu2c0x_device::read), FUNC(ppu2c0x_device::write));
-	map(0x4014, 0x4014).w(m_ppu, FUNC(ppu2c0x_device::spriteram_dma));
+	//map(0x4014, 0x4014).w(m_ppu, FUNC(ppu2c0x_device::spriteram_dma));
 	map(0x4016, 0x4016).rw(FUNC(m82_state::m82_in0_r), FUNC(m82_state::m82_in0_w)); // IN0 - input port 1
 	map(0x4017, 0x4017).r(FUNC(m82_state::m82_in1_r));     // IN1 - input port 2 / PSG second control register
 
@@ -206,7 +206,7 @@ void m82_state::nes_m82(machine_config &config)
 	PPU_2C02(config, m_ppu);
 	m_ppu->set_addrmap(0, &m82_state::m82_ppu_map);
 	m_ppu->set_cpu_tag(m_maincpu);
-	m_ppu->int_callback().set_inputline(m_maincpu, INPUT_LINE_NMI);
+	//m_ppu->int_callback().set_inputline(m_maincpu, INPUT_LINE_NMI);
 
 	// sound hardware
 	SPEAKER(config, "mono").front_center();

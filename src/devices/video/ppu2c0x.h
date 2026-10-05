@@ -57,13 +57,13 @@ class ppu2c0x_device : public device_t,
 						public device_palette_interface
 {
 public:
-	typedef device_delegate<void (int scanline, bool vblank, bool blanked)> scanline_delegate;
-	typedef device_delegate<void (int scanline, bool vblank, bool blanked)> hblank_delegate;
-	typedef device_delegate<int (int address, int data)> vidaccess_delegate;
+	//typedef device_delegate<void (int scanline, bool vblank, bool blanked)> scanline_delegate;
+	//typedef device_delegate<void (int scanline, bool vblank, bool blanked)> hblank_delegate;
+	//typedef device_delegate<int (int address, int data)> vidaccess_delegate;
+	//typedef device_delegate<void ()> ppu_odd_frame_skip_delegate;
 	typedef device_delegate<void (offs_t offset)> latch_delegate;
 	typedef device_delegate<void (int scanline, unsigned dot, int ppu_tick, uint16_t ppu_address)> ppu_to_mapper_delegate;
 	typedef device_delegate<void (uint16_t address, uint64_t ppu_cycle, int ppu_tick, bool odd_frame)> ppu_bus_address_delegate;
-	//typedef device_delegate<void ()> ppu_odd_frame_skip_delegate;
 	typedef device_delegate<void (bool upper_chr, uint16_t ppu_address)> mmc1_ppu_phase_delegate;
 	typedef device_delegate<void (uint16_t address)> mmc5_ppu_read_delegate;
 	typedef device_delegate<void ()> mmc5_reset_scanline_irq_delegate;
@@ -104,9 +104,15 @@ public:
 		m_cpu.set_tag(std::forward<T>(tag));
 	}
 
-	auto int_callback()
+	//auto int_callback()
+	//{
+	//	return m_int_callback.bind();
+	//}
+	
+	//PlayChoice-10
+	auto nmi_detect_callback()
 	{
-		return m_int_callback.bind();
+		return m_nmi_detect_callback.bind();
 	}
 
 	// ---------------------------------------------------------------------
@@ -116,7 +122,7 @@ public:
 	// paths may depend on the virtual API even though the current NES path is
 	// driven by the cycle-accurate renderer below.
 	// ---------------------------------------------------------------------
-	void spriteram_dma(address_space &space, const uint8_t page);
+	void spriteram_dma(address_space &space, const uint8_t page) { }
 	void set_spriteram_value(offs_t, uint8_t) { }
 	void ppu_vram_direct_write(offs_t, uint8_t) { }
 	bool in_vblanking() { return false; }
@@ -156,26 +162,26 @@ public:
 	int get_current_scanline() { return scanline; }
 	int get_current_dot() { return dot; }
 
-	template <typename... T>
+	/*template <typename... T>
 	void set_scanline_callback(T &&... args)
 	{
 		m_scanline_callback_proc.set(std::forward<T>(args)...);
 		m_scanline_callback_proc.resolve();
-	}
+	}*/
 
-	template <typename... T>
+	/*template <typename... T>
 	void set_hblank_callback(T &&... args)
 	{
 		m_hblank_callback_proc.set(std::forward<T>(args)...);
 		m_hblank_callback_proc.resolve();
-	}
+	}*/
 
-	template <typename... T>
+	/*template <typename... T>
 	void set_vidaccess_callback(T &&... args)
 	{
 		m_vidaccess_callback_proc.set(std::forward<T>(args)...);
 		m_vidaccess_callback_proc.resolve();
-	}
+	}*/
 
 	void set_scanlines_per_frame(int scanlines) { m_scanlines_per_frame = scanlines; }
 	uint16_t get_vram_dest();
@@ -752,10 +758,11 @@ private:
 
 	inline uint16_t apply_grayscale_and_emphasis(uint8_t color);
 
-	scanline_delegate m_scanline_callback_proc;
-	hblank_delegate m_hblank_callback_proc;
-	vidaccess_delegate m_vidaccess_callback_proc;
-	devcb_write_line m_int_callback;
+	//scanline_delegate m_scanline_callback_proc;
+	//hblank_delegate m_hblank_callback_proc;
+	//vidaccess_delegate m_vidaccess_callback_proc;
+	//devcb_write_line m_int_callback;
+	devcb_write_line m_nmi_detect_callback; //PlayChoice-10
 
 	TIMER_CALLBACK_MEMBER(clock_cpu_cycle);
 

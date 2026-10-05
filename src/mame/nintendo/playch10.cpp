@@ -1997,7 +1997,7 @@ void playch10_state::playch10(machine_config &config)
 	m_ppu->set_addrmap(0, &playch10_state::ppu_map);
 	m_ppu->set_screen("bottom");
 	m_ppu->set_cpu_tag("cart");
-	m_ppu->int_callback().set(FUNC(playch10_state::int_detect_w));
+	m_ppu->nmi_detect_callback().set(FUNC(playch10_state::int_detect_w));
 
 	NES_ZAPPER_SENSOR(config, m_sensor).set_screen_tag("bottom");
 

@@ -578,7 +578,7 @@ void vs_smbbl_state::machine_start()
 {
 	vs_base_state::machine_start();
 
-	m_ppu1->set_scanline_callback(*this, FUNC(vs_smbbl_state::smbbl_scanline_cb));
+	//m_ppu1->set_scanline_callback(*this, FUNC(vs_smbbl_state::smbbl_scanline_cb));
 
 	u8 *base = m_gfx1_rom->base();
 	const u32 entries = m_gfx1_rom->bytes() / 0x2000;
@@ -1006,7 +1006,7 @@ void vs_dual_state::init_vsdual()
 //**********************************************************************************
 // Vs. Super Mario Bros (Bootleg)
 
-void vs_smbbl_state::smbbl_scanline_cb(int scanline, bool vblank, bool blanked)
+/*void vs_smbbl_state::smbbl_scanline_cb(int scanline, bool vblank, bool blanked)
 {
 	// Z80 IRQ is controlled by two factors:
 	// - bit 6 of current (next) scanline number
@@ -1015,7 +1015,7 @@ void vs_smbbl_state::smbbl_scanline_cb(int scanline, bool vblank, bool blanked)
 	{
 		m_subcpu->set_input_line(INPUT_LINE_IRQ0, BIT(scanline + 1, 6) ? ASSERT_LINE : CLEAR_LINE);
 	}
-}
+}*/
 
 u8 vs_smbbl_state::smbbl_ppu_data_r()
 {
@@ -2499,7 +2499,7 @@ void vs_uni_state::vsnes(machine_config &config)
 	m_ppu1->set_addrmap(0, &vs_uni_state::vsnes_ppu1_map);
 	m_ppu1->set_screen("screen1");
 	m_ppu1->set_cpu_tag(m_maincpu);
-	m_ppu1->int_callback().set_inputline(m_maincpu, INPUT_LINE_NMI);
+	//m_ppu1->int_callback().set_inputline(m_maincpu, INPUT_LINE_NMI);
 
 	NES_ZAPPER_SENSOR(config, m_sensor).set_screen_tag("screen1");
 
@@ -2518,7 +2518,7 @@ void vs_uni_state::jajamaru(machine_config &config)
 	PPU_2C05_01(config.replace(), m_ppu1);
 	m_ppu1->set_screen("screen1");
 	m_ppu1->set_cpu_tag(m_maincpu);
-	m_ppu1->int_callback().set_inputline(m_maincpu, INPUT_LINE_NMI);
+	//m_ppu1->int_callback().set_inputline(m_maincpu, INPUT_LINE_NMI);
 }
 
 void vs_uni_state::mightybj(machine_config &config)
@@ -2528,7 +2528,7 @@ void vs_uni_state::mightybj(machine_config &config)
 	PPU_2C05_02(config.replace(), m_ppu1);
 	m_ppu1->set_screen("screen1");
 	m_ppu1->set_cpu_tag(m_maincpu);
-	m_ppu1->int_callback().set_inputline(m_maincpu, INPUT_LINE_NMI);
+	//m_ppu1->int_callback().set_inputline(m_maincpu, INPUT_LINE_NMI);
 }
 
 void vs_uni_state::vsgshoe(machine_config &config)
@@ -2538,7 +2538,7 @@ void vs_uni_state::vsgshoe(machine_config &config)
 	PPU_2C05_03(config.replace(), m_ppu1);
 	m_ppu1->set_screen("screen1");
 	m_ppu1->set_cpu_tag(m_maincpu);
-	m_ppu1->int_callback().set_inputline(m_maincpu, INPUT_LINE_NMI);
+	//m_ppu1->int_callback().set_inputline(m_maincpu, INPUT_LINE_NMI);
 }
 
 void vs_uni_state::topgun(machine_config &config)
@@ -2549,7 +2549,7 @@ void vs_uni_state::topgun(machine_config &config)
 	m_ppu1->set_addrmap(0, &vs_uni_state::vsnes_ppu1_map);
 	m_ppu1->set_screen("screen1");
 	m_ppu1->set_cpu_tag(m_maincpu);
-	m_ppu1->int_callback().set_inputline(m_maincpu, INPUT_LINE_NMI);
+	//m_ppu1->int_callback().set_inputline(m_maincpu, INPUT_LINE_NMI);
 }
 
 void vs_dual_state::vsdual(machine_config &config)
@@ -2580,13 +2580,13 @@ void vs_dual_state::vsdual(machine_config &config)
 	m_ppu1->set_addrmap(0, &vs_dual_state::vsnes_ppu1_map);
 	m_ppu1->set_screen("screen1");
 	m_ppu1->set_cpu_tag(m_maincpu);
-	m_ppu1->int_callback().set_inputline(m_maincpu, INPUT_LINE_NMI);
+	//m_ppu1->int_callback().set_inputline(m_maincpu, INPUT_LINE_NMI);
 
 	PPU_2C04(config, m_ppu2);
 	m_ppu2->set_addrmap(0, &vs_dual_state::vsnes_ppu2_map);
 	m_ppu2->set_screen("screen2");
 	m_ppu2->set_cpu_tag(m_subcpu);
-	m_ppu2->int_callback().set_inputline(m_subcpu, INPUT_LINE_NMI);
+	//m_ppu2->int_callback().set_inputline(m_subcpu, INPUT_LINE_NMI);
 
 	// sound hardware
 	SPEAKER(config, "speaker", 2).front();
@@ -2617,7 +2617,7 @@ void vs_smbbl_state::vs_smbbl(machine_config &config)
 	m_ppu1->set_addrmap(0, &vs_smbbl_state::smbbl_ppu_map);
 	m_ppu1->set_cpu_tag(m_maincpu);
 	m_ppu1->set_screen("screen1");
-	m_ppu1->int_callback().set_inputline(m_maincpu, INPUT_LINE_NMI);
+	//m_ppu1->int_callback().set_inputline(m_maincpu, INPUT_LINE_NMI);
 
 	// sound hardware
 	SPEAKER(config, "mono").front_center();
