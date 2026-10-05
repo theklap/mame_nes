@@ -437,7 +437,7 @@ void ppu2c0x_device::init_startup_only_state() {
 	// --------------------------------------------------
 	// PPU model / board configuration
 	// --------------------------------------------------
-	m_security_value = 0;
+	//m_security_value = 0;
 	m_prerender_line = 0;
 
 	// --------------------------------------------------
@@ -488,7 +488,13 @@ void ppu2c0x_device::device_start() {
 	// --------------------------------------------------
 	// Device pointers
 	// --------------------------------------------------
-	m_maincpu6502 = machine().root_device().subdevice<rp2a03_core_device>("maincpu");
+	m_maincpu6502 = downcast<rp2a03_core_device *>(&*m_cpu);
+
+	pal_cpu_ppu = 0;
+	save_item(NAME(pal_cpu_ppu));
+
+	m_cpu_clock_timer = timer_alloc(FUNC(ppu2c0x_device::clock_cpu_cycle), this);
+	m_cpu_clock_timer->adjust(m_cpu->cycles_to_attotime(1) + attotime(0, 1), 0, m_cpu->cycles_to_attotime(1));
 
 	// --------------------------------------------------
 	// Power-up palette RAM
@@ -929,6 +935,21 @@ void ppu2c0x_rgb_device::init_palette_tables() {
 *  PPU Bus Helpers
 *
 *************************************/
+TIMER_CALLBACK_MEMBER(ppu2c0x_device::clock_cpu_cycle)
+{
+	if (m_cpu->total_cycles() == 0)
+		return;
+
+	tick(1);
+	tick(2);
+	tick(3);
+
+	if (m_scanlines_per_frame == PAL_SCANLINES_PER_FRAME && ++pal_cpu_ppu == 5)
+	{
+		tick(4);
+		pal_cpu_ppu = 0;
+	}
+}
 
 void ppu2c0x_device::ppu_bus_address_drive(uint16_t addr, ppu_bus_source source)
 {
@@ -2846,7 +2867,7 @@ uint8_t ppu2c0x_device::read(offs_t offset) {
 
 			w = false;
 
-			const uint8_t old_bus = ppu_open_bus_peek();
+			/*const uint8_t old_bus = ppu_open_bus_peek();
 
 			const uint8_t ret = m_security_value ? uint8_t((vblank_read ? 0x80 : 0x00) | (spr0_read ? 0x40 : 0x00) | m_security_value) :
 												   uint8_t((vblank_read ? 0x80 : 0x00) | (spr0_read ? 0x40 : 0x00) | (ovf_read ? 0x20 : 0x00) | (old_bus & 0x1f));
@@ -2864,6 +2885,22 @@ uint8_t ppu2c0x_device::read(offs_t offset) {
 				ppu_open_bus_drive(ret);
 			else
 				ppu_open_bus_drive_masked(ret, 0xe0);
+
+			return ret;*/
+			const uint8_t old_bus = ppu_open_bus_peek();
+			const uint8_t security_mask = m_security_value ? uint8_t(0x1f | (m_security_value & 0x20)) : 0;
+			const uint8_t ret = uint8_t((vblank_read ? 0x80 : 0x00) | (spr0_read ? 0x40 : 0x00) | ((ovf_read && !(security_mask & 0x20)) ? 0x20 : 0x00) | (m_security_value & security_mask) | (old_bus & uint8_t(~(0xe0 | security_mask))));
+
+			if (BIT(ret, 7) && !m_mmc5_reset_scanline_irq.isnull()) {
+				m_mmc5_reset_scanline_irq();
+			}
+
+			ppustatus_vblank = false;
+			set_nmi(false);
+
+			// $2002 drives status bits 7-5 and any security-signature bits.
+			// Other open-bus bits retain their existing decay timers.
+			ppu_open_bus_drive_masked(ret, uint8_t(0xe0 | security_mask));
 
 			return ret;
 		}

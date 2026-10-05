@@ -113,11 +113,24 @@ void nesapu_device::calculate_rates()
 
 void nesapu_device::device_start()
 {
-	m_maincpu_dev = machine().root_device().subdevice<cpu_device>("maincpu");
-	m_maincpu6502 = machine().root_device().subdevice<rp2a03_core_device>("maincpu");
-	m_ppu_dev = machine().root_device().subdevice<ppu2c0x_device>("ppu");
-	//m_mmc5 = machine().root_device().subdevice<nes_exrom_device>("nes_slot:exrom");
+	device_t &root = machine().root_device();
+	device_t *const sub_cpu = root.subdevice("sub");
+	const bool is_sub_cpu = (owner() == sub_cpu);
+	const char *const cpu_tag = is_sub_cpu ? "sub" : "maincpu";
+
+	m_maincpu_dev = root.subdevice<cpu_device>(cpu_tag);
+	m_maincpu6502 = root.subdevice<rp2a03_core_device>(cpu_tag);
+
+	if (is_sub_cpu) {
+		m_ppu_dev = root.subdevice<ppu2c0x_device>("ppu2");
+	} else {
+		m_ppu_dev = root.subdevice<ppu2c0x_device>("ppu");
+		if (!m_ppu_dev)
+			m_ppu_dev = root.subdevice<ppu2c0x_device>("ppu1");
+	}
+	
 	pal_cpu_ppu = 0;
+	
 	// --------------------------------------------------
 	// Deterministic startup initialization.
 	//
@@ -1079,7 +1092,7 @@ void nesapu_device::tick() {
 	// Avoid ticking the PPU
 	// before the CPU/APU cycle relationship is valid at startup. Keep that
 	// behavior as a one-time latch instead of rechecking cpu_cycle math forever.
-	if (!run_ppu)
+	/*if (!run_ppu)
 	{
 		if (cpu_cycle >= 0)
 			run_ppu = true;
@@ -1095,7 +1108,7 @@ void nesapu_device::tick() {
 			m_ppu_dev->tick(4);
 			pal_cpu_ppu = 0;
 		}
-	}
+	}*/
 }
 
 TIMER_CALLBACK_MEMBER(nesapu_device::apu_tick) {

@@ -757,6 +757,11 @@ private:
 	vidaccess_delegate m_vidaccess_callback_proc;
 	devcb_write_line m_int_callback;
 
+	TIMER_CALLBACK_MEMBER(clock_cpu_cycle);
+
+	emu_timer *m_cpu_clock_timer = nullptr;
+	u8 pal_cpu_ppu = 0;
+
 	// Legacy MAME render/helper state.
 	int m_refresh_latch;
 	int m_add;

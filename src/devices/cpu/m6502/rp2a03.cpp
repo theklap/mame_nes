@@ -26,6 +26,7 @@ void rp2a03_device::rp2a03_map(address_map &map)
 	map(0x4015, 0x4015).lw8(NAME([this](u8 data) { m_apu->write(0x15, data);})); //logerror("Write to APU 4015 from rp2a03: %d\n", data);
 	map(0x4017, 0x4017).lw8(NAME([this](u8 data) { m_apu->write(0x17, data);})); //logerror("Write to APU 4017 from rp2a03: %d\n", data);
 	map(0x4018, 0x40ff).r(m_apu, FUNC(nesapu_device::read));
+	//map(0x4018, 0x401f).r(m_apu, FUNC(nesapu_device::read));
 	
 	// 0x4014 w -> NES sprite DMA (is this internal?)
 	// 0x4016 w -> d0-d2: RP2A03 OUT0,OUT1,OUT2
