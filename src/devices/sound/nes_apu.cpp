@@ -114,21 +114,23 @@ void nesapu_device::calculate_rates()
 void nesapu_device::device_start()
 {
 	device_t &root = machine().root_device();
+	device_t *const apu_cpu = owner();
 	device_t *const sub_cpu = root.subdevice("sub");
-	const bool is_sub_cpu = (owner() == sub_cpu);
-	const char *const cpu_tag = is_sub_cpu ? "sub" : "maincpu";
+	device_t *const cart_cpu = root.subdevice("cart");
 
-	m_maincpu_dev = root.subdevice<cpu_device>(cpu_tag);
-	m_maincpu6502 = root.subdevice<rp2a03_core_device>(cpu_tag);
+	m_maincpu_dev = dynamic_cast<cpu_device *>(apu_cpu);
+	m_maincpu6502 = dynamic_cast<rp2a03_core_device *>(apu_cpu);
 
-	if (is_sub_cpu) {
+	if (apu_cpu == sub_cpu) {
 		m_ppu_dev = root.subdevice<ppu2c0x_device>("ppu2");
+	} else if (apu_cpu == cart_cpu) {
+		m_ppu_dev = root.subdevice<ppu2c0x_device>("ppu");
 	} else {
 		m_ppu_dev = root.subdevice<ppu2c0x_device>("ppu");
 		if (!m_ppu_dev)
 			m_ppu_dev = root.subdevice<ppu2c0x_device>("ppu1");
 	}
-	
+
 	pal_cpu_ppu = 0;
 	
 	// --------------------------------------------------

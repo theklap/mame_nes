@@ -1468,6 +1468,8 @@ void ppu2c0x_device::set_nmi(bool s) {
 			// we delay 2 ppu clicks, gives enough time to cancel it
 			nmi_pending = true;
 			nmi_delay = 2;
+			//Playchoice10 shit
+			m_int_callback(1);
 		}
 	} else {
 		if (nmi_delay > 0 && nmi_pending) {
@@ -1475,6 +1477,8 @@ void ppu2c0x_device::set_nmi(bool s) {
 		}
 		nmi_pending = false;
 		nmi_delay = 0;
+		//Playchoice10 shit
+		m_int_callback(0);
 	}
 }
 
@@ -3400,8 +3404,7 @@ uint32_t ppu2c0x_device::screen_update(screen_device& screen, bitmap_rgb32& bitm
 	return 0;
 }
 
-void ppu2c0x_device::spriteram_dma(address_space &space, const uint8_t page)
-{
+void ppu2c0x_device::spriteram_dma(address_space &space, const uint8_t page) {
 	const int address = page << 8;
 
 	for (int i = 0; i < 0x100; i++)

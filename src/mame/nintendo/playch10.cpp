@@ -430,7 +430,10 @@ private:
 
 	void pc10_set_videorom_bank(int first, int count, int bank, int size);
 	void pc10_set_videoram_bank(int first, int count, int bank, int size);
-	void gboard_scanline_cb(int scanline, bool vblank, bool blanked);
+	//void gboard_scanline_cb(int scanline, bool vblank, bool blanked);
+	void gboard_ppu_bus_address(u16 address, u64 cpu_cycles, int ppu_tick, bool odd_frame);
+	void gboard_ppu_tick(int scanline, unsigned dot, int ppu_tick, u16 ppu_address);
+	void gboard_irq_clock();
 	void int_detect_w(int state);
 	void mapper9_latch(offs_t offset);
 	void pc10_set_mirroring(int mirroring);
@@ -495,6 +498,11 @@ private:
 	u8 m_mmc1_switchlow = 0;
 	int m_gboard_banks[2]{};
 	int m_gboard_command = 0;
+	bool m_gboard_irq_reload = false;
+	int m_gboard_irq_delay = 0;
+	u64 m_gboard_last_a12_low_cpu = 0;
+	u16 m_gboard_prev_ppu_addr = 0;
+	bool m_gboard_a12_low_seen = false;
 	int m_IRQ_count = 0;
 	u8 m_IRQ_count_latch = 0;
 	int m_IRQ_enable = 0;
@@ -602,10 +610,14 @@ u32 playch10_state::screen_update_playch10_top(screen_device &screen, bitmap_rgb
 		return screen_update_playch10_single(screen, bitmap, cliprect);
 
 	// When the bios is accessing vram, the video circuitry can't access it
-	if (!m_pc10_sdcs)
+	/*if (!m_pc10_sdcs)
 		m_bg_tilemap->draw(screen, bitmap, cliprect, 0, 0);
 	else
 		bitmap.fill(0, cliprect);
+	*/
+	
+	//that commented out crap above caused the top screen to flash every 5 seconds
+	m_bg_tilemap->draw(screen, bitmap, cliprect, 0, 0);
 
 	return 0;
 }
@@ -1266,21 +1278,55 @@ void playch10_state::init_pcfboard()
 //**********************************************************************************
 // G Board (MMC3) games (Super Mario Bros. 3, etc)
 
-void playch10_state::gboard_scanline_cb(int scanline, bool vblank, bool blanked)
+void playch10_state::gboard_ppu_bus_address(u16 address, u64 cpu_cycles, int ppu_tick, bool odd_frame)
 {
-	if (scanline < ppu2c0x_device::BOTTOM_VISIBLE_SCANLINE)
-	{
-		int priorCount = m_IRQ_count;
-		if (m_IRQ_count)
-			m_IRQ_count--;
-		else
-			m_IRQ_count = m_IRQ_count_latch;
+	address &= 0x3fff;
 
-		if (m_IRQ_enable && !blanked && !m_IRQ_count && priorCount) // according to blargg the latter should be present as well, but it breaks Rampart and Joe & Mac US: they probably use the alt irq!
+	const bool previous_a12 = BIT(m_gboard_prev_ppu_addr, 12);
+	const bool current_a12 = BIT(address, 12);
+
+	if (!current_a12)
+	{
+		if (previous_a12 || !m_gboard_a12_low_seen)
 		{
-			m_cartcpu->set_input_line(0, ASSERT_LINE);
+			m_gboard_last_a12_low_cpu = cpu_cycles;
+			m_gboard_a12_low_seen = true;
 		}
 	}
+
+	if (!previous_a12 && current_a12)
+	{
+		const u64 low_time = cpu_cycles - m_gboard_last_a12_low_cpu;
+
+		if (m_gboard_a12_low_seen && low_time > 9)
+			gboard_irq_clock();
+
+		m_gboard_a12_low_seen = false;
+	}
+
+	m_gboard_prev_ppu_addr = address;
+}
+
+void playch10_state::gboard_irq_clock()
+{
+	if (m_IRQ_count == 0 || m_gboard_irq_reload)
+	{
+		m_IRQ_count = m_IRQ_count_latch;
+		m_gboard_irq_reload = false;
+	}
+	else
+	{
+		--m_IRQ_count;
+	}
+
+	if (m_IRQ_enable && m_IRQ_count == 0)
+		m_gboard_irq_delay = 2;
+}
+
+void playch10_state::gboard_ppu_tick(int scanline, unsigned dot, int ppu_tick, u16 ppu_address)
+{
+	if (m_gboard_irq_delay > 0 && --m_gboard_irq_delay == 0)
+		m_cartcpu->queue_delayed_mapper_irq(2);
 }
 
 void playch10_state::gboard_rom_switch_w(offs_t offset, u8 data)
@@ -1352,16 +1398,19 @@ void playch10_state::gboard_rom_switch_w(offs_t offset, u8 data)
 			m_IRQ_count_latch = data;
 			break;
 
-		case 0x4001: // scanline latch
+		case 0x4001: // IRQ reload
 			m_IRQ_count = 0;
+			m_gboard_irq_reload = true;
 			break;
 
-		case 0x6000: // disable irqs
+		case 0x6000: // IRQ disable and acknowledge
 			m_IRQ_enable = 0;
+			m_gboard_irq_delay = 0;
+			m_cartcpu->cancel_delayed_mapper_irq();
 			m_cartcpu->set_input_line(0, CLEAR_LINE);
 			break;
 
-		case 0x6001: // enable irqs
+		case 0x6001: // IRQ enable
 			m_IRQ_enable = 1;
 			break;
 	}
@@ -1377,8 +1426,14 @@ void playch10_state::init_pcgboard()
 	m_gboard_command = 0;
 	m_IRQ_enable = 0;
 	m_IRQ_count = m_IRQ_count_latch = 0;
+	m_gboard_irq_reload = false;
+	m_gboard_irq_delay = 0;
+	m_gboard_last_a12_low_cpu = 0;
+	m_gboard_prev_ppu_addr = 0;
+	m_gboard_a12_low_seen = false;
 
-	m_ppu->set_scanline_callback(*this, FUNC(playch10_state::gboard_scanline_cb));
+	m_ppu->set_ppu_bus_address(*this, FUNC(playch10_state::gboard_ppu_bus_address));
+	m_ppu->set_ppu_to_mapper(*this, FUNC(playch10_state::gboard_ppu_tick));
 }
 
 void playch10_state::init_pcgboard_type2()
@@ -1942,8 +1997,7 @@ void playch10_state::playch10(machine_config &config)
 	m_ppu->set_addrmap(0, &playch10_state::ppu_map);
 	m_ppu->set_screen("bottom");
 	m_ppu->set_cpu_tag("cart");
-	m_ppu->int_callback().set_inputline(m_cartcpu, INPUT_LINE_NMI);
-	m_ppu->int_callback().append(FUNC(playch10_state::int_detect_w));
+	m_ppu->int_callback().set(FUNC(playch10_state::int_detect_w));
 
 	NES_ZAPPER_SENSOR(config, m_sensor).set_screen_tag("bottom");
 
