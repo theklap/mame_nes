@@ -99,7 +99,7 @@ void vt3xx_soc_base_device::device_add_mconfig(machine_config &config)
 
 	PPU_VT3XX(config.replace(), m_ppu, RP2A03_NTSC_XTAL);
 	m_ppu->set_cpu_tag(m_maincpu);
-	m_ppu->int_callback().set(FUNC(vt3xx_soc_base_device::ppu_nmi));
+	//m_ppu->int_callback().set(FUNC(vt3xx_soc_base_device::ppu_nmi));
 	m_ppu->read_bg().set(FUNC(vt3xx_soc_base_device::chr_r));
 	m_ppu->read_sp().set(FUNC(vt3xx_soc_base_device::spr_r));
 	m_ppu->read_onespace_with_relative().set(FUNC(vt3xx_soc_base_device::read_onespace_bus_with_relative_offset));
