@@ -210,8 +210,8 @@ void nes_vt02_vt03_soc_device::device_start()
 	m_chrram = std::make_unique<u8[]>(0x2000);
 	save_pointer(NAME(m_chrram), 0x2000);
 
-	m_ppu->set_scanline_callback(*this, FUNC(nes_vt02_vt03_soc_device::scanline_irq));
-	m_ppu->set_hblank_callback(*this, FUNC(nes_vt02_vt03_soc_device::hblank_irq));
+	//m_ppu->set_scanline_callback(*this, FUNC(nes_vt02_vt03_soc_device::scanline_irq));
+	//m_ppu->set_hblank_callback(*this, FUNC(nes_vt02_vt03_soc_device::hblank_irq));
 
 	//m_ppu->set_hblank_callback(*m_cartslot->m_cart, FUNC(device_nes_cart_interface::hblank_irq)));
 	//m_ppu->space(AS_PROGRAM).install_readwrite_handler(0, 0x1fff, read8sm_delegate(*m_cartslot->m_cart, FUNC(device_nes_cart_interface::chr_r)), write8sm_delegate(*m_cartslot->m_cart, FUNC(device_nes_cart_interface::chr_w)));

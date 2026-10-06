@@ -1237,7 +1237,7 @@ void nes_clone_afbm7800_state::common_start()
 		m_nametables[i]->configure_entries(0, 0x800 / 0x400, &m_nt_ram[0], 0x400);
 
 	m_ppu->space(AS_PROGRAM).install_readwrite_handler(0x0000, 0x1fff, read8sm_delegate(*this, FUNC(nes_clone_afbm7800_state::vram_r)), write8sm_delegate(*this, FUNC(nes_clone_afbm7800_state::vram_w)));
-	m_ppu->set_scanline_callback(*this, FUNC(nes_clone_afbm7800_state::mmc3_scanline_cb));
+	//m_ppu->set_scanline_callback(*this, FUNC(nes_clone_afbm7800_state::mmc3_scanline_cb));
 
 	m_ppu->space(AS_PROGRAM).install_readwrite_bank(0x2000,0x23ff,m_nametables[0]);
 	m_ppu->space(AS_PROGRAM).install_readwrite_bank(0x2400,0x27ff,m_nametables[1]);
