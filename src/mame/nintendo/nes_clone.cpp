@@ -348,7 +348,7 @@ void nes_clone_state::nes_clone_basemap(address_map &map)
 	map(0x0000, 0x07ff).ram();
 	map(0x2000, 0x3fff).rw(m_ppu, FUNC(ppu2c0x_device::read), FUNC(ppu2c0x_device::write));
 
-	map(0x4014, 0x4014).w(m_ppu, FUNC(ppu2c0x_device::spriteram_dma));
+	//map(0x4014, 0x4014).w(m_ppu, FUNC(ppu2c0x_device::spriteram_dma));
 
 	map(0x4016, 0x4016).rw(FUNC(nes_clone_state::in0_r), FUNC(nes_clone_state::in0_w));
 	map(0x4017, 0x4017).r(FUNC(nes_clone_state::in1_r));
@@ -522,7 +522,7 @@ void nes_clone_state::nes_clone(machine_config &config)
 
 	PPU_2C02(config, m_ppu);
 	m_ppu->set_cpu_tag("maincpu");
-	m_ppu->int_callback().set_inputline(m_maincpu, INPUT_LINE_NMI);
+	//m_ppu->int_callback().set_inputline(m_maincpu, INPUT_LINE_NMI);
 
 	/* sound hardware */
 	SPEAKER(config, "mono").front_center();
@@ -545,7 +545,7 @@ void nes_clone_state::nes_clone_pal(machine_config &config)
 
 	PPU_PALC(config, m_ppu);
 	m_ppu->set_cpu_tag("maincpu");
-	m_ppu->int_callback().set_inputline(m_maincpu, INPUT_LINE_NMI);
+	//m_ppu->int_callback().set_inputline(m_maincpu, INPUT_LINE_NMI);
 
 	/* sound hardware */
 	SPEAKER(config, "mono").front_center();

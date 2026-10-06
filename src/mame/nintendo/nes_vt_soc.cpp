@@ -1230,7 +1230,7 @@ void nes_vt02_vt03_soc_device::do_pal_timings_and_ppu_replacement(machine_config
 
 	PPU_VT03PAL(config.replace(), m_ppu, RP2A03_PAL_XTAL);
 	m_ppu->set_cpu_tag(m_maincpu);
-	m_ppu->int_callback().set_inputline(m_maincpu, INPUT_LINE_NMI);
+	//m_ppu->int_callback().set_inputline(m_maincpu, INPUT_LINE_NMI);
 	m_ppu->read_bg().set(FUNC(nes_vt02_vt03_soc_device::chr_r));
 	m_ppu->read_sp().set(FUNC(nes_vt02_vt03_soc_device::spr_r));
 	m_ppu->set_screen(m_screen);
@@ -1258,7 +1258,7 @@ void nes_vt02_vt03_soc_device::device_add_mconfig(machine_config &config)
 
 	PPU_VT03(config, m_ppu, RP2A03_NTSC_XTAL);
 	m_ppu->set_cpu_tag(m_maincpu);
-	m_ppu->int_callback().set_inputline(m_maincpu, INPUT_LINE_NMI);
+	//m_ppu->int_callback().set_inputline(m_maincpu, INPUT_LINE_NMI);
 	m_ppu->read_bg().set(FUNC(nes_vt02_vt03_soc_device::chr_r));
 	m_ppu->read_sp().set(FUNC(nes_vt02_vt03_soc_device::spr_r));
 	m_ppu->set_screen(m_screen);
