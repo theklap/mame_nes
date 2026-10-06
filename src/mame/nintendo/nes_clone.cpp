@@ -239,7 +239,7 @@ protected:
 	virtual void handle_mmc3chr_banks(uint16_t* selected_chrbanks);
 	void update_prg_banks();
 	void update_banks();
-	void mmc3_scanline_cb(int scanline, bool vblank, bool blanked);
+	//void mmc3_scanline_cb(int scanline, bool vblank, bool blanked);
 
 	int16_t m_mmc3_scanline_counter = 0;
 	uint8_t m_mmc3_scanline_latch = 0;
@@ -1054,7 +1054,7 @@ void nes_clone_afbm7800_state::mapper_e001_w(uint8_t data)
 
 
 
-void nes_clone_afbm7800_state::mmc3_scanline_cb(int scanline, bool vblank, bool blanked)
+/*void nes_clone_afbm7800_state::mmc3_scanline_cb(int scanline, bool vblank, bool blanked)
 {
 	if (m_mmc3_irq_enable)
 	{
@@ -1067,7 +1067,7 @@ void nes_clone_afbm7800_state::mmc3_scanline_cb(int scanline, bool vblank, bool 
 			}
 		}
 	}
-}
+}*/
 
 
 
