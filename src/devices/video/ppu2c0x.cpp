@@ -62,9 +62,6 @@ device_memory_interface::space_config_vector ppu2c0x_device::memory_space_config
 
 void ppu2c0x_device::device_config_complete() {
 	/* reset the callbacks */
-	//m_scanline_callback_proc.set(nullptr);
-	//m_hblank_callback_proc.set(nullptr);
-	//m_vidaccess_callback_proc.set(nullptr);
 	m_latch.set(nullptr);
 	m_ppu_to_mapper.set(nullptr);
 	m_ppu_bus_address_callback.set(nullptr);
@@ -97,10 +94,6 @@ ppu2c0x_device::ppu2c0x_device(const machine_config& mconfig, device_type type, 
 	m_mmc1_ppu_phase(*this),
 	m_mmc5_ppu_read(*this),
 	m_mmc5_reset_scanline_irq(*this),
-	//m_scanline_callback_proc(*this),
-	//m_hblank_callback_proc(*this),
-	//m_vidaccess_callback_proc(*this),
-	//m_int_callback(*this),
 	m_nmi_detect_callback(*this),
 	m_refresh_latch(0),
 	m_add(1),
@@ -273,6 +266,8 @@ void ppu2c0x_device::init_runtime_reset_state() {
 
 	ppu2007_post_bump_pending = false;
 	ppu2007_post_bump_delay = 0;
+	ppu2007_rmw_dummy_pending = false;
+	ppu2007_ignore_vram_read = 0;
 
 	ppu2007_ale_read_addr_latch_poison = false;
 	ppu2007_ale_read_low_latch = 0;
@@ -280,10 +275,19 @@ void ppu2c0x_device::init_runtime_reset_state() {
 	// --------------------------------------------------
 	// Delayed $2007 write state
 	// --------------------------------------------------
-	m_2007_write.pending = false;
-	m_2007_write.delay = 0;
-	m_2007_write.addr = 0;
-	m_2007_write.data = 0;
+	m_2007_write_head = 0;
+	m_2007_write_count = 0;
+
+	for (auto &write : m_2007_write)
+	{
+		write.pending = false;
+		write.delay = 0;
+		write.addr = 0;
+		write.data = 0;
+		write.extra_pending = false;
+		write.extra_addr = 0;
+		write.extra_data = 0;
+	}
 
 	// --------------------------------------------------
 	// Delayed $2007 read state
@@ -293,6 +297,9 @@ void ppu2c0x_device::init_runtime_reset_state() {
 	m_2007_read.addr = 0;
 	m_2007_read.use_next_ppu_read_for_refill = false;
 	m_2007_read.waiting_for_refill_bus_read = false;
+	m_2007_read.bus_stage = 0;
+	m_2007_read.address_deadline = 0;
+	m_2007_read.data_deadline = 0;
 
 	// --------------------------------------------------
 	// Pending delayed CPU register effects
@@ -483,6 +490,62 @@ void ppu2c0x_device::start_nopalram() {
 	init_runtime_reset_state();
 }
 
+void ppu2c0x_device::device_reset() {
+	/*
+	0 = CPU 1 (Phase 0)
+		- passes accuracy coin
+		- Warrio effect = False
+		- read2004.nes = 4 x FF
+		- demo_ntsc - correct
+		- scanline.nes - correct
+	1 = CPU 2 (Phase 1)
+		- passes accuracy coin
+		- Warrio effect = True
+		- read2004.nes = 3 x FF
+		- demo_ntsc - correct
+		- scanline.nes chopped
+	2 = CPU 3 (Phase 2)
+		- passes accuracy coin
+		- Warrio effect = False
+		- read2004.nes = 3 x FF
+		- demo_ntsc - correct
+		- scanline.nes chopped
+	3 = CPU 4 (Phase 3)
+		- passes accuracy coin
+		- Warrio effect = False
+		- read2004.nes = 3 x FF
+		- demo_ntsc - correct
+		- scanline.nes chopped
+	*/
+	if (m_scanlines_per_frame == PAL_SCANLINES_PER_FRAME) {
+		m_cpu_clock_timer->adjust(m_cpu->cycles_to_attotime(1) + attotime(0, 1), 0, m_cpu->cycles_to_attotime(1));
+	} else {
+		ioport_port *const alignment_port = machine().root_device().ioport("PPUALIGN");
+		m_cpu_ppu_alignment = alignment_port ? (alignment_port->read() & 0x07) : 0;
+
+		if (m_cpu_ppu_alignment == 4) {
+			const u32 alignment_roll = (u32(osd_ticks()) ^ machine().rand()) % 100;
+
+			if (alignment_roll < 27)
+				m_cpu_ppu_alignment = 0;
+			else if (alignment_roll < 42)
+				m_cpu_ppu_alignment = 1;
+			else if (alignment_roll < 73)
+				m_cpu_ppu_alignment = 2;
+			else
+				m_cpu_ppu_alignment = 3;
+
+			logerror("m_cpu_ppu_alignment=%u (roll=%u)\n", unsigned(m_cpu_ppu_alignment), unsigned(alignment_roll));
+			osd_printf_info("Random - CPU/PPU Alignment=%u\n", unsigned(m_cpu_ppu_alignment));
+		} else {
+			logerror("m_cpu_ppu_alignment=%u\n", unsigned(m_cpu_ppu_alignment));
+			osd_printf_info("Static - CPU/PPU Alignment=%u\n", unsigned(m_cpu_ppu_alignment));
+		}
+
+		m_cpu_clock_timer->adjust(m_cpu->cycles_to_attotime(1) - attotime::from_ticks(m_cpu_ppu_alignment, 21477272), 0, attotime::from_ticks(1, m_cpu->clock() * 3));
+	}
+}
+
 void ppu2c0x_device::device_start() {
 	start_nopalram();
 
@@ -494,8 +557,11 @@ void ppu2c0x_device::device_start() {
 	pal_cpu_ppu = 0;
 	save_item(NAME(pal_cpu_ppu));
 
-	m_cpu_clock_timer = timer_alloc(FUNC(ppu2c0x_device::clock_cpu_cycle), this);
-	m_cpu_clock_timer->adjust(m_cpu->cycles_to_attotime(1) + attotime(0, 1), 0, m_cpu->cycles_to_attotime(1));
+	if (m_scanlines_per_frame == PAL_SCANLINES_PER_FRAME) {
+		m_cpu_clock_timer = timer_alloc(FUNC(ppu2c0x_device::clock_cpu_cycle), this);
+	} else {
+		m_cpu_clock_timer = timer_alloc(FUNC(ppu2c0x_device::clock_ppu_dot), this);
+	}
 
 	// --------------------------------------------------
 	// Power-up palette RAM
@@ -710,17 +776,31 @@ void ppu2c0x_device::device_start() {
 	save_item(NAME(ppu_bus_read_can_fill_2007));
 	save_item(NAME(ppu2007_post_bump_pending));
 	save_item(NAME(ppu2007_post_bump_delay));
+	save_item(NAME(ppu2007_rmw_dummy_pending));
+	save_item(NAME(ppu2007_ignore_vram_read));
 
-	save_item(NAME(m_2007_write.pending));
-	save_item(NAME(m_2007_write.delay));
-	save_item(NAME(m_2007_write.addr));
-	save_item(NAME(m_2007_write.data));
+	save_item(NAME(m_2007_write_head));
+	save_item(NAME(m_2007_write_count));
+
+	for (unsigned i = 0; i < PPU2007_WRITE_QUEUE_SIZE; ++i)
+	{
+		save_item(NAME(m_2007_write[i].pending), i);
+		save_item(NAME(m_2007_write[i].delay), i);
+		save_item(NAME(m_2007_write[i].addr), i);
+		save_item(NAME(m_2007_write[i].data), i);
+		save_item(NAME(m_2007_write[i].extra_pending), i);
+		save_item(NAME(m_2007_write[i].extra_addr), i);
+		save_item(NAME(m_2007_write[i].extra_data), i);
+	}
 
 	save_item(NAME(m_2007_read.pending));
 	save_item(NAME(m_2007_read.delay));
 	save_item(NAME(m_2007_read.addr));
 	save_item(NAME(m_2007_read.use_next_ppu_read_for_refill));
 	save_item(NAME(m_2007_read.waiting_for_refill_bus_read));
+	save_item(NAME(m_2007_read.bus_stage));
+	save_item(NAME(m_2007_read.address_deadline));
+	save_item(NAME(m_2007_read.data_deadline));
 
 	// --------------------------------------------------
 	// Fetch helper state
@@ -936,6 +1016,13 @@ void ppu2c0x_rgb_device::init_palette_tables() {
 *  PPU Bus Helpers
 *
 *************************************/
+TIMER_CALLBACK_MEMBER(ppu2c0x_device::clock_ppu_dot)
+{
+	//if (m_cpu->total_cycles() == 0)
+	//	return;
+	tick((ppu_tick_in_cpu_cycle % 3) + 1);
+}
+
 TIMER_CALLBACK_MEMBER(ppu2c0x_device::clock_cpu_cycle)
 {
 	if (m_cpu->total_cycles() == 0)
@@ -1045,6 +1132,33 @@ uint8_t ppu2c0x_device::ppu_bus_read(uint16_t addr, ppu_fetch_phase phase) {
 	return data;
 }
 
+void ppu2c0x_device::process_2007_read_strobes(int64_t master_tick) {
+	if (!m_2007_read.pending || !m_2007_read.bus_stage)
+		return;
+
+	if (m_2007_read.bus_stage == 1 &&
+		master_tick >= m_2007_read.address_deadline) {
+		ppu_bus_address_drive(m_2007_read.addr, ppu_bus_source::PPU);
+		m_2007_read.bus_stage = 2;
+	}
+
+	if (m_2007_read.bus_stage == 2 &&
+		master_tick >= m_2007_read.data_deadline) {
+		if (!m_mmc5_ppu_read.isnull())
+			m_mmc5_ppu_read(m_2007_read.addr);
+
+		ppudata_read_buffer = readbyte(m_2007_read.addr);
+		ppu_ad_latch = ppudata_read_buffer;
+
+		if (m_2007_read.addr < 0x2000 && !m_latch.isnull())
+			m_latch(m_2007_read.addr);
+
+		m_2007_read.pending = false;
+		m_2007_read.delay = 0;
+		m_2007_read.bus_stage = 0;
+	}
+}
+
 void ppu2c0x_device::schedule_2007_read(uint16_t addr, int delay, bool use_next_ppu_read_for_refill) {
 	addr &= 0x3FFF;
 
@@ -1053,15 +1167,42 @@ void ppu2c0x_device::schedule_2007_read(uint16_t addr, int delay, bool use_next_
 	m_2007_read.addr = addr;
 	m_2007_read.use_next_ppu_read_for_refill = use_next_ppu_read_for_refill;
 	m_2007_read.waiting_for_refill_bus_read = false;
+	m_2007_read.bus_stage = 0;
+	m_2007_read.address_deadline = 0;
+	m_2007_read.data_deadline = 0;
 }
 
-void ppu2c0x_device::schedule_2007_write(uint16_t addr, uint8_t data, int delay) {
-	addr &= 0x3FFF;
+bool ppu2c0x_device::cpu_2007_shared_edge() const {
+	if (m_scanlines_per_frame == PAL_SCANLINES_PER_FRAME ||
+		!m_cpu_clock_timer)
+		return false;
 
-	m_2007_write.pending = true;
-	m_2007_write.delay = (delay > 0) ? delay : 0;
-	m_2007_write.addr = addr;
-	m_2007_write.data = data;
+	const int64_t clocks_to_dot = int64_t(
+		(m_cpu_clock_timer->expire() - m_cpu->local_time()).as_double() *
+		m_cpu->clock() * 12.0 + 0.5);
+
+	return clocks_to_dot % 4 == 0;
+}
+
+void ppu2c0x_device::schedule_2007_write(uint16_t addr, uint8_t data, int delay, bool extra_pending, uint16_t extra_addr, uint8_t extra_data)
+{
+	if (m_2007_write_count == PPU2007_WRITE_QUEUE_SIZE)
+	{
+		logerror("[2007 WRITE] queue full\n");
+		return;
+	}
+
+	const unsigned slot = (m_2007_write_head + m_2007_write_count) % PPU2007_WRITE_QUEUE_SIZE;
+
+	m_2007_write[slot].pending = true;
+	m_2007_write[slot].delay = (delay > 0) ? delay : 0;
+	m_2007_write[slot].addr = addr & 0x3FFF;
+	m_2007_write[slot].data = data;
+	m_2007_write[slot].extra_pending = extra_pending;
+	m_2007_write[slot].extra_addr = extra_addr & 0x3FFF;
+	m_2007_write[slot].extra_data = extra_data;
+
+	++m_2007_write_count;
 }
 
 void ppu2c0x_device::schedule_2007_post_access_bump() {
@@ -1082,6 +1223,15 @@ void ppu2c0x_device::set_mapper(int mapper)
 void ppu2c0x_device::tick(int x) {
 
 	ppu_tick_in_cpu_cycle = x;
+	
+	if (m_scanlines_per_frame != PAL_SCANLINES_PER_FRAME) {
+		process_2007_read_strobes(int64_t(
+			m_cpu_clock_timer->expire().as_double() *
+			m_cpu->clock() * 12.0 + 0.5));
+	}
+	
+	if (ppu2007_ignore_vram_read > 0)
+		--ppu2007_ignore_vram_read;
 
 	// Sprite-0 hit is detected by pixel overlap now, but $2002 bit 6
 	// becomes visible two PPU dots later.
@@ -1105,25 +1255,50 @@ void ppu2c0x_device::tick(int x) {
 	// Non-rendering writes still happen immediately in the $2007 write handler;
 	// this path is only for delayed rendering writes.
 	// --------------------------------------------------
-	if (m_2007_write.pending) {
-		if (m_2007_write.delay > 0) {
-			--m_2007_write.delay;
-		} else {
-			const uint16_t bus_addr = m_2007_write.addr & 0x3FFF;
+	for (unsigned i = 0; i < m_2007_write_count; ++i)
+	{
+		const unsigned slot = (m_2007_write_head + i) % PPU2007_WRITE_QUEUE_SIZE;
 
-			if ((bus_addr & 0x3F00) == 0x3F00) {
-				ppu_address_bus = bus_addr;
-				//m_palette_ram[bus_addr & 0x1F] = m_2007_write.data & 0x3F;
-				palette_write(bus_addr & 0x1F, m_2007_write.data);
-			} else {
-				ppu_bus_address_drive(bus_addr, ppu_bus_source::PPU);
-				writebyte(bus_addr, m_2007_write.data);
+		if (m_2007_write[slot].delay > 0)
+			--m_2007_write[slot].delay;
+	}
+
+	while (m_2007_write_count && m_2007_write[m_2007_write_head].delay == 0)
+	{
+		ppu2007_delayed_write &write = m_2007_write[m_2007_write_head];
+
+		auto apply_write = [this](uint16_t addr, uint8_t data)
+		{
+			addr &= 0x3FFF;
+
+			if ((addr & 0x3F00) == 0x3F00)
+			{
+				ppu_address_bus = addr;
+				palette_write(addr & 0x1F, data);
 			}
+			else
+			{
+				ppu_bus_address_drive(addr, ppu_bus_source::PPU);
+				writebyte(addr, data);
+			}
+		};
 
+		apply_write(write.addr, write.data);
+
+		if (write.extra_pending)
+			apply_write(write.extra_addr, write.extra_data);
+
+		write.pending = false;
+		write.extra_pending = false;
+
+		m_2007_write_head = (m_2007_write_head + 1) % PPU2007_WRITE_QUEUE_SIZE;
+		--m_2007_write_count;
+
+		//ppu2007_post_bump_pending = true;
+		//ppu2007_post_bump_delay = 1;
+		if ((bg_pipeline_enabled || spr_pipeline_enabled) && is_visible_scanline()) {
 			ppu2007_post_bump_pending = true;
 			ppu2007_post_bump_delay = 1;
-
-			m_2007_write.pending = false;
 		}
 	}
 
@@ -1138,8 +1313,30 @@ void ppu2c0x_device::tick(int x) {
 	//   - outside rendering, refill directly from the accessed address;
 	//   - during rendering, wait for the next allowed real PPU fetch.
 	// --------------------------------------------------
-	if (m_2007_read.pending && !m_2007_read.waiting_for_refill_bus_read) {
+	if (m_2007_read.pending &&
+		!m_2007_read.waiting_for_refill_bus_read &&
+		!m_2007_read.bus_stage) {
 		if (m_2007_read.delay > 0) {
+			if (!m_2007_read.use_next_ppu_read_for_refill &&
+				m_2007_read.delay == 2) {
+				if (m_scanlines_per_frame != PAL_SCANLINES_PER_FRAME &&
+					m_2007_read.addr < 0x3F00) {
+					// Experimental address/data transitions within the dot.
+					m_2007_read.address_deadline = int64_t(
+						m_cpu_clock_timer->expire().as_double() *
+						m_cpu->clock() * 12.0 + 0.5) + 2;
+					m_2007_read.data_deadline =
+						m_2007_read.address_deadline + 1;
+					m_2007_read.bus_stage = 1;
+				} else {
+					const uint16_t read_addr =
+						m_2007_read.addr >= 0x3F00 ?
+						(m_2007_read.addr & 0x2FFF) : m_2007_read.addr;
+
+					ppu_bus_address_drive(read_addr, ppu_bus_source::PPU);
+				}
+			}
+
 			--m_2007_read.delay;
 		} else {
 			const uint16_t delayed_bus_addr = m_2007_read.addr & 0x3FFF;
@@ -1194,6 +1391,7 @@ void ppu2c0x_device::tick(int x) {
 				}
 
 				ppudata_read_buffer = readbyte(read_addr);
+				ppu_ad_latch = ppudata_read_buffer;
 				
 				// MMC2/MMC4 observe pattern-table reads performed through $2007.
 				// Apply the latch only after the triggering byte has been fetched.
@@ -2869,26 +3067,6 @@ uint8_t ppu2c0x_device::read(offs_t offset) {
 
 			w = false;
 
-			/*const uint8_t old_bus = ppu_open_bus_peek();
-
-			const uint8_t ret = m_security_value ? uint8_t((vblank_read ? 0x80 : 0x00) | (spr0_read ? 0x40 : 0x00) | m_security_value) :
-												   uint8_t((vblank_read ? 0x80 : 0x00) | (spr0_read ? 0x40 : 0x00) | (ovf_read ? 0x20 : 0x00) | (old_bus & 0x1f));
-
-			if (BIT(ret, 7) && !m_mmc5_reset_scanline_irq.isnull()) {
-				m_mmc5_reset_scanline_irq();
-			}
-
-			ppustatus_vblank = false;
-			set_nmi(false);
-
-			// $2002 read drives only status bits 7-5.
-			// Low bits 4-0 are open bus and must keep their existing decay timers.
-			if (m_security_value)
-				ppu_open_bus_drive(ret);
-			else
-				ppu_open_bus_drive_masked(ret, 0xe0);
-
-			return ret;*/
 			const uint8_t old_bus = ppu_open_bus_peek();
 			const uint8_t security_mask = m_security_value ? uint8_t(0x1f | (m_security_value & 0x20)) : 0;
 			const uint8_t ret = uint8_t((vblank_read ? 0x80 : 0x00) | (spr0_read ? 0x40 : 0x00) | ((ovf_read && !(security_mask & 0x20)) ? 0x20 : 0x00) | (m_security_value & security_mask) | (old_bus & uint8_t(~(0xe0 | security_mask))));
@@ -2948,16 +3126,50 @@ uint8_t ppu2c0x_device::read(offs_t offset) {
 		}
 
 		case PPU_DATA: /* $2007 */ {
-			const uint16_t bus_addr = v & 0x3FFF;
-
-			// $2007 read is a real PPU address-bus event.
-			// mmc3_test_2/3-A12_clocking expects this to clock when A12 rises.
-			if ((bus_addr & 0x3F00) == 0x3F00) {
-				ppu_address_bus = bus_addr;
-			} else {
-				ppu_bus_address_drive(bus_addr, ppu_bus_source::CPU_ACCESS);
+			if (m_scanlines_per_frame != PAL_SCANLINES_PER_FRAME) {
+				process_2007_read_strobes(int64_t(
+					(m_cpu->local_time() + m_cpu->cycles_to_attotime(1)).as_double() *
+					m_cpu->clock() * 12.0 + 0.5));
 			}
 
+			const uint16_t bus_addr = v & 0x3FFF;
+			const bool rendering_for_access = (bg_pipeline_enabled || spr_pipeline_enabled) && is_visible_scanline();
+			
+			if (ppu2007_ignore_vram_read > 0) {
+				if (!rendering_for_access &&
+					bus_addr < 0x3F00 &&
+					cpu_2007_shared_edge()) {
+					// Experimental: overlapping read is not retriggered
+					// at the shared edge. Keep the previous bus byte and v.
+					return ppu_open_bus_peek();
+				}
+				// Experimental overlap model:
+				// During the refill address phase, sample shared AD.
+				// Otherwise, sample the current read buffer.
+				const bool address_phase =
+					m_scanlines_per_frame != PAL_SCANLINES_PER_FRAME ?
+					(m_2007_read.pending && m_2007_read.bus_stage == 2) :
+					(m_2007_read.pending &&
+					 !m_2007_read.use_next_ppu_read_for_refill &&
+					 !m_2007_read.waiting_for_refill_bus_read &&
+					 m_2007_read.delay == 1);
+
+				const uint8_t ret = address_phase ? ppu_ad_latch : ppudata_read_buffer;
+
+				ppu_open_bus_drive(ret);
+
+				if (!rendering_for_access)
+					do_2007_post_access_bump(ppu_bus_source::CPU_ACCESS);
+
+				return ret;
+			}
+
+			// An accepted access now drives its address.
+			if ((bus_addr & 0x3F00) == 0x3F00)
+				ppu_address_bus = bus_addr;
+			else
+				ppu_bus_address_drive(bus_addr, ppu_bus_source::CPU_ACCESS);
+			
 			uint8_t ret;
 
 			if (bus_addr >= 0x3F00 && bus_addr <= 0x3FFF) {
@@ -2974,7 +3186,7 @@ uint8_t ppu2c0x_device::read(offs_t offset) {
 				ppu_open_bus_drive(ret);
 			}
 
-			const bool rendering_for_access = (bg_pipeline_enabled || spr_pipeline_enabled) && is_visible_scanline();
+			ppu2007_ignore_vram_read = 6;
 
 			if (!rendering_for_access) {
 				// Non-rendering:
@@ -2982,7 +3194,9 @@ uint8_t ppu2c0x_device::read(offs_t offset) {
 				do_2007_post_access_bump(ppu_bus_source::CPU_ACCESS);
 
 				// The internal read buffer refills later from the accessed address.
-				schedule_2007_read(bus_addr, 5, false);
+				//schedule_2007_read(bus_addr, 5, false);
+				const int refill_delay = 5 - ppu_tick_in_cpu_cycle;
+				schedule_2007_read(bus_addr, refill_delay, false);
 			} else {
 				// Rendering:
 				// Do not perform a hidden memory read here.
@@ -3259,56 +3473,77 @@ void ppu2c0x_device::write(offs_t offset, uint8_t val) {
 		}
 
 		case PPU_DATA: /* 7 */ {
+			if (m_scanlines_per_frame != PAL_SCANLINES_PER_FRAME) {
+				process_2007_read_strobes(int64_t(
+					(m_cpu->local_time() + m_cpu->cycles_to_attotime(1)).as_double() *
+					m_cpu->clock() * 12.0 + 0.5));
+			}
+
 			uint16_t bus_addr = v & 0x3FFF;
 
-			// Bus sees the access address now.
-			// Palette space is internal; don't clock cartridge/MMC3 A12 from it.
 			if ((bus_addr & 0x3F00) == 0x3F00) {
 				ppu_address_bus = bus_addr & 0x3FFF;
-				//ppu_ad_latch = bus_addr & 0xFF;
 			} else {
 				ppu_bus_address_drive(bus_addr, ppu_bus_source::CPU_ACCESS);
 			}
 
 			const bool rendering_for_access = (bg_pipeline_enabled || spr_pipeline_enabled) && is_visible_scanline();
+			const bool rmw_dummy_write = m_maincpu6502 && m_maincpu6502->get_rmw_1();
+			const bool rmw_final_write = !rmw_dummy_write && ppu2007_rmw_dummy_pending;
 
-			if (!rendering_for_access) {
-				// Non-rendering:
-				// $2007 write takes effect at the current address now.
-				writebyte(bus_addr & 0x3FFF, val);
+			if (rmw_dummy_write)
+				ppu2007_rmw_dummy_pending = true;
+			else
+				ppu2007_rmw_dummy_pending = false;
 
-				// The $2007 post-access increment is NOT immediate.
-				// Hardware leaves the current palette/address visible briefly after
-				// the write becomes effective. This lets a palette write show the newly
-				// written color for 1 dot before v advances.
-				ppu2007_post_bump_pending = true;
-				ppu2007_post_bump_delay = 1;
+			uint8_t write_data = val;
+			bool extra_write = false;
+			uint16_t extra_addr = 0;
 
-				// Keep the bus shadow at the access address until the delayed bump runs.
-				// Palette space is internal; don't clock cartridge/MMC3 A12 from it.
-				if ((bus_addr & 0x3F00) == 0x3F00) {
-					ppu_address_bus = bus_addr & 0x3FFF;
-					//ppu_ad_latch = bus_addr & 0xFF;
-				} else {
-					ppu_bus_address_drive(bus_addr, ppu_bus_source::CPU_ACCESS);
-				}
-			} else {
-				// Rendering:
-				// The write itself is delayed. Do NOT bump v here.
-				// The bump is armed when the delayed write actually reaches the PPU bus,
-				// so the increment is delayed relative to the effective write, not merely
-				// relative to the CPU register write.
-				schedule_2007_write(bus_addr & 0x3FFF, val, 5);
+			if (bus_addr < 0x3F00)
+			{
+				if (rmw_dummy_write)
+					write_data = uint8_t(bus_addr);
 
-				// Keep the bus shadow at the access address for now.
-				// Palette space is internal; don't clock cartridge/MMC3 A12 from it.
-				if ((bus_addr & 0x3F00) == 0x3F00) {
-					ppu_address_bus = bus_addr & 0x3FFF;
-					//ppu_ad_latch = bus_addr & 0xFF;
-				} else {
-					ppu_bus_address_drive(bus_addr, ppu_bus_source::CPU_ACCESS);
+				if (rmw_final_write)
+				{
+					extra_addr = (bus_addr & 0x3F00) | val;
+					extra_write = extra_addr < 0x3F00;
 				}
 			}
+
+			int write_delay = 5 - ppu_tick_in_cpu_cycle;
+
+			if (m_scanlines_per_frame != PAL_SCANLINES_PER_FRAME) {
+				// Experimental target: CPU cycle ends, then two PPU dots.
+				const attotime write_ready =
+					m_cpu->local_time() +
+					m_cpu->cycles_to_attotime(1) +
+					attotime::from_ticks(2, m_cpu->clock() * 3);
+
+				const int64_t remaining_master = int64_t(
+					(write_ready - m_cpu_clock_timer->expire()).as_double() *
+					m_cpu->clock() * 12.0 + 0.5);
+
+				// The first upcoming dot decrements the queue delay.
+				write_delay = remaining_master > 0 ?
+					int((remaining_master + 3) / 4) + 1 : 1;
+			}
+			if (!rendering_for_access &&
+				rmw_final_write &&
+				extra_write &&
+				cpu_2007_shared_edge()) {
+				// Experimental: only the data-derived address is written
+				// when the final RMW access meets the shared edge.
+				schedule_2007_write(extra_addr, val, write_delay);
+			} else {
+				schedule_2007_write(bus_addr, write_data, write_delay,
+					extra_write, extra_addr, val);
+			}
+			
+			if (!rendering_for_access)
+				do_2007_post_access_bump(ppu_bus_source::CPU_ACCESS);
+			
 			break;
 		}
 

@@ -963,6 +963,13 @@ void nes_state::nes_map(address_map &map)
 
 static INPUT_PORTS_START( nes )
 	// input devices go through slot options
+	PORT_START("PPUALIGN")
+	PORT_CONFNAME(0x07, 0x04, "CPU/PPU Alignment")
+	PORT_CONFSETTING(0x00, "Phase 0")
+	PORT_CONFSETTING(0x01, "Phase 1")
+	PORT_CONFSETTING(0x02, "Phase 2")
+	PORT_CONFSETTING(0x03, "Phase 3")
+	PORT_CONFSETTING(0x04, "Random")
 INPUT_PORTS_END
 
 static INPUT_PORTS_START( famicom )

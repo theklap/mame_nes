@@ -878,10 +878,10 @@ void rp2a03_core_device::write(uint16_t adr, uint8_t val) {
 		}
 	}
 
-	rmw_1 = false; 
-	m_mintf->write(adr, val); 
+	rmw_1 = false;
 	cpu_data_bus = val;
 	cpu_external_bus = val;
+	m_mintf->write(adr, val);
 }
 
 void rp2a03_core_device::write_1(uint16_t adr, uint8_t val) { 
@@ -914,9 +914,9 @@ void rp2a03_core_device::write_1(uint16_t adr, uint8_t val) {
 			prev_4017_write = total_cycles();
 	}
 
-	m_mintf->write(adr, val); 
-	cpu_data_bus = val; 
+	cpu_data_bus = val;
 	cpu_external_bus = val;
+	m_mintf->write(adr, val);
 }
 
 void rp2a03_core_device::write_9(uint16_t adr, uint8_t val) { 
@@ -961,9 +961,9 @@ void rp2a03_core_device::write_9(uint16_t adr, uint8_t val) {
 		prev_4017_write = total_cycles();
 	}
 
-	m_mintf->write_9(adr, val); 
-	cpu_data_bus = val; 
+	cpu_data_bus = val;
 	cpu_external_bus = val;
+	m_mintf->write_9(adr, val);
 }
 
 

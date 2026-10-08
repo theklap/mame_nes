@@ -364,6 +364,7 @@ protected:
 	// Device overrides.
 	// ---------------------------------------------------------------------
 	virtual void device_start() override;
+	virtual void device_reset() override;
 	virtual u32 palette_entries() const noexcept override { return 0x40 * 8; }
 	virtual void device_config_complete() override;
 	virtual space_config_vector memory_space_config() const override;
@@ -499,6 +500,7 @@ protected:
 	int ppu_tick_in_cpu_cycle;
 	uint64_t ppu_cycle_offset;
 	uint8_t frame_start_ppu_phase;
+	u8 m_cpu_ppu_alignment;
 
 	// Current PPU address bus value.
 	unsigned ppu_address_bus;
@@ -627,18 +629,26 @@ protected:
 	// ---------------------------------------------------------------------
 	// Delayed $2007 read/write state.
 	// ---------------------------------------------------------------------
+	static constexpr unsigned PPU2007_WRITE_QUEUE_SIZE = 4;
+	
 	struct ppu2007_delayed_write
 	{
 		bool pending = false;
 		int delay = 0;
 		uint16_t addr = 0;
 		uint8_t data = 0;
+		bool extra_pending = false;
+		uint16_t extra_addr = 0;
+		uint8_t extra_data = 0;
 	};
 
 	struct ppu2007_delayed_read
 	{
 		bool pending = false;
 		int delay = 0;
+		uint8_t bus_stage = 0;
+		int64_t address_deadline = 0;
+		int64_t data_deadline = 0;
 		uint16_t addr = 0;
 
 		// false = delayed direct refill from addr
@@ -650,7 +660,11 @@ protected:
 		bool waiting_for_refill_bus_read = false;
 	};
 
-	ppu2007_delayed_write m_2007_write;
+	ppu2007_delayed_write m_2007_write[PPU2007_WRITE_QUEUE_SIZE];
+	unsigned m_2007_write_head = 0;
+	unsigned m_2007_write_count = 0;
+	
+	//ppu2007_delayed_write m_2007_write;
 	ppu2007_delayed_read m_2007_read;
 
 	bool ppu2007_buffer_fill_armed;
@@ -659,12 +673,16 @@ protected:
 
 	bool ppu2007_post_bump_pending;
 	int ppu2007_post_bump_delay;
+	bool ppu2007_rmw_dummy_pending = false;
+	uint8_t ppu2007_ignore_vram_read = 0;
 
 	uint16_t spr_fetch_v_old;
 	uint16_t spr_fetch_v_new;
 
-	void schedule_2007_write(uint16_t addr, uint8_t data, int delay);
+	void schedule_2007_write(uint16_t addr, uint8_t data, int delay, bool extra_pending = false, uint16_t extra_addr = 0, uint8_t extra_data = 0);
+	bool cpu_2007_shared_edge() const;
 	void schedule_2007_read(uint16_t addr, int delay, bool use_next_ppu_read_for_refill);
+	void process_2007_read_strobes(int64_t master_tick);
 	void schedule_2007_post_access_bump();
 	
 	// ---------------------------------------------------------------------
@@ -765,6 +783,7 @@ private:
 	devcb_write_line m_nmi_detect_callback; //PlayChoice-10
 
 	TIMER_CALLBACK_MEMBER(clock_cpu_cycle);
+	TIMER_CALLBACK_MEMBER(clock_ppu_dot);
 
 	emu_timer *m_cpu_clock_timer = nullptr;
 	u8 pal_cpu_ppu = 0;
